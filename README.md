@@ -8,6 +8,29 @@ Emitter -> Vessel -> Terminal -> Pipeline -> SubseaManifold -> InjectionWell -> 
 
 上层控制器、MILP、RL policy 或实验脚本提交动作；物理层负责验证动作、推进仿真、更新库存/运输/注入/压力状态，并输出可审计的结果。
 
+## 环境依赖
+
+- Python `>=3.10`(GPU 环境使用 3.12)
+- 核心依赖:`searoute>=1.6`、`CoolProp>=6.6`(见 `pyproject.toml`)
+- RL 相关(可选):`numpy`、`gymnasium`、`stable-baselines3`、`sb3-contrib`
+- 波高预测(GPU)相关:`torch`、`torchvision`、`torchaudio`、`numpy`、`pandas`、`scikit-learn`、`matplotlib`、`tqdm`、`jupyterlab`
+
+### CPU / 基础安装(pip)
+
+```powershell
+pip install -e .
+pip install -e ".[rl]"   # 需要 RL 环境时
+```
+
+### GPU 环境(conda)
+
+波高预测的深度学习模型需要 GPU（CUDA 12.8）,使用 `environment-gpu.yml` 一键创建:
+
+```powershell
+conda env create -f environment-gpu.yml
+conda activate ccs-rlllm-gpu
+```
+
 ## 快速运行
 
 PowerShell:
@@ -200,6 +223,14 @@ dashboard 和可视化生成代码。
 后续如果继续整理，建议优先把 `economics.py` 和 `metrics.py` 放入 `evaluation/`，再考虑把 `network.py` / `simulator.py` / `routes.py` / `line_source.py` 拆成 `physics/`、`navigation/`、`geology/` 等包。
 
 ## 数据目录
+
+### 外部数据下载
+
+部分数据文件体积较大,未纳入 git 仓库,存放在 Google Drive:
+
+- [数据文件（Google Drive）](https://drive.google.com/file/d/1IlseiDmvowxYsci3Ilt8Dg0HXjKRsETk/view?usp=drive_link)
+
+下载后请放回对应的数据目录再运行相关脚本。
 
 ### `scenarios/`
 
