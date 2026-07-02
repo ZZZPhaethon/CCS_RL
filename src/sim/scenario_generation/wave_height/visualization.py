@@ -14,7 +14,7 @@ def plot_wave_height_snapshot(
     nc_path: str | Path,
     *,
     record_index: int = 0,
-    output_path: str | Path = "wave_height_snapshot.png",
+    output_path: str | Path = "output/wave_height/wave_height_snapshot.png",
     routes: Mapping[str, Mapping[str, object]] | None = None,
     locations: Mapping[str, Coordinate] | None = None,
     variable_name: str = "significant_wave_height",
@@ -95,7 +95,7 @@ def plot_phase1_wave_height_snapshot(
     nc_path: str | Path,
     *,
     record_index: int = 0,
-    output_path: str | Path = "wave_height_phase1_snapshot.png",
+    output_path: str | Path = "output/wave_height/wave_height_phase1_snapshot.png",
     stride: int = 1,
 ) -> Path:
     """Plot one wave-height snapshot with the Phase 1 vessel routes overlaid."""
