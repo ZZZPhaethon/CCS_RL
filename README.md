@@ -43,7 +43,7 @@ CCS_RLLLM/
 |-- scenarios/            # 可复现实验场景 JSON
 |-- docs/                 # 项目说明、研究记录、压力模型说明等文档
 |-- examples/             # 小型运行示例和 dashboard 生成脚本
-|-- experiments/          # 实验入口和 benchmark 脚本
+|-- experiments/          # 实验入口和 controller comparison 脚本
 |-- hpc/                  # 集群/HPC 提交脚本和 smoke test
 |-- src/sim/              # 主 Python 包
 |-- tests/                # 单元测试和结构测试
@@ -206,7 +206,7 @@ dashboard 和可视化生成代码。
 只放可复现实验场景 JSON：
 
 - `northern_lights_phase1.json`
-- `northern_lights_phase2_scenario.json`
+- `northern_lights_phase2.json`
 
 ### `data/capture_rates/`
 
@@ -220,11 +220,11 @@ Phase 1 emitter capture-rate profile 数据和元数据。
 
 ### `experiments/`
 
-实验/benchmark 入口。这里放“如何组合已有模块跑一个研究实验”的脚本，不放底层算法实现。
+实验入口。这里放“如何组合已有模块跑一个研究实验”的脚本，不放底层算法实现。
 
 当前主要脚本：
 
-- `benchmark_phase1_yara_milp.py`：Phase 1 fixed-horizon MILP benchmark 和 policy comparison。
+- `compare_controllers_same_scenarios.py`：在相同 disturbance scenario 下比较 episode controllers，并写出 CSV/report；static MILP 作为 perfect-foresight benchmark 单独报告。
 
 ### `hpc/`
 

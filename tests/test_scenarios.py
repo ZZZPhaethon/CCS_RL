@@ -10,9 +10,13 @@ from sim.network_scenarios import (
     NATURGASSPARKEN,
     NORTHERN_LIGHTS_PHASE1_CAPTURE_PROFILE_PATH,
     NORTHERN_LIGHTS_PHASE1_DATA_PATH,
+    NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH,
     NORTHERN_LIGHTS_PHASE2_DATA_PATH,
+    available_fixed_scenario_choices,
+    build_fixed_scenario_demo,
     build_northern_lights_phase2_demo,
     build_northern_lights_phase1_demo,
+    fixed_scenario_locations,
 )
 
 
@@ -28,9 +32,8 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("yara_sluiskil", network.entities)
         self.assertEqual(network.downstream_of("oygarden_terminal"), ["oygarden_pipeline"])
         self.assertEqual(network.downstream_of("oygarden_pipeline"), ["aurora_subsea_manifold"])
-        self.assertEqual(network.downstream_of("aurora_subsea_manifold"), ["aurora_well_a7_ah", "aurora_well_c1_h"])
+        self.assertEqual(network.downstream_of("aurora_subsea_manifold"), ["aurora_well_a7_ah"])
         self.assertEqual(network.downstream_of("aurora_well_a7_ah"), ["aurora_reservoir"])
-        self.assertEqual(network.downstream_of("aurora_well_c1_h"), ["aurora_reservoir"])
         self.assertEqual(state.entity_inventory_t["northern_pioneer"], 0.0)
 
     def test_phase1_demo_includes_reference_physical_parameters(self):
@@ -58,8 +61,8 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(terminal.berth_count, 1)
         self.assertEqual(terminal.site_name, "Naturgassparken / Oygarden receiving terminal")
         self.assertIsInstance(pipeline, Pipeline)
-        self.assertAlmostEqual(pipeline.annual_capacity_tpy, 1_500_000.0)
-        self.assertAlmostEqual(pipeline.max_flow_tph, 1_500_000.0 / 8760.0)
+        self.assertAlmostEqual(pipeline.annual_capacity_tpy, 5_000_000.0)
+        self.assertAlmostEqual(pipeline.max_flow_tph, 5_000_000.0 / 8760.0)
         self.assertAlmostEqual(pipeline.length_km, 100.4)
         self.assertEqual(pipeline.route_color, "#ff0000")
         self.assertGreaterEqual(len(pipeline.route_coordinates), 4)
@@ -67,7 +70,7 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(pipeline.route_coordinates[-1], EOS_SUBSEA_TEMPLATE_LOCATION)
         self.assertAlmostEqual(route_distance_km(pipeline.route_coordinates), 100.4, delta=0.5)
         self.assertIsInstance(manifold, SubseaManifold)
-        self.assertAlmostEqual(manifold.max_flow_tph, 1_500_000.0 / 8760.0)
+        self.assertAlmostEqual(manifold.max_flow_tph, 5_000_000.0 / 8760.0)
         self.assertIsInstance(reservoir, Reservoir)
         self.assertAlmostEqual(reservoir.depth_m, 2_600.0)
 
@@ -127,7 +130,7 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(network.downstream_of("aurora_well_c1_h"), ["aurora_reservoir"])
         self.assertEqual(state.entity_inventory_t["stockholm_exergi"], 0.0)
 
-    def test_phase1_demo_has_three_emitters_four_ships_and_two_wells(self):
+    def test_phase1_demo_has_three_emitters_four_ships_and_one_well(self):
         network, state = build_northern_lights_phase1_demo()
         with NORTHERN_LIGHTS_PHASE1_DATA_PATH.open(encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -138,8 +141,10 @@ class ScenarioTests(unittest.TestCase):
 
         self.assertEqual(len(emitters), 3)
         self.assertEqual(len(vessels), 4)
-        self.assertEqual(len(wells), 2)
+        self.assertEqual(len(wells), 1)
         self.assertIn("yara_sluiskil", network.entities)
+        self.assertIn("aurora_well_a7_ah", network.entities)
+        self.assertNotIn("aurora_well_c1_h", network.entities)
         celsio = network.entities["celsio"]
         self.assertIsInstance(celsio, Emitter)
         self.assertAlmostEqual(celsio.annual_target_export_tpy, 350_000.0)
@@ -148,8 +153,22 @@ class ScenarioTests(unittest.TestCase):
             sum(emitter.annual_target_export_tpy or 0.0 for emitter in emitters),
             payload["contracted_annual_target_export_tpy"],
         )
-        self.assertEqual(network.downstream_of("aurora_subsea_manifold"), ["aurora_well_a7_ah", "aurora_well_c1_h"])
+        self.assertEqual(network.downstream_of("aurora_subsea_manifold"), ["aurora_well_a7_ah"])
         self.assertEqual(state.entity_inventory_t["yara_sluiskil"], 0.0)
+
+    def test_phase1_2well_demo_preserves_current_two_well_case(self):
+        network, state = build_fixed_scenario_demo("northern_lights_phase1_2well")
+        with NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+
+        wells = [entity for entity in network.entities.values() if isinstance(entity, InjectionWell)]
+
+        self.assertEqual(payload["scenario_id"], "northern_lights_phase1_2well")
+        self.assertEqual(len(wells), 2)
+        self.assertEqual(network.downstream_of("aurora_subsea_manifold"), ["aurora_well_a7_ah", "aurora_well_c1_h"])
+        self.assertEqual(network.downstream_of("aurora_well_a7_ah"), ["aurora_reservoir"])
+        self.assertEqual(network.downstream_of("aurora_well_c1_h"), ["aurora_reservoir"])
+        self.assertEqual(state.entity_inventory_t["aurora_well_c1_h"], 0.0)
 
     def test_phase1_demo_uses_hourly_emitter_profile_from_data(self):
         network, state = build_northern_lights_phase1_demo()
@@ -165,17 +184,19 @@ class ScenarioTests(unittest.TestCase):
         self.assertNotAlmostEqual(expected_rate_tph, brevik.nominal_capture_tph)
         self.assertAlmostEqual(result.state.last_capture_tph["brevik"], expected_rate_tph)
 
-    def test_phase1_pipeline_and_wells_use_1_5_mtpa_capacity(self):
+    def test_phase1_pipeline_and_well_use_requested_capacity(self):
         network, _ = build_northern_lights_phase1_demo()
-        expected_tph = 1_500_000.0 / 8760.0
+        expected_pipeline_tph = 5_000_000.0 / 8760.0
+        expected_well_tph = 2_500_000.0 / 8760.0
 
         pipeline = network.entities["oygarden_pipeline"]
         wells = [entity for entity in network.entities.values() if isinstance(entity, InjectionWell)]
 
         self.assertIsInstance(pipeline, Pipeline)
-        self.assertAlmostEqual(pipeline.max_flow_tph, expected_tph)
+        self.assertAlmostEqual(pipeline.annual_capacity_tpy, 5_000_000.0)
+        self.assertAlmostEqual(pipeline.max_flow_tph, expected_pipeline_tph)
         for well in wells:
-            self.assertAlmostEqual(well.max_injection_tph, expected_tph)
+            self.assertAlmostEqual(well.max_injection_tph, expected_well_tph)
 
     def test_toy_scenario_is_external_data_with_one_well(self):
         build_toy_demo = getattr(scenarios, "build_toy_demo", None)
@@ -201,6 +222,34 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(len(pipeline.route_coordinates), len(payload["offshore_pipeline_route"]))
         self.assertEqual(locations["brevik"], (59.05, 9.7))
         self.assertEqual(state.entity_inventory_t["well_1"], 0.0)
+
+    def test_fixed_scenario_selector_loads_scenarios_folder_cases(self):
+        self.assertIn("toy", available_fixed_scenario_choices())
+        self.assertIn("northern_lights_phase1", available_fixed_scenario_choices())
+        self.assertIn("northern_lights_phase1_2well", available_fixed_scenario_choices())
+        self.assertIn("northern_lights_phase2", available_fixed_scenario_choices())
+        self.assertNotIn("northern_lights_phase2_scenario", available_fixed_scenario_choices())
+        self.assertNotIn("northern_lights_phase2_public_2028", available_fixed_scenario_choices())
+
+        network, state = build_fixed_scenario_demo("northern_lights_phase1")
+        locations = fixed_scenario_locations("northern_lights_phase1")
+
+        self.assertIn("yara_sluiskil", network.entities)
+        self.assertIn("oygarden_terminal", locations)
+        self.assertEqual(state.entity_inventory_t["yara_sluiskil"], 0.0)
+
+    def test_scenario_ids_match_json_file_stems(self):
+        for path in scenarios.SCENARIO_ROOT.glob("*.json"):
+            with self.subTest(path=path.name):
+                with path.open(encoding="utf-8") as handle:
+                    payload = json.load(handle)
+
+                self.assertEqual(payload["scenario_id"], path.stem)
+
+    def test_fixed_scenario_selector_accepts_file_stems(self):
+        network, _state = build_fixed_scenario_demo("northern_lights_phase2")
+
+        self.assertIn("stockholm_exergi", network.entities)
 
 
 if __name__ == "__main__":

@@ -183,7 +183,7 @@ class PhysicalSimulatorTests(unittest.TestCase):
     def test_step_record_preserves_proposed_committed_and_executed_actions(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("terminal", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
         network.add_entity(InjectionWell("well", max_injection_tph=300.0))
         network.connect("terminal", "pipeline")
         network.connect("pipeline", "well")

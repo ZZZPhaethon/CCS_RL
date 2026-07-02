@@ -43,6 +43,20 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         self.assertEqual(rolling.economics.storage_shortfall_eur_per_t, 0.0)
         self.assertEqual(rolling.time_limit_s, 30.0)
 
+    def test_controller_comparison_can_build_selected_fixed_scenario(self):
+        from experiments import compare_controllers_same_scenarios as compare
+        from sim.scenario_generation import ScenarioConfig
+
+        env = compare.make_env(
+            cap_hours=2,
+            scenario_seed_config=ScenarioConfig(episode_hours=2, randomize_initial_inventory=False),
+            economics=compare.EconomicParameters(),
+            fixed_scenario="northern_lights_phase1",
+        )
+
+        self.assertIn("yara_sluiskil", env.emitter_ids)
+        self.assertIn("oygarden_terminal", env.terminal_ids)
+
     def test_rule_based_controller_factory_translates_to_hybrid_env_action(self):
         from experiments import compare_controllers_same_scenarios as compare
         from sim.environment import MAX_WELL_RATE_MTPA, MIN_WELL_RATE_MTPA, VESSEL_WAIT
@@ -200,6 +214,32 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         self.assertEqual(args.rolling_planning_horizon_h, 168)
         self.assertEqual(args.rolling_replan_every, 24)
         self.assertEqual(args.rolling_time_limit_s, 30.0)
+        self.assertEqual(args.scenario, "toy")
+
+    def test_controller_comparison_cli_accepts_fixed_scenario_choice(self):
+        from experiments import compare_controllers_same_scenarios as compare
+
+        with patch.object(
+            sys,
+            "argv",
+            ["compare_controllers_same_scenarios.py", "--scenario", "northern_lights_phase2"],
+        ):
+            args = compare.parse_args()
+
+        self.assertEqual(args.scenario, "northern_lights_phase2")
+
+    def test_controller_comparison_cli_rejects_internal_phase2_id(self):
+        from experiments import compare_controllers_same_scenarios as compare
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["compare_controllers_same_scenarios.py", "--scenario", "northern_lights_phase2_public_2028"],
+            ),
+            self.assertRaises(SystemExit),
+        ):
+            compare.parse_args()
 
     def test_fixed_horizon_cli_forwards_static_milp_solver_controls(self):
         from experiments import compare_controllers_same_scenarios as compare
@@ -257,6 +297,7 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
             self.assertEqual(fixed.call_args.args, (2, 123.0, 0.05, 10.0))
             self.assertEqual(fixed.call_args.kwargs["seed"], 1)
             self.assertIsNotNone(fixed.call_args.kwargs["scenario_seed_config"])
+            self.assertEqual(fixed.call_args.kwargs["fixed_scenario"], "toy")
             self.assertEqual(fixed.call_args.kwargs["economics"].storage_shortfall_eur_per_t, 0.0)
 
     def test_static_fixed_horizon_benchmark_passes_mip_gap_controls(self):

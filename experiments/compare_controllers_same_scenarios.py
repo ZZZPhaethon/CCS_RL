@@ -32,7 +32,12 @@ from sim.environment import (
     VESSEL_WAIT,
 )
 from sim.metrics import EpisodeMetrics, run_episode
-from sim.network_scenarios import build_toy_demo, toy_locations
+from sim.network_scenarios import (
+    available_fixed_scenario_choices,
+    build_fixed_scenario_demo,
+    fixed_scenario_locations,
+    resolve_fixed_scenario_id,
+)
 from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
 
 ProgressLogger = Callable[[str], None]
@@ -43,11 +48,12 @@ def make_env(
     cap_hours: int,
     scenario_seed_config: ScenarioConfig,
     economics: EconomicParameters | None = None,
+    fixed_scenario: str = "toy",
 ) -> CCSEnv:
-    network, _state = build_toy_demo()
+    network, _state = build_fixed_scenario_demo(fixed_scenario)
     return CCSEnv(
         network,
-        toy_locations(),
+        fixed_scenario_locations(fixed_scenario),
         scenario_generator=ScenarioGenerator(config=scenario_seed_config),
         cost_model=CostModel(economics),
         config=CCSEnvConfig(episode_hours=cap_hours),
@@ -128,9 +134,11 @@ def metric_row(
     metrics: EpisodeMetrics,
     signature: str,
     solve_time_s: float,
+    fixed_scenario: str = "toy",
 ) -> dict[str, object]:
     return {
         "seed": seed,
+        "fixed_scenario": fixed_scenario,
         "controller": controller,
         "scenario_signature": signature,
         "solve_time_s": solve_time_s,
@@ -188,11 +196,13 @@ def static_fixed_horizon_milp_benchmark(
     scenario_seed_config: ScenarioConfig,
     seed: int,
     economics: EconomicParameters,
+    fixed_scenario: str = "toy",
 ) -> dict[str, object]:
     env = make_env(
         cap_hours=cap_hours,
         scenario_seed_config=scenario_seed_config,
         economics=economics,
+        fixed_scenario=fixed_scenario,
     )
     scenario = env.scenario_generator.sample(env.network, seed=seed)
     solve_start = time.perf_counter()
@@ -212,6 +222,7 @@ def static_fixed_horizon_milp_benchmark(
     row = {
         "case": "static_milp_fixed_horizon_scenario_oracle",
         "seed": seed,
+        "fixed_scenario": fixed_scenario,
         "scenario_signature": scenario_signature(scenario),
         "horizon_h": cap_hours,
         "status": result.status,
@@ -419,6 +430,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3, 4, 5])
     parser.add_argument("--output-dir", type=Path, default=Path("output"))
     parser.add_argument(
+        "--scenario",
+        choices=available_fixed_scenario_choices(),
+        default="toy",
+        help="Fixed network scenario from the scenarios folder. Disturbances are still controlled by --quiet-scenario and --seeds.",
+    )
+    parser.add_argument(
         "--controllers",
         nargs="+",
         choices=["idle", "greedy_shuttle", "rule_based", "rolling_milp"],
@@ -477,6 +494,7 @@ def _quiet_config(cap_hours: int, random_initial_inventory: bool) -> ScenarioCon
 
 def main() -> None:
     args = parse_args()
+    fixed_scenario = resolve_fixed_scenario_id(args.scenario)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     progress_path = args.output_dir / "progress.log"
     progress_path.write_text("", encoding="utf-8")
@@ -505,7 +523,7 @@ def main() -> None:
     script_start = time.perf_counter()
     log(
         f"Running {total_runs} fixed-horizon episode rollouts: "
-        f"cap={args.cap_hours} h, seeds={args.seeds}, controllers={args.controllers}"
+        f"scenario={fixed_scenario}, cap={args.cap_hours} h, seeds={args.seeds}, controllers={args.controllers}"
     )
     factories = controller_factories(
         args.rolling_replan_every,
@@ -526,6 +544,7 @@ def main() -> None:
                 cap_hours=args.cap_hours,
                 scenario_seed_config=scenario_config,
                 economics=economics,
+                fixed_scenario=fixed_scenario,
             )
             metrics = run_episode(env, factory(env), seed=seed)
             run_duration_s = time.perf_counter() - run_start
@@ -538,6 +557,7 @@ def main() -> None:
                     metrics=metrics,
                     signature=signature,
                     solve_time_s=run_duration_s,
+                    fixed_scenario=fixed_scenario,
                 )
             )
             write_csv(partial_path, rows)
@@ -558,6 +578,7 @@ def main() -> None:
         benchmark = {
             "case": "static_milp_fixed_horizon_scenario_oracle",
             "episodes": len(args.seeds),
+            "fixed_scenario": fixed_scenario,
             "horizon_h": args.cap_hours,
             "status": "skipped",
             "solve_time_s": "",
@@ -590,6 +611,7 @@ def main() -> None:
                 scenario_seed_config=scenario_config,
                 seed=seed,
                 economics=economics,
+                fixed_scenario=fixed_scenario,
             )
             if row["scenario_signature"] != seed_to_signature[seed]:
                 raise RuntimeError(f"Static MILP scenario signature mismatch for seed {seed}.")

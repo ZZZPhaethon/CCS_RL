@@ -49,7 +49,7 @@ def make_toy_two_source_network() -> PhysicalNetwork:
         )
     )
     network.add_entity(Terminal("terminal", storage_capacity_t=6_000.0, berth_count=2))
-    network.add_entity(Pipeline("pipeline", max_flow_tph=400.0, ramp_tph=400.0))
+    network.add_entity(Pipeline("pipeline", max_flow_tph=400.0))
     network.add_entity(SubseaManifold("manifold", max_flow_tph=400.0))
     network.add_entity(InjectionWell("well_a", max_injection_tph=200.0))
     network.add_entity(InjectionWell("well_b", max_injection_tph=200.0))

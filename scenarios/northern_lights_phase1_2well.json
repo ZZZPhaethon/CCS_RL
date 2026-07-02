@@ -1,8 +1,8 @@
 {
-  "scenario_id": "northern_lights_phase1",
+  "scenario_id": "northern_lights_phase1_2well",
   "description": "Commercial Northern Lights Phase 1 scenario with Brevik, Celsio, and Yara Sluiskil, using the four 7,500 m3 Phase 1 CO2 ships.",
   "time_step_hours": 1.0,
-  "annual_capacity_tpy": 5000000.0,
+  "annual_capacity_tpy": 1500000.0,
   "contracted_annual_target_export_tpy": 1550000.0,
   "locations": {
     "oygarden_terminal": [
@@ -16,6 +16,10 @@
     "a7_ah_injection_well": [
       60.575913400339694,
       3.4416777066688846
+    ],
+    "c1_h_contingent_well": [
+      60.51296134202507,
+      3.468345735950719
     ],
     "brevik": [
       59.0569,
@@ -201,14 +205,14 @@
   },
   "pipeline": {
     "entity_id": "oygarden_pipeline",
-    "annual_capacity_tpy": 5000000.0,
-    "max_flow_tph": 570.7762557077626,
+    "annual_capacity_tpy": 1500000.0,
+    "max_flow_tph": 171.232876712329,
     "length_km": 100.4,
     "route_color": "#ff0000"
   },
   "manifold": {
     "entity_id": "aurora_subsea_manifold",
-    "max_flow_tph": 570.7762557077626
+    "max_flow_tph": 171.232876712329
   },
   "injection_wells": [
     {
@@ -218,8 +222,18 @@
         60.575913400339694,
         3.4416777066688846
       ],
-      "max_injection_tph": 285.3881278538813,
+      "max_injection_tph": 171.232876712329,
       "well_status": "phase1_injection_well"
+    },
+    {
+      "entity_id": "aurora_well_c1_h",
+      "public_name": "31/5-C-1 H",
+      "coordinates": [
+        60.51296134202507,
+        3.468345735950719
+      ],
+      "max_injection_tph": 171.232876712329,
+      "well_status": "phase1_contingent_well_represented_as_available"
     }
   ],
   "reservoir": {
@@ -233,7 +247,14 @@
       100.0,
       1000.0
     ],
-    "line_source_well_distances_m": {}
+    "line_source_well_distances_m": {
+      "aurora_well_a7_ah": {
+        "aurora_well_c1_h": 7200.0
+      },
+      "aurora_well_c1_h": {
+        "aurora_well_a7_ah": 7200.0
+      }
+    }
   },
   "line_source_parameters": {
     "initial_pressure_bar": 260.0,
@@ -256,7 +277,7 @@
     "co2_density_kg_m3": "assumed",
     "well_radius_m": "derived_from_concept_report",
     "skin": "assumed",
-    "active_wells": "phase1_a7_ah_injection_well_only"
+    "active_wells": "current_two_public_well_locations_only"
   },
   "connections": [
     [
@@ -304,7 +325,15 @@
       "aurora_well_a7_ah"
     ],
     [
+      "aurora_subsea_manifold",
+      "aurora_well_c1_h"
+    ],
+    [
       "aurora_well_a7_ah",
+      "aurora_reservoir"
+    ],
+    [
+      "aurora_well_c1_h",
       "aurora_reservoir"
     ]
   ],

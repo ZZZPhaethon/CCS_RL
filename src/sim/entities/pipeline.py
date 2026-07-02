@@ -9,7 +9,6 @@ Coordinate = tuple[float, float]
 class Pipeline:
     entity_id: str
     max_flow_tph: float
-    ramp_tph: float
     annual_capacity_tpy: float | None = None
     length_km: float | None = None
     route_color: str | None = None

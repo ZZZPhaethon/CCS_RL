@@ -82,7 +82,7 @@ class RuleBasedActionGeneratorTests(unittest.TestCase):
         self.assertIn("set_flow", actions["oygarden_pipeline"])
         self.assertEqual(
             actions["aurora_subsea_manifold"]["set_well_split"],
-            {"well_splits": {"aurora_well_a7_ah": 1.0, "aurora_well_c1_h": 0.0}},
+            {"well_splits": {"aurora_well_a7_ah": 1.0}},
         )
         well_actions = {
             entity_id: entity_actions

@@ -20,9 +20,7 @@ def project_pipeline_outflow(
         "flow_tph",
         actions.get(terminal_id, {}).get("flow_tph", 0.0),
     ) * network.time_step_hours
-    previous_tph = state.last_pipeline_flow_tph.get(pipeline.entity_id, 0.0)
-    ramp_limited_tph = min(pipeline.max_flow_tph, previous_tph + pipeline.ramp_tph)
-    pipeline_capacity_t = ramp_limited_tph * network.time_step_hours
+    pipeline_capacity_t = pipeline.max_flow_tph * network.time_step_hours
     well_capacity_t = pipeline_injection_capacity(network, pipeline.entity_id, state)
     actual_t = min(requested_t, pipeline_capacity_t, well_capacity_t, max(0.0, supply_limit_t))
     state.last_pipeline_flow_tph[pipeline.entity_id] = actual_t / network.time_step_hours
@@ -34,7 +32,7 @@ def project_pipeline_outflow(
                 requested_t,
                 actual_t,
                 requested_t - actual_t,
-                "Pipeline flow request clipped by pipeline ramp/limit or well capacity.",
+                "Pipeline flow request clipped by pipeline limit, well capacity, or available supply.",
             )
         )
     return actual_t

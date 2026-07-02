@@ -25,24 +25,63 @@ ROOT = Path(__file__).resolve().parents[2]
 SCENARIO_ROOT = ROOT / "scenarios"
 CAPTURE_RATE_ROOT = ROOT / "data" / "capture_rates"
 NORTHERN_LIGHTS_PHASE1_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1.json"
-NORTHERN_LIGHTS_PHASE2_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase2_scenario.json"
+NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1_2well.json"
+NORTHERN_LIGHTS_PHASE2_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase2.json"
 TOY_DATA_PATH = SCENARIO_ROOT / "toy.json"
 NORTHERN_LIGHTS_PHASE1_CAPTURE_PROFILE_PATH = CAPTURE_RATE_ROOT / "phase1plus_emitters_capture_rate_profile_hourly.csv"
 
+_FIXED_SCENARIO_PATHS = {
+    "toy": TOY_DATA_PATH,
+    "northern_lights_phase1": NORTHERN_LIGHTS_PHASE1_DATA_PATH,
+    "northern_lights_phase1_2well": NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH,
+    "northern_lights_phase2": NORTHERN_LIGHTS_PHASE2_DATA_PATH,
+}
+
 
 def _load_phase1_data() -> dict:
-    with NORTHERN_LIGHTS_PHASE1_DATA_PATH.open(encoding="utf-8") as handle:
-        return json.load(handle)
+    return _load_fixed_scenario_data("northern_lights_phase1")
 
 
 def _load_phase2_data() -> dict:
-    with NORTHERN_LIGHTS_PHASE2_DATA_PATH.open(encoding="utf-8") as handle:
-        return json.load(handle)
+    return _load_fixed_scenario_data("northern_lights_phase2")
+
+
+def _load_phase1_2well_data() -> dict:
+    return _load_fixed_scenario_data("northern_lights_phase1_2well")
 
 
 def _load_toy_data() -> dict:
-    with TOY_DATA_PATH.open(encoding="utf-8") as handle:
+    return _load_fixed_scenario_data("toy")
+
+
+def available_fixed_scenario_ids() -> tuple[str, ...]:
+    """Canonical fixed-network scenario ids backed by JSON files."""
+    return tuple(sorted(_FIXED_SCENARIO_PATHS))
+
+
+def available_fixed_scenario_choices() -> tuple[str, ...]:
+    """CLI-friendly scenario names matching JSON file stems."""
+    return available_fixed_scenario_ids()
+
+
+def resolve_fixed_scenario_id(identifier: str) -> str:
+    if identifier not in _FIXED_SCENARIO_PATHS:
+        choices = ", ".join(available_fixed_scenario_choices())
+        raise ValueError(f"Unknown fixed scenario '{identifier}'. Choose one of: {choices}")
+    return identifier
+
+
+def _load_fixed_scenario_data(identifier: str) -> dict:
+    scenario_id = resolve_fixed_scenario_id(identifier)
+    with _FIXED_SCENARIO_PATHS[scenario_id].open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def fixed_scenario_locations(identifier: str) -> dict[str, tuple[float, float]]:
+    return {
+        location_id: _coordinate(values)
+        for location_id, values in _load_fixed_scenario_data(identifier)["locations"].items()
+    }
 
 
 def _load_hourly_capture_profiles(path: Path) -> dict[str, tuple[float, ...]]:
@@ -66,9 +105,10 @@ def _coordinate(values: list[float]) -> tuple[float, float]:
 
 
 PHASE1_DATA = _load_phase1_data()
+PHASE1_2WELL_DATA = _load_phase1_2well_data()
 NATURGASSPARKEN = _coordinate(PHASE1_DATA["locations"]["oygarden_terminal"])
 EOS_SUBSEA_TEMPLATE_LOCATION = _coordinate(PHASE1_DATA["locations"]["eos_subsea_template"])
-C1_INJECTION_WELL_LOCATION = _coordinate(PHASE1_DATA["locations"]["c1_h_contingent_well"])
+C1_INJECTION_WELL_LOCATION = _coordinate(PHASE1_2WELL_DATA["locations"]["c1_h_contingent_well"])
 OFFSHORE_PIPELINE_ROUTE = [
     _coordinate(point)
     for point in PHASE1_DATA["offshore_pipeline_route"]
@@ -78,10 +118,7 @@ OFFSHORE_PIPELINE_ROUTE = [
 def build_northern_lights_phase1_demo() -> tuple[PhysicalNetwork, PhysicalState]:
     """Northern Lights Phase 1 commercial scenario used by demos and tests."""
 
-    return _build_network_from_scenario_data(
-        _load_phase1_data(),
-        hourly_capture_profiles=_load_hourly_capture_profiles(NORTHERN_LIGHTS_PHASE1_CAPTURE_PROFILE_PATH),
-    )
+    return build_fixed_scenario_demo("northern_lights_phase1")
 
 
 def build_northern_lights_phase2_demo() -> tuple[PhysicalNetwork, PhysicalState]:
@@ -92,20 +129,29 @@ def build_northern_lights_phase2_demo() -> tuple[PhysicalNetwork, PhysicalState]
     whose coordinates are not public in the reviewed sources.
     """
 
-    return _build_network_from_scenario_data(_load_phase2_data())
+    return build_fixed_scenario_demo("northern_lights_phase2")
 
 
 def build_toy_demo() -> tuple[PhysicalNetwork, PhysicalState]:
     """Two-emitter toy comparison scenario used by controller experiments."""
 
-    return _build_network_from_scenario_data(_load_toy_data())
+    return build_fixed_scenario_demo("toy")
+
+
+def build_fixed_scenario_demo(identifier: str) -> tuple[PhysicalNetwork, PhysicalState]:
+    """Load any fixed-network scenario from the project ``scenarios`` folder."""
+    scenario_id = resolve_fixed_scenario_id(identifier)
+    hourly_profiles = {}
+    if scenario_id in {"northern_lights_phase1", "northern_lights_phase1_2well"}:
+        hourly_profiles = _load_hourly_capture_profiles(NORTHERN_LIGHTS_PHASE1_CAPTURE_PROFILE_PATH)
+    return _build_network_from_scenario_data(
+        _load_fixed_scenario_data(scenario_id),
+        hourly_capture_profiles=hourly_profiles,
+    )
 
 
 def toy_locations() -> dict[str, tuple[float, float]]:
-    return {
-        location_id: _coordinate(values)
-        for location_id, values in _load_toy_data()["locations"].items()
-    }
+    return fixed_scenario_locations("toy")
 
 
 def _build_network_from_scenario_data(
@@ -158,7 +204,6 @@ def _build_network_from_scenario_data(
         Pipeline(
             pipeline["entity_id"],
             max_flow_tph=float(pipeline["max_flow_tph"]),
-            ramp_tph=float(pipeline["ramp_tph"]),
             annual_capacity_tpy=float(pipeline["annual_capacity_tpy"]),
             length_km=float(pipeline["length_km"]),
             route_color=pipeline["route_color"],

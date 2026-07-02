@@ -40,7 +40,7 @@ def _no_capture_env(cap_hours: int = 24) -> CCSEnv:
     network.add_entity(Emitter("source", nominal_capture_tph=0.0, buffer_capacity_t=1_000.0))
     network.add_entity(Vessel("ship", capacity_t=500.0, loading_rate_tph=500.0, unloading_rate_tph=500.0, speed_knots=100.0))
     network.add_entity(Terminal("terminal", storage_capacity_t=1_000.0, berth_count=1))
-    network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+    network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
     network.add_entity(SubseaManifold("manifold", max_flow_tph=500.0))
     network.add_entity(InjectionWell("well", max_injection_tph=500.0))
     network.add_entity(Reservoir("reservoir", storage_capacity_t=1e7, initial_pressure_bar=100.0, pressure_at_capacity_bar=200.0, max_pressure_bar=200.0))
@@ -69,7 +69,7 @@ def _two_berth_parallel_env() -> CCSEnv:
     network.add_entity(Vessel("ship_a", capacity_t=1_000.0, loading_rate_tph=1_000.0, unloading_rate_tph=1_000.0, speed_knots=1.0))
     network.add_entity(Vessel("ship_b", capacity_t=1_000.0, loading_rate_tph=1_000.0, unloading_rate_tph=1_000.0, speed_knots=1.0))
     network.add_entity(Terminal("terminal", storage_capacity_t=3_000.0, berth_count=2))
-    network.add_entity(Pipeline("pipeline", max_flow_tph=2_000.0, ramp_tph=2_000.0))
+    network.add_entity(Pipeline("pipeline", max_flow_tph=2_000.0))
     network.add_entity(SubseaManifold("manifold", max_flow_tph=2_000.0))
     network.add_entity(InjectionWell("well", max_injection_tph=2_000.0))
     network.add_entity(Reservoir("reservoir", storage_capacity_t=1e7, initial_pressure_bar=100.0, pressure_at_capacity_bar=200.0, max_pressure_bar=200.0))
@@ -101,7 +101,7 @@ def _two_source_one_ship_fast_env() -> CCSEnv:
     network.add_entity(Emitter("source_b", nominal_capture_tph=0.0, buffer_capacity_t=2_000.0))
     network.add_entity(Vessel("ship", capacity_t=500.0, loading_rate_tph=500.0, unloading_rate_tph=500.0, speed_knots=100000.0))
     network.add_entity(Terminal("terminal", storage_capacity_t=2_000.0, berth_count=1))
-    network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+    network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
     network.add_entity(SubseaManifold("manifold", max_flow_tph=500.0))
     network.add_entity(InjectionWell("well", max_injection_tph=500.0))
     network.add_entity(Reservoir("reservoir", storage_capacity_t=1e7, initial_pressure_bar=100.0, pressure_at_capacity_bar=200.0, max_pressure_bar=200.0))
@@ -252,7 +252,7 @@ class RollingMilpTests(unittest.TestCase):
 
     def test_controller_resets_between_episodes(self):
         env = _cold_env(cap_hours=96)
-        controller = RollingMilpController(env, replan_every=48, planning_horizon_h=48, time_limit_s=1.0)
+        controller = RollingMilpController(env, replan_every=48, planning_horizon_h=48, time_limit_s=3.0)
         a = run_episode(env, controller, seed=1).stored_t
         b = run_episode(env, controller, seed=1).stored_t  # reused controller
         self.assertEqual(a, b)  # stale plan would make the second run differ

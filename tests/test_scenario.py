@@ -190,7 +190,7 @@ class ScenarioApplyTests(unittest.TestCase):
         network.add_entity(InjectionWell("well_1", max_injection_tph=200.0))
         from sim.entities import Pipeline
 
-        network.add_entity(Pipeline("pipeline", max_flow_tph=200.0, ramp_tph=200.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=200.0))
         network.connect("ship_1", "oygarden")
         network.connect("oygarden", "pipeline")
         network.connect("pipeline", "well_1")

@@ -156,7 +156,6 @@
     "entity_id": "pipeline",
     "annual_capacity_tpy": 3504000.0,
     "max_flow_tph": 400.0,
-    "ramp_tph": 400.0,
     "length_km": 98.3,
     "route_color": "#ff0000"
   },

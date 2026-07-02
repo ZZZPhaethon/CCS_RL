@@ -19,9 +19,12 @@ class Phase1EnvTests(unittest.TestCase):
         env = self.env
         self.assertEqual(len(env.vessel_ids), 4)       # four Phase 1 ships
         self.assertEqual(len(env.emitter_ids), 3)      # Brevik, Celsio, Yara
-        self.assertEqual(len(env.well_ids), 2)         # two Aurora wells
+        self.assertEqual(len(env.well_ids), 1)         # A7 AH Phase 1 injection well
         self.assertEqual(env.vessel_action_dims, [5, 5, 5, 5])
-        self.assertEqual(len(env.well_rate_bounds()), 2)
+        self.assertEqual(len(env.well_rate_bounds()), 1)
+
+    def test_phase1_well_action_bound_matches_requested_capacity(self):
+        self.assertEqual(self.env.well_rate_bounds(), [(0.5, 2.5)])
 
     def test_routes_use_real_distances(self):
         # Yara (NL) -> Oygarden is far longer than Brevik (Norway) -> Oygarden.

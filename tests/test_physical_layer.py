@@ -25,7 +25,7 @@ class PhysicalLayerTests(unittest.TestCase):
         network.add_entity(Emitter("brevik", nominal_capture_tph=100.0, buffer_capacity_t=1_000.0))
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
         network.add_entity(Terminal("oygarden", storage_capacity_t=2_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=200.0, ramp_tph=200.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=200.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=200.0))
         network.connect("brevik", "ship_1")
         network.connect("ship_1", "oygarden")
@@ -47,7 +47,7 @@ class PhysicalLayerTests(unittest.TestCase):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=100.0))
         network.connect("ship_1", "oygarden")
         network.connect("oygarden", "pipeline")
@@ -69,7 +69,7 @@ class PhysicalLayerTests(unittest.TestCase):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
         network.connect("ship_1", "oygarden")
         network.connect("oygarden", "pipeline")
@@ -83,10 +83,25 @@ class PhysicalLayerTests(unittest.TestCase):
         self.assertAlmostEqual(result.flows_t.get(("oygarden", "pipeline"), 0.0), 0.0)
         self.assertTrue(any(v.entity_id == "pipeline" for v in result.violations))
 
+    def test_pipeline_flow_is_not_ramp_limited(self):
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
+        network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
+        network.connect("oygarden", "pipeline")
+        network.connect("pipeline", "well_1")
+        state = PhysicalState(entity_inventory_t={"oygarden": 500.0})
+
+        result = network.step(state, actions={"pipeline": {"flow_tph": 500.0}})
+
+        self.assertAlmostEqual(result.flows_t[("oygarden", "pipeline")], 500.0)
+        self.assertAlmostEqual(result.state.entity_inventory_t["well_1"], 500.0)
+        self.assertEqual(result.violations, [])
+
     def test_pipeline_does_not_flow_without_action(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
         network.connect("oygarden", "pipeline")
         network.connect("pipeline", "well_1")
@@ -103,7 +118,7 @@ class PhysicalLayerTests(unittest.TestCase):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=200.0, ramp_tph=200.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=200.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=200.0))
         network.add_entity(
             Reservoir(
@@ -133,7 +148,7 @@ class PhysicalLayerTests(unittest.TestCase):
     def test_line_source_pressures_are_reported_after_injection(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=100.0, ramp_tph=100.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=100.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=100.0))
         network.add_entity(
             Reservoir(
@@ -190,7 +205,7 @@ class PhysicalLayerTests(unittest.TestCase):
         )
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=100.0, ramp_tph=100.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=100.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=100.0))
         network.add_entity(
             Reservoir(
@@ -244,7 +259,7 @@ class PhysicalLayerTests(unittest.TestCase):
         )
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=300.0, ramp_tph=300.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=300.0))
         network.add_entity(SubseaManifold("manifold", max_flow_tph=300.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=300.0))
         network.add_entity(InjectionWell("well_2", max_injection_tph=300.0))
@@ -307,7 +322,7 @@ class PhysicalLayerTests(unittest.TestCase):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=300.0, ramp_tph=300.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=300.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=200.0))
         network.add_entity(InjectionWell("well_2", max_injection_tph=100.0))
         network.add_entity(
@@ -340,7 +355,7 @@ class PhysicalLayerTests(unittest.TestCase):
     def test_manifold_split_action_controls_flow_to_multiple_wells(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=300.0, ramp_tph=300.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=300.0))
         network.add_entity(SubseaManifold("manifold", max_flow_tph=300.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=300.0))
         network.add_entity(InjectionWell("well_2", max_injection_tph=300.0))
@@ -488,7 +503,7 @@ class PhysicalLayerTests(unittest.TestCase):
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
         network.add_entity(Vessel("ship_2", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
         network.connect("ship_1", "oygarden")
         network.connect("ship_2", "oygarden")
@@ -512,7 +527,7 @@ class PhysicalLayerTests(unittest.TestCase):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=300.0))
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
         network.connect("ship_1", "oygarden")
         network.connect("oygarden", "pipeline")
@@ -530,7 +545,7 @@ class PhysicalLayerTests(unittest.TestCase):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0, ramp_tph=500.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
         network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
         network.connect("ship_1", "oygarden")
         network.connect("oygarden", "pipeline")

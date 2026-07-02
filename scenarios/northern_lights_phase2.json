@@ -1,5 +1,5 @@
 {
-  "scenario_id": "northern_lights_phase2_public_2028",
+  "scenario_id": "northern_lights_phase2",
   "description": "Northern Lights Phase 2 public-data scenario: 5 contracted industrial emitters, 8 dedicated CO2 ships, and at least 5 MtCO2/y transport and storage capacity.",
   "time_step_hours": 1.0,
   "phase2_annual_capacity_tpy": 5000000.0,
@@ -301,7 +301,6 @@
     "entity_id": "oygarden_pipeline",
     "annual_capacity_tpy": 5000000.0,
     "max_flow_tph": 570.776255707763,
-    "ramp_tph": 250.0,
     "length_km": 100.4,
     "route_color": "#ff0000",
     "phase2_expansion_items": [

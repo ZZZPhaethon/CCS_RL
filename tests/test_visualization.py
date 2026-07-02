@@ -412,8 +412,8 @@ class VisualizationTests(unittest.TestCase):
         links = payload["map"]["injection_links"]
         self.assertEqual({link["target"] for link in links}, {"aurora_reservoir"})
         self.assertEqual({link["relation"] for link in links}, {"injection_target"})
+        self.assertEqual({link["source"] for link in links}, {"aurora_well_a7_ah"})
         for link in links:
-            self.assertIn(link["source"], {"aurora_well_a7_ah", "aurora_well_c1_h"})
             self.assertIn("coordinates", link)
             self.assertEqual(link["style"], "geologic")
 
@@ -552,7 +552,7 @@ class VisualizationTests(unittest.TestCase):
     def test_dashboard_surfaces_pipeline_flow_rate_chart(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("terminal", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=100.0, ramp_tph=100.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=100.0))
         network.add_entity(InjectionWell("well", max_injection_tph=100.0))
         network.connect("terminal", "pipeline")
         network.connect("pipeline", "well")
@@ -634,14 +634,14 @@ class VisualizationTests(unittest.TestCase):
         self.assertEqual(brevik_params["max_production_tph"], 56.0)
         self.assertEqual(vessel_params["volume_capacity_m3"], 7_500.0)
         self.assertEqual(vessel_params["speed_knots"], 14.0)
-        self.assertEqual(pipeline_params["annual_capacity_tpy"], 1_500_000.0)
+        self.assertEqual(pipeline_params["annual_capacity_tpy"], 5_000_000.0)
         self.assertEqual(pipeline_params["length_km"], 100.4)
         self.assertEqual(pipeline_params["route_color"], "#ff0000")
         self.assertEqual(reservoir_params["depth_m"], 2_600.0)
         self.assertIn("\"annual_target_export_tpy\": 400000.0", html)
         self.assertIn("\"volume_capacity_m3\": 7500.0", html)
         self.assertIn("\"speed_knots\": 14.0", html)
-        self.assertIn("\"annual_capacity_tpy\": 1500000.0", html)
+        self.assertIn("\"annual_capacity_tpy\": 5000000.0", html)
         self.assertIn("\"depth_m\": 2600.0", html)
 
     def test_offshore_pipeline_route_is_red_and_starts_at_naturgassparken(self):
@@ -738,7 +738,7 @@ class VisualizationTests(unittest.TestCase):
                 for entity_id, entity in payload["frames"][0]["entities"].items()
                 if entity["type"] == "InjectionWell"
             },
-            {"aurora_well_a7_ah", "aurora_well_c1_h"},
+            {"aurora_well_a7_ah"},
         )
 
     def test_write_phase1_dashboard(self):

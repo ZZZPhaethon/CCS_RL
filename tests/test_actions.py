@@ -1,12 +1,16 @@
 import unittest
 
 from sim.actions import ActionFrame, ActionProposal, ActionResolver
-from sim.network_scenarios import build_northern_lights_phase1_demo
+from sim.network_scenarios import build_fixed_scenario_demo
 
 
 class ActionInterfaceTests(unittest.TestCase):
+    def _network(self):
+        network, _ = build_fixed_scenario_demo("northern_lights_phase1_2well")
+        return network
+
     def test_resolver_commits_heterogeneous_entity_actions_to_network_format(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -53,7 +57,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertTrue(all(decision.accepted for decision in committed.decisions))
 
     def test_resolver_rejects_actions_not_supported_by_entity_type(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -75,7 +79,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("does not support", committed.decisions[0].reason)
 
     def test_resolver_rejects_invalid_numeric_action_parameters(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -103,7 +107,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("non-negative", committed.decisions[1].reason)
 
     def test_resolver_rejects_invalid_boolean_action_parameters(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -124,7 +128,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("must be boolean", committed.decisions[0].reason)
 
     def test_resolver_rejects_invalid_manifold_split_parameters(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -145,7 +149,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("sum to 1", committed.decisions[0].reason)
 
     def test_resolver_merges_compatible_actions_for_same_entity(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -171,7 +175,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertTrue(all(decision.accepted for decision in committed.decisions))
 
     def test_resolver_rejects_conflicting_actions_for_same_entity(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -199,7 +203,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("conflicts", committed.decisions[1].reason)
 
     def test_supported_actions_are_reported_by_entity_type(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
 
         supported = resolver.supported_actions_by_entity()
