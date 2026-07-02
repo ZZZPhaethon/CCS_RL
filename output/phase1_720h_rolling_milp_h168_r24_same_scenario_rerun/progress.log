@@ -1,0 +1,66 @@
+Running 1 fixed-horizon episode rollouts: scenario=northern_lights_phase1, cap=720 h, seeds=[1], controllers=['rolling_milp']
+[1/1] seed=1 controller=rolling_milp ...
+  rolling_milp replan at t=0 h; lookahead=168 h; terminal=0.0 t; source_buffer=0.0 t
+  rolling_milp plan ready in 30.5s; planned_departures=1; vented=0.0 t; shortfall=23,773.1 t
+  rolling_milp replan at t=24 h; lookahead=168 h; terminal=0.0 t; source_buffer=0.0 t
+  rolling_milp plan ready in 30.6s; planned_departures=4; vented=0.0 t; shortfall=19,387.2 t
+  rolling_milp replan at t=48 h; lookahead=168 h; terminal=0.0 t; source_buffer=0.0 t
+  rolling_milp plan ready in 30.4s; planned_departures=5; vented=0.0 t; shortfall=16,572.1 t
+  rolling_milp replan at t=72 h; lookahead=168 h; terminal=0.0 t; source_buffer=895.0 t
+  rolling_milp plan ready in 30.5s; planned_departures=5; vented=0.0 t; shortfall=10,405.2 t
+  rolling_milp replan at t=96 h; lookahead=168 h; terminal=0.0 t; source_buffer=1,790.1 t
+  rolling_milp plan ready in 30.5s; planned_departures=9; vented=0.0 t; shortfall=2,559.6 t
+  rolling_milp replan at t=120 h; lookahead=168 h; terminal=0.0 t; source_buffer=2,685.1 t
+  rolling_milp plan ready in 30.5s; planned_departures=5; vented=0.0 t; shortfall=7,537.1 t
+  rolling_milp replan at t=144 h; lookahead=168 h; terminal=1,427.4 t; source_buffer=3,580.1 t
+  rolling_milp plan ready in 30.5s; planned_departures=4; vented=0.0 t; shortfall=13,600.9 t
+  rolling_milp replan at t=168 h; lookahead=168 h; terminal=58.5 t; source_buffer=5,269.4 t
+  rolling_milp plan ready in 27.4s; planned_departures=17; vented=558.5 t; shortfall=2,611.8 t
+  rolling_milp replan at t=192 h; lookahead=168 h; terminal=0.0 t; source_buffer=6,168.3 t
+  rolling_milp plan ready in 25.2s; planned_departures=3; vented=3,924.4 t; shortfall=17,054.6 t
+  rolling_milp replan at t=216 h; lookahead=168 h; terminal=3,194.2 t; source_buffer=7,202.0 t
+  rolling_milp plan ready in 30.6s; planned_departures=1; vented=1,648.5 t; shortfall=21,609.9 t
+  rolling_milp replan at t=240 h; lookahead=168 h; terminal=0.0 t; source_buffer=10,405.9 t
+  rolling_milp plan ready in 30.7s; planned_departures=13; vented=168.4 t; shortfall=4,060.5 t
+  rolling_milp replan at t=264 h; lookahead=168 h; terminal=3,450.3 t; source_buffer=9,796.1 t
+  rolling_milp plan ready in 29.2s; planned_departures=11; vented=2,358.6 t; shortfall=10,246.6 t
+  rolling_milp replan at t=288 h; lookahead=168 h; terminal=5,853.2 t; source_buffer=7,994.9 t
+  rolling_milp plan ready in 30.5s; planned_departures=5; vented=0.0 t; shortfall=8,352.7 t
+  rolling_milp replan at t=312 h; lookahead=168 h; terminal=4,512.2 t; source_buffer=6,418.1 t
+  rolling_milp plan ready in 30.4s; planned_departures=2; vented=0.0 t; shortfall=19,617.6 t
+  rolling_milp replan at t=336 h; lookahead=168 h; terminal=3,143.2 t; source_buffer=8,605.3 t
+  rolling_milp plan ready in 30.5s; planned_departures=13; vented=0.0 t; shortfall=7,528.9 t
+  rolling_milp replan at t=360 h; lookahead=168 h; terminal=1,774.3 t; source_buffer=10,258.2 t
+  rolling_milp plan ready in 30.4s; planned_departures=8; vented=0.0 t; shortfall=7,819.3 t
+  rolling_milp replan at t=384 h; lookahead=168 h; terminal=2,988.0 t; source_buffer=7,059.5 t
+  rolling_milp plan ready in 27.1s; planned_departures=10; vented=0.0 t; shortfall=0.0 t
+  rolling_milp replan at t=408 h; lookahead=168 h; terminal=1,029.6 t; source_buffer=11,161.6 t
+  rolling_milp plan ready in 30.6s; planned_departures=6; vented=7,233.6 t; shortfall=16,214.9 t
+  rolling_milp replan at t=432 h; lookahead=168 h; terminal=2,455.6 t; source_buffer=11,515.2 t
+  rolling_milp plan ready in 30.6s; planned_departures=13; vented=2,685.7 t; shortfall=3,059.0 t
+  rolling_milp replan at t=456 h; lookahead=168 h; terminal=864.3 t; source_buffer=15,624.4 t
+  rolling_milp plan ready in 30.8s; planned_departures=11; vented=2,319.0 t; shortfall=8,402.3 t
+  rolling_milp replan at t=480 h; lookahead=168 h; terminal=3,020.4 t; source_buffer=9,686.8 t
+  rolling_milp plan ready in 27.5s; planned_departures=3; vented=1,794.6 t; shortfall=22,597.5 t
+  rolling_milp replan at t=504 h; lookahead=168 h; terminal=0.0 t; source_buffer=12,297.0 t
+  rolling_milp plan ready in 30.5s; planned_departures=14; vented=2,005.5 t; shortfall=6,543.5 t
+  rolling_milp replan at t=528 h; lookahead=168 h; terminal=3,603.7 t; source_buffer=14,087.9 t
+  rolling_milp plan ready in 30.5s; planned_departures=1; vented=6,208.5 t; shortfall=33,220.0 t
+  rolling_milp replan at t=552 h; lookahead=168 h; terminal=1,272.6 t; source_buffer=13,437.8 t
+  rolling_milp plan ready in 30.6s; planned_departures=11; vented=430.5 t; shortfall=11,440.1 t
+  rolling_milp replan at t=576 h; lookahead=168 h; terminal=0.0 t; source_buffer=13,264.8 t
+  rolling_milp plan ready in 30.5s; planned_departures=11; vented=0.0 t; shortfall=2,623.7 t
+  rolling_milp replan at t=600 h; lookahead=168 h; terminal=4,118.5 t; source_buffer=14,195.3 t
+  rolling_milp plan ready in 30.0s; planned_departures=13; vented=0.0 t; shortfall=0.0 t
+  rolling_milp replan at t=624 h; lookahead=168 h; terminal=842.7 t; source_buffer=12,429.4 t
+  rolling_milp plan ready in 30.4s; planned_departures=11; vented=0.0 t; shortfall=0.0 t
+  rolling_milp replan at t=648 h; lookahead=168 h; terminal=1,498.0 t; source_buffer=15,767.0 t
+  rolling_milp plan ready in 30.4s; planned_departures=9; vented=1,875.1 t; shortfall=3,715.1 t
+  rolling_milp replan at t=672 h; lookahead=168 h; terminal=2,153.4 t; source_buffer=12,408.1 t
+  rolling_milp plan ready in 30.5s; planned_departures=13; vented=4,277.1 t; shortfall=2,494.0 t
+  rolling_milp replan at t=696 h; lookahead=168 h; terminal=1,936.9 t; source_buffer=10,037.4 t
+  rolling_milp plan ready in 30.7s; planned_departures=11; vented=0.0 t; shortfall=10,534.6 t
+[1/1] seed=1 controller=rolling_milp done in 899.7s; hours=720; stored=93255.3 t; vented=211.1 t; total_cost=3,294,986
+Skipping static MILP fixed-horizon same-scenario oracle.
+Wrote outputs to E:\CCS_RLLLM\output\phase1_720h_rolling_milp_h168_r24_same_scenario_rerun
+Total wall-clock time: 899.8s
