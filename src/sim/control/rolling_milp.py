@@ -22,6 +22,7 @@ import time
 from typing import Callable
 
 from ..economics import EconomicParameters
+from ..entities.storage import InjectionWell
 from ..entities.terminal import Terminal
 from ..environment import (
     MAX_WELL_RATE_MTPA,
@@ -84,7 +85,7 @@ def _plan_explicit_actions(
     hours = range(H)
     state = env.simulator.state
     terminal_capacity_t = _terminal_capacity_t(env)
-    injection_cap_tph = _current_injection_cap_tph(env)
+    injection_cap_by_hour = [_current_injection_cap_tph(env, t) for t in hours]
     arcs, starts = _build_action_arcs(env, H)
 
     prob = pulp.LpProblem("rolling_explicit_action_plan", pulp.LpMinimize)
@@ -125,7 +126,10 @@ def _plan_explicit_actions(
         t: pulp.LpVariable(f"terminal_stock_{t}", lowBound=0, upBound=terminal_capacity_t)
         for t in range(H + 1)
     }
-    inj = {t: pulp.LpVariable(f"inj_{t}", lowBound=0, upBound=injection_cap_tph) for t in hours}
+    inj = {
+        t: pulp.LpVariable(f"inj_{t}", lowBound=0, upBound=injection_cap_by_hour[t])
+        for t in hours
+    }
     vent = {
         (emitter_id, t): pulp.LpVariable(f"vent_{emitter_id}_{t}", lowBound=0)
         for emitter_id in env.emitter_ids
@@ -432,7 +436,14 @@ def _build_action_arcs(env: CCSEnv, horizon_h: int) -> tuple[list[_ActionArc], d
                 for destination_id in nodes:
                     if destination_id == origin_id:
                         continue
-                    duration_h = _sail_hours_between(env, origin_id, destination_id, vessel_id)
+                    duration_h = _sail_hours_between(
+                        env,
+                        origin_id,
+                        destination_id,
+                        vessel_id,
+                        start_h=t,
+                        max_horizon_h=horizon_h - t,
+                    )
                     if t + duration_h > horizon_h:
                         continue
                     arcs.append(
@@ -470,29 +481,74 @@ def _path_start(env: CCSEnv, vessel_id: str, horizon_h: int) -> _PathStart:
     vstate = env.simulator.vessel_states[vessel_id]
     if vstate["mode"] == "berthed":
         return _PathStart(0, str(vstate["berth"]))
-    remaining_h = _remaining_sailing_hours(env, vessel_id)
+    remaining_h = _remaining_sailing_hours(env, vessel_id, max_horizon_h=horizon_h)
     if remaining_h >= horizon_h:
         return _PathStart(horizon_h, None)
     return _PathStart(remaining_h, str(vstate["destination"]))
 
 
-def _remaining_sailing_hours(env: CCSEnv, vessel_id: str) -> int:
+def _remaining_sailing_hours(env: CCSEnv, vessel_id: str, max_horizon_h: int | None = None) -> int:
     route = env._routes[vessel_id]
     vstate = env.simulator.vessel_states[vessel_id]
     distance_km = float(vstate.get("distance_km") or route["distance_km"])
-    speed_knots = max(1e-9, float(route["speed_knots"]))
-    leg_h = max(1, math.ceil(distance_km / (speed_knots * KNOTS_TO_KMH)))
-    return max(0, math.ceil(leg_h * (1.0 - float(vstate["progress"]))))
+    remaining_km = max(0.0, distance_km * (1.0 - float(vstate["progress"])))
+    return _sailing_duration_h(
+        env,
+        vessel_id,
+        distance_km=remaining_km,
+        start_h=0,
+        max_horizon_h=max_horizon_h,
+    )
 
 
-def _sail_hours_between(env: CCSEnv, origin_id: str, destination_id: str, vessel_id: str) -> int:
+def _sail_hours_between(
+    env: CCSEnv,
+    origin_id: str,
+    destination_id: str,
+    vessel_id: str,
+    *,
+    start_h: int = 0,
+    max_horizon_h: int | None = None,
+) -> int:
     route = env._routes[vessel_id]
     if {origin_id, destination_id} == {str(route["origin"]), str(route["destination"])}:
         distance_km = float(route["distance_km"])
     else:
         distance_km = _dynamic_leg_distance_km(env, route, origin_id, destination_id)
-    speed_knots = max(1e-9, float(route["speed_knots"]))
-    return max(1, math.ceil(distance_km / (speed_knots * KNOTS_TO_KMH)))
+    return _sailing_duration_h(
+        env,
+        vessel_id,
+        distance_km=distance_km,
+        start_h=start_h,
+        max_horizon_h=max_horizon_h,
+    )
+
+
+def _sailing_duration_h(
+    env: CCSEnv,
+    vessel_id: str,
+    *,
+    distance_km: float,
+    start_h: int,
+    max_horizon_h: int | None,
+) -> int:
+    route = env._routes[vessel_id]
+    speed_kmh = max(0.0, float(route["speed_knots"])) * KNOTS_TO_KMH
+    if distance_km <= 1e-9:
+        return 0
+    if speed_kmh <= 1e-9:
+        return 1 if max_horizon_h is None else max_horizon_h + 1
+
+    nominal_h = max(1, math.ceil(distance_km / speed_kmh))
+    max_search_h = max(1, int(max_horizon_h)) if max_horizon_h is not None else nominal_h * 10 + 24
+    covered_km = 0.0
+    for elapsed_h in range(1, max_search_h + 1):
+        offset_h = start_h + elapsed_h - 1
+        speed_factor = _forecast_vessel_speed_factor(env, vessel_id, offset_h)
+        covered_km += speed_kmh * speed_factor
+        if covered_km >= distance_km - 1e-9:
+            return elapsed_h
+    return max_search_h + 1
 
 
 def _dynamic_leg_distance_km(env: CCSEnv, route: dict, origin_id: str, destination_id: str) -> float:
@@ -541,7 +597,13 @@ def _wait_expr(arc_vars, wait_arc: dict[tuple[str, str, int], int], vessel_id: s
 def _capture_tonnes(env: CCSEnv, emitter_id: str, offset_h: int) -> float:
     state = env.simulator.state
     emitter = env.network.entities[emitter_id]
-    availability = state.emitter_availability.get(emitter_id, emitter.availability)
+    availability = _forecast_series_value(
+        env,
+        env.scenario.emitter_availability if env.scenario is not None else {},
+        emitter_id,
+        offset_h,
+        state.emitter_availability.get(emitter_id, emitter.availability),
+    )
     return emitter.capture_rate_tph_at(state.time_h + offset_h) * max(0.0, float(availability))
 
 
@@ -556,10 +618,55 @@ def _terminal_berth_counts(env: CCSEnv) -> dict[str, int]:
     }
 
 
-def _current_injection_cap_tph(env: CCSEnv) -> float:
+def _current_injection_cap_tph(env: CCSEnv, offset_h: int = 0) -> float:
     _vessels, nominal_injection_cap_tph, _capture_rate, _terminal_capacity = extract_params(env)
-    current_well_cap_tph = sum(upper * _MTPA_TO_TPH for _lower, upper in env.well_rate_bounds())
-    return min(nominal_injection_cap_tph, current_well_cap_tph)
+    state = env.simulator.state
+    well_cap_tph = 0.0
+    for well_id, well in env.network._entities_of_type(InjectionWell).items():
+        available = _forecast_series_value(
+            env,
+            env.scenario.well_available if env.scenario is not None else {},
+            well_id,
+            offset_h,
+            state.well_available.get(well_id, well.available),
+        )
+        if not bool(available):
+            continue
+        injectivity = _forecast_series_value(
+            env,
+            env.scenario.injectivity_factor if env.scenario is not None else {},
+            well_id,
+            offset_h,
+            state.injectivity_factor.get(well_id, 1.0),
+        )
+        well_cap_tph += well.max_injection_tph * max(0.0, float(injectivity))
+    return min(nominal_injection_cap_tph, well_cap_tph)
+
+
+def _forecast_vessel_speed_factor(env: CCSEnv, vessel_id: str, offset_h: int) -> float:
+    state = env.simulator.state
+    value = _forecast_series_value(
+        env,
+        env.scenario.vessel_speed_factor if env.scenario is not None else {},
+        vessel_id,
+        offset_h,
+        state.vessel_speed_factor.get(vessel_id, 1.0),
+    )
+    return max(0.0, float(value))
+
+
+def _forecast_series_value(
+    env: CCSEnv,
+    series_by_id: dict[str, list],
+    entity_id: str,
+    offset_h: int,
+    fallback,
+):
+    series = series_by_id.get(entity_id)
+    if not series or env.scenario is None:
+        return fallback
+    time_h = env.simulator.state.time_h + offset_h * env.network.time_step_hours
+    return series[env.scenario.step_index(time_h)]
 
 
 def _sailing_cost_expression(arcs: list[_ActionArc], arc_vars, params: EconomicParameters):

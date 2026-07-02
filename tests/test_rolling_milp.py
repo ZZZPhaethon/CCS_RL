@@ -11,14 +11,20 @@ except ImportError:
     HAVE_PULP = False
 
 from sim.control.baselines import greedy_shuttle_policy
-from sim.control.rolling_milp import RollingMilpController, _plan_explicit_actions, _sail_hours_between
+from sim.control.rolling_milp import (
+    RollingMilpController,
+    _build_action_arcs,
+    _capture_tonnes,
+    _plan_explicit_actions,
+    _sail_hours_between,
+)
 from sim.economics import EconomicParameters
 from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, SubseaManifold, Terminal, Vessel
 from sim.environment import CCSEnv, CCSEnvConfig, MAX_WELL_RATE_MTPA, MIN_WELL_RATE_MTPA, VESSEL_WAIT
 from sim.metrics import run_episode
 from sim.network import PhysicalNetwork
 from sim.routes import route_distance_km, sea_route
-from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
+from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
 from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
 
 
@@ -240,6 +246,51 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         self.assertGreater(expected_hours, direct_hours)
         self.assertEqual(_sail_hours_between(env, "source_a", "source_b", vessel_id), expected_hours)
 
+    def test_capture_forecast_uses_future_scenario_availability(self):
+        env = _cold_env(cap_hours=6)
+        env.reset(seed=1)
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=6,
+            emitter_availability={
+                "source_a": [1.0, 0.25, 0.0, 1.0, 1.0, 1.0],
+                "source_b": [1.0] * 6,
+            },
+            vessel_speed_factor={vessel_id: [1.0] * 6 for vessel_id in env.vessel_ids},
+            well_available={well_id: [True] * 6 for well_id in env.well_ids},
+            injectivity_factor={well_id: [1.0] * 6 for well_id in env.well_ids},
+        )
+        env.simulator.state.time_h = 1.0
+        env.scenario.apply_to_state(env.simulator.state, time_h=1.0)
+
+        self.assertAlmostEqual(_capture_tonnes(env, "source_a", 0), 20.0)
+        self.assertAlmostEqual(_capture_tonnes(env, "source_a", 1), 0.0)
+
+    def test_action_arcs_use_future_weather_speed_forecast(self):
+        env = _no_capture_env(cap_hours=4)
+        env.reset(seed=1)
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=4,
+            emitter_availability={"source": [1.0] * 4},
+            vessel_speed_factor={"ship": [1.0, 0.5, 0.5, 0.5]},
+            well_available={"well": [True] * 4},
+            injectivity_factor={"well": [1.0] * 4},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+
+        arcs, _starts = _build_action_arcs(env, horizon_h=4)
+        sail_at_t1 = next(
+            arc
+            for arc in arcs
+            if arc.vessel_id == "ship"
+            and arc.start_h == 1
+            and arc.origin_id == "source"
+            and arc.destination_id == "terminal"
+        )
+
+        self.assertEqual(sail_at_t1.duration_h, 2)
+
 
 @unittest.skipUnless(HAVE_PULP, "pulp/CBC not installed")
 class RollingMilpTests(unittest.TestCase):
@@ -336,6 +387,31 @@ class RollingMilpTests(unittest.TestCase):
 
         self.assertTrue(plan.is_valid, plan.validation_error)
         self.assertEqual(plan.vessel_actions_by_hour["ship"][0], env.vessel_go_emitter_action("source_b"))
+
+    def test_explicit_plan_limits_future_injection_by_well_forecast(self):
+        env = _no_capture_env(cap_hours=3)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 1_000.0
+        env.simulator.state.entity_inventory_t["terminal"] = 1_000.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=3,
+            emitter_availability={"source": [1.0, 1.0, 1.0]},
+            vessel_speed_factor={"ship": [1.0, 1.0, 1.0]},
+            well_available={"well": [True, True, True]},
+            injectivity_factor={"well": [1.0, 0.2, 0.0]},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+
+        plan = _plan_explicit_actions(
+            env,
+            planning_horizon_h=3,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
+        )
+
+        self.assertTrue(plan.is_valid, plan.validation_error)
+        self.assertLessEqual(plan.injection_tph[1], 100.0 + 1e-6)
+        self.assertAlmostEqual(plan.injection_tph[2], 0.0)
 
 
 if __name__ == "__main__":
