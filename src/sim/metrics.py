@@ -40,12 +40,18 @@ class EpisodeMetrics:
     annual_storage_gap_t: float = 0.0  # target*captured - stored (long-horizon obligation only)
 
     # Economic KPIs (EUR).
+    vessel_fuel: float = 0.0
+    conditioning: float = 0.0
+    reconditioning: float = 0.0
+    loading: float = 0.0
+    unloading: float = 0.0
     operating_cost: float = 0.0
     vent_penalty: float = 0.0
     storage_shortfall_penalty: float = 0.0
     total_cost: float = 0.0
     net: float = 0.0
     cost_per_stored_t: float | None = None
+    total_cost_per_stored_t: float | None = None
 
     # Operational quality / resilience KPIs.
     throttle_hours: int = 0
@@ -161,6 +167,7 @@ class _MetricsRecorder:
         in_transit = env._in_transit_inventory()
         annual_gap_t = max(0.0, env.config.storage_target_rate * captured - stored)
         cost_per_stored = ledger.operating_cost / stored if stored > _EPS else None
+        total_cost_per_stored = ledger.total_cost / stored if stored > _EPS else None
         return EpisodeMetrics(
             horizon_hours=env.n_steps * env.network.time_step_hours,
             storage_target_rate=env.config.storage_target_rate,
@@ -173,12 +180,18 @@ class _MetricsRecorder:
             loss_rate=env.loss_rate(),
             storage_rate=env.storage_rate(),
             annual_storage_gap_t=annual_gap_t,
+            vessel_fuel=ledger.vessel_fuel,
+            conditioning=ledger.conditioning,
+            reconditioning=ledger.reconditioning,
+            loading=ledger.loading,
+            unloading=ledger.unloading,
             operating_cost=ledger.operating_cost,
             vent_penalty=ledger.vent_penalty,
             storage_shortfall_penalty=ledger.storage_shortfall_penalty,
             total_cost=ledger.total_cost,
             net=ledger.net,
             cost_per_stored_t=cost_per_stored,
+            total_cost_per_stored_t=total_cost_per_stored,
             throttle_hours=self.throttle_hours,
             well_switch_count=self.well_switch_count,
             berth_wait_vessel_hours=self.berth_wait_vessel_hours,

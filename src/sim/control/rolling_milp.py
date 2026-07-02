@@ -35,6 +35,7 @@ from .baselines import greedy_shuttle_policy
 from .milp import KNOTS_TO_KMH, _validate_static_solution, extract_params
 
 _MTPA_TO_TPH = 1_000_000.0 / (365.25 * 24.0)
+_DOWNSTREAM_INVENTORY_CREDIT = 0.5
 Policy = Callable[[CCSEnv], dict[str, list]]
 
 
@@ -219,11 +220,38 @@ def _plan_explicit_actions(
                 <= berth_count
             )
 
-    stored_expr = pulp.lpSum(inj[t] for t in hours)
+    final_downstream_cargo = {}
+    for vessel_id in env.vessel_ids:
+        vessel = env.network.entities[vessel_id]
+        terminal_id = str(env._routes[vessel_id]["destination"])
+        final_at_terminal = pulp.lpSum(
+            arc_vars[i] for i in incoming.get((vessel_id, H, terminal_id), [])
+        )
+        final_downstream_cargo[vessel_id] = pulp.LpVariable(
+            f"final_downstream_cargo_{vessel_id}",
+            lowBound=0,
+            upBound=vessel.capacity_t,
+        )
+        prob += final_downstream_cargo[vessel_id] <= cargo[(vessel_id, H)]
+        prob += final_downstream_cargo[vessel_id] <= vessel.capacity_t * final_at_terminal
+        prob += (
+            final_downstream_cargo[vessel_id]
+            >= cargo[(vessel_id, H)] - vessel.capacity_t * (1 - final_at_terminal)
+        )
+
     initial_source_total_t = sum(float(state.entity_inventory_t.get(eid, 0.0)) for eid in env.emitter_ids)
     captured_from_operations_t = sum(_capture_tonnes(env, emitter_id, t) for emitter_id in env.emitter_ids for t in hours)
-    captured_total_t = initial_source_total_t + captured_from_operations_t
-    prob += shortfall >= env.config.storage_target_rate * captured_total_t - stored_expr
+    stored_expr = pulp.lpSum(inj[t] for t in hours)
+    downstream_inventory_expr = terminal_stock[H] + pulp.lpSum(final_downstream_cargo.values())
+    storage_progress_expr = (
+        float(env.cumulative_stored_t)
+        + stored_expr
+        + _DOWNSTREAM_INVENTORY_CREDIT * downstream_inventory_expr
+    )
+    required_storage_t = env.config.storage_target_rate * (
+        float(env.cumulative_captured_t) + captured_from_operations_t
+    )
+    prob += shortfall >= required_storage_t - storage_progress_expr
     prob += (
         _sailing_cost_expression(arcs, arc_vars, economics)
         + _loading_cost_expression(env, load, economics)
@@ -444,13 +472,12 @@ def _build_action_arcs(env: CCSEnv, horizon_h: int) -> tuple[list[_ActionArc], d
                         start_h=t,
                         max_horizon_h=horizon_h - t,
                     )
-                    if t + duration_h > horizon_h:
-                        continue
+                    end_h = min(t + duration_h, horizon_h)
                     arcs.append(
                         _ActionArc(
                             vessel_id=vessel_id,
                             start_h=t,
-                            end_h=t + duration_h,
+                            end_h=end_h,
                             origin_id=origin_id,
                             destination_id=destination_id,
                             action=_action_to_destination(env, vessel_id, destination_id),

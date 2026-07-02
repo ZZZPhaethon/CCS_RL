@@ -179,6 +179,11 @@ class MilpTests(unittest.TestCase):
         self.assertGreater(result.stored_t, 0.0)
         self.assertGreater(result.deliveries, 0)
         self.assertGreater(result.operating_cost, 0.0)
+        self.assertAlmostEqual(
+            result.operating_cost,
+            result.vessel_fuel + result.conditioning + result.reconditioning + result.loading + result.unloading,
+        )
+        self.assertAlmostEqual(result.total_cost_per_stored_t, result.total_cost / result.stored_t)
 
     def test_fixed_horizon_can_pool_capture_under_flexible_emitter_actions(self):
         result = milp_module.solve_max_storage_fixed_horizon(_unbalanced_source_env(), horizon_h=120)

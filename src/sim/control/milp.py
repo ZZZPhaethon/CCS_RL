@@ -66,6 +66,12 @@ class FixedHorizonMilpResult:
     total_cost: float
     cost_per_stored_t: float
     schedule: dict[str, list[int]]
+    total_cost_per_stored_t: float = float("nan")
+    vessel_fuel: float = 0.0
+    conditioning: float = 0.0
+    reconditioning: float = 0.0
+    loading: float = 0.0
+    unloading: float = 0.0
     is_valid: bool = True
     validation_error: str = ""
     max_binary_integrality_violation: float = 0.0
@@ -208,7 +214,8 @@ def solve_max_storage_fixed_horizon(
     in_transit_growth_t = captured_from_operations_t - stored_t - vented_t
     in_transit_t = max(0.0, initial_buffer_t + in_transit_growth_t)
     shortfall_t = float(shortfall.value() or 0.0)
-    cost = _schedule_cost(vessels, schedule, float(H), stored_t, params)
+    cost_breakdown = _schedule_cost_breakdown(vessels, schedule, float(H), stored_t, params)
+    cost = sum(cost_breakdown.values())
     total_cost = cost + vented_t * params.carbon_price_eur_per_t + shortfall_t * params.storage_shortfall_eur_per_t
     max_storable_from_deliveries_t = sum(v.capacity_t * len(schedule[v.vessel_id]) for v in vessels)
     validation = _validate_static_solution(
@@ -234,6 +241,8 @@ def solve_max_storage_fixed_horizon(
         total_cost=total_cost,
         cost_per_stored_t=cost / stored_t if stored_t > 0 else float("nan"),
         schedule=schedule,
+        total_cost_per_stored_t=total_cost / stored_t if stored_t > 0 else float("nan"),
+        **cost_breakdown,
         is_valid=validation.is_valid,
         validation_error=validation.validation_error,
         max_binary_integrality_violation=validation.max_binary_integrality_violation,
@@ -381,7 +390,8 @@ def _solve_max_storage_fixed_horizon_with_scenario(
     in_transit_t = max(0.0, initial_in_transit_t + in_transit_growth_t)
     shortfall_t = float(shortfall.value() or 0.0)
     n_deliveries = sum(len(times) for times in schedule.values())
-    cost = _schedule_cost(vessels, schedule, float(H), stored_t, params)
+    cost_breakdown = _schedule_cost_breakdown(vessels, schedule, float(H), stored_t, params)
+    cost = sum(cost_breakdown.values())
     total_cost = cost + vented_t * params.carbon_price_eur_per_t + shortfall_t * params.storage_shortfall_eur_per_t
     by_id = {v.vessel_id: v for v in vessels}
     max_storable_from_deliveries_t = term_init_t + sum(
@@ -411,6 +421,8 @@ def _solve_max_storage_fixed_horizon_with_scenario(
         total_cost=total_cost,
         cost_per_stored_t=cost / stored_t if stored_t > 0 else float("nan"),
         schedule=schedule,
+        total_cost_per_stored_t=total_cost / stored_t if stored_t > 0 else float("nan"),
+        **cost_breakdown,
         is_valid=validation.is_valid,
         validation_error=validation.validation_error,
         max_binary_integrality_violation=validation.max_binary_integrality_violation,
@@ -638,8 +650,18 @@ def _schedule_cost(
     stored_t: float,
     params: EconomicParameters,
 ) -> float:
+    return sum(_schedule_cost_breakdown(vessels, schedule, horizon_h, stored_t, params).values())
+
+
+def _schedule_cost_breakdown(
+    vessels: list[VesselParams],
+    schedule: dict[str, list[int]],
+    horizon_h: float,
+    stored_t: float,
+    params: EconomicParameters,
+) -> dict[str, float]:
     sail_hours = sum(2 * v.sail_h * len(schedule[v.vessel_id]) for v in vessels)
-    fuel = sail_hours * params.vessel_fuel_eur_per_h_sailing
+    vessel_fuel = sail_hours * params.vessel_fuel_eur_per_h_sailing
     loaded_t = sum(v.capacity_t * len(schedule[v.vessel_id]) for v in vessels)
     conditioning = loaded_t * params.conditioning_eur_per_t
     reconditioning = stored_t * params.reconditioning_eur_per_t
@@ -647,4 +669,10 @@ def _schedule_cost(
     unloading_h = sum(v.unload_dur_h * len(schedule[v.vessel_id]) for v in vessels)
     loading = loading_h * params.hoteling_fuel_eur_per_h
     unloading = unloading_h * params.hoteling_fuel_eur_per_h
-    return fuel + conditioning + reconditioning + loading + unloading
+    return {
+        "vessel_fuel": vessel_fuel,
+        "conditioning": conditioning,
+        "reconditioning": reconditioning,
+        "loading": loading,
+        "unloading": unloading,
+    }

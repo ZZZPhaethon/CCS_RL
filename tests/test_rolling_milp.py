@@ -20,7 +20,14 @@ from sim.control.rolling_milp import (
 )
 from sim.economics import EconomicParameters
 from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, SubseaManifold, Terminal, Vessel
-from sim.environment import CCSEnv, CCSEnvConfig, MAX_WELL_RATE_MTPA, MIN_WELL_RATE_MTPA, VESSEL_WAIT
+from sim.environment import (
+    CCSEnv,
+    CCSEnvConfig,
+    MAX_WELL_RATE_MTPA,
+    MIN_WELL_RATE_MTPA,
+    VESSEL_GO_TERMINAL,
+    VESSEL_WAIT,
+)
 from sim.metrics import run_episode
 from sim.network import PhysicalNetwork
 from sim.routes import route_distance_km, sea_route
@@ -378,6 +385,7 @@ class RollingMilpTests(unittest.TestCase):
         env.reset(seed=1)
         env.simulator.state.entity_inventory_t["source_a"] = 0.0
         env.simulator.state.entity_inventory_t["source_b"] = 500.0
+        env.cumulative_captured_t = 500.0
 
         plan = _plan_explicit_actions(
             env,
@@ -386,13 +394,39 @@ class RollingMilpTests(unittest.TestCase):
         )
 
         self.assertTrue(plan.is_valid, plan.validation_error)
-        self.assertEqual(plan.vessel_actions_by_hour["ship"][0], env.vessel_go_emitter_action("source_b"))
+        self.assertIn(env.vessel_go_emitter_action("source_b"), plan.vessel_actions_by_hour["ship"])
+
+    def test_explicit_plan_can_start_voyage_that_finishes_after_lookahead(self):
+        env = _no_capture_env(cap_hours=2)
+        env.reset(seed=1)
+        env._routes["ship"]["distance_km"] = 18.52
+        env.simulator.state.entity_inventory_t["source"] = 500.0
+        env.cumulative_captured_t = 500.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=2,
+            emitter_availability={"source": [1.0, 1.0]},
+            vessel_speed_factor={"ship": [1.0, 1.0]},
+            well_available={"well": [True, True]},
+            injectivity_factor={"well": [1.0, 1.0]},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+
+        plan = _plan_explicit_actions(
+            env,
+            planning_horizon_h=2,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
+        )
+
+        self.assertTrue(plan.is_valid, plan.validation_error)
+        self.assertEqual(plan.vessel_actions_by_hour["ship"], [VESSEL_WAIT, VESSEL_GO_TERMINAL])
 
     def test_explicit_plan_limits_future_injection_by_well_forecast(self):
         env = _no_capture_env(cap_hours=3)
         env.reset(seed=1)
         env.simulator.state.entity_inventory_t["source"] = 1_000.0
         env.simulator.state.entity_inventory_t["terminal"] = 1_000.0
+        env.cumulative_captured_t = 1_000.0
         env.scenario = Scenario(
             time_step_hours=1.0,
             n_steps=3,
@@ -410,8 +444,25 @@ class RollingMilpTests(unittest.TestCase):
         )
 
         self.assertTrue(plan.is_valid, plan.validation_error)
+        self.assertGreater(plan.injection_tph[0], 400.0)
         self.assertLessEqual(plan.injection_tph[1], 100.0 + 1e-6)
         self.assertAlmostEqual(plan.injection_tph[2], 0.0)
+
+    def test_explicit_plan_counts_existing_cumulative_storage_gap(self):
+        env = _no_capture_env(cap_hours=1)
+        env.reset(seed=1)
+        env.cumulative_captured_t = 1_000.0
+        env.cumulative_stored_t = 0.0
+        env.simulator.state.entity_inventory_t["terminal"] = 500.0
+
+        plan = _plan_explicit_actions(
+            env,
+            planning_horizon_h=1,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
+        )
+
+        self.assertTrue(plan.is_valid, plan.validation_error)
+        self.assertGreater(plan.injection_tph[0], 400.0)
 
 
 if __name__ == "__main__":

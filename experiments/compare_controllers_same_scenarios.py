@@ -162,9 +162,15 @@ def summarize(rows: list[dict[str, object]]) -> list[dict[str, object]]:
         "storage_rate",
         "vent_penalty",
         "storage_shortfall_penalty",
+        "vessel_fuel",
+        "conditioning",
+        "reconditioning",
+        "loading",
+        "unloading",
         "operating_cost",
         "total_cost",
         "cost_per_stored_t",
+        "total_cost_per_stored_t",
         "throttle_hours",
         "well_switch_count",
         "berth_wait_vessel_hours",
@@ -177,6 +183,8 @@ def summarize(rows: list[dict[str, object]]) -> list[dict[str, object]]:
         for metric in metrics:
             values = [row[metric] for row in controller_rows if row.get(metric) is not None]
             if not values:
+                out[f"{metric}_mean"] = ""
+                out[f"{metric}_std"] = ""
                 continue
             floats = [float(value) for value in values]
             mean = sum(floats) / len(floats)
@@ -243,9 +251,15 @@ def static_fixed_horizon_milp_benchmark(
                 "in_transit_t": "",
                 "in_transit_growth_t": "",
                 "shortfall_t": "",
+                "vessel_fuel": "",
+                "conditioning": "",
+                "reconditioning": "",
+                "loading": "",
+                "unloading": "",
                 "operating_cost": "",
                 "total_cost": "",
                 "cost_per_stored_t": "",
+                "total_cost_per_stored_t": "",
             }
         )
         return row
@@ -258,9 +272,15 @@ def static_fixed_horizon_milp_benchmark(
             "in_transit_t": result.in_transit_t,
             "in_transit_growth_t": result.in_transit_growth_t,
             "shortfall_t": result.shortfall_t,
+            "vessel_fuel": getattr(result, "vessel_fuel", ""),
+            "conditioning": getattr(result, "conditioning", ""),
+            "reconditioning": getattr(result, "reconditioning", ""),
+            "loading": getattr(result, "loading", ""),
+            "unloading": getattr(result, "unloading", ""),
             "operating_cost": result.operating_cost,
             "total_cost": result.total_cost,
             "cost_per_stored_t": result.cost_per_stored_t,
+            "total_cost_per_stored_t": getattr(result, "total_cost_per_stored_t", ""),
         }
     )
     return row
@@ -294,9 +314,15 @@ def _blank_static_summary(rows: list[dict[str, object]], reason: str) -> dict[st
         "in_transit_t": "",
         "in_transit_growth_t": "",
         "shortfall_t": "",
+        "vessel_fuel": "",
+        "conditioning": "",
+        "reconditioning": "",
+        "loading": "",
+        "unloading": "",
         "operating_cost": "",
         "total_cost": "",
         "cost_per_stored_t": "",
+        "total_cost_per_stored_t": "",
         "time_limit_s": rows[0].get("time_limit_s", "") if rows else "",
         "mip_gap_rel": rows[0].get("mip_gap_rel", "") if rows else "",
         "mip_gap_abs": rows[0].get("mip_gap_abs", "") if rows else "",
@@ -327,9 +353,15 @@ def _summarize_valid_static_rows(rows: list[dict[str, object]], all_rows: list[d
         "in_transit_t": _mean(rows, "in_transit_t"),
         "in_transit_growth_t": _mean(rows, "in_transit_growth_t"),
         "shortfall_t": _mean(rows, "shortfall_t"),
+        "vessel_fuel": _mean(rows, "vessel_fuel"),
+        "conditioning": _mean(rows, "conditioning"),
+        "reconditioning": _mean(rows, "reconditioning"),
+        "loading": _mean(rows, "loading"),
+        "unloading": _mean(rows, "unloading"),
         "operating_cost": operating_cost_mean,
         "total_cost": total_cost_mean,
         "cost_per_stored_t": operating_cost_mean / stored_mean if stored_mean > 0 else float("nan"),
+        "total_cost_per_stored_t": total_cost_mean / stored_mean if stored_mean > 0 else float("nan"),
         "time_limit_s": all_rows[0].get("time_limit_s", ""),
         "mip_gap_rel": all_rows[0].get("mip_gap_rel", ""),
         "mip_gap_abs": all_rows[0].get("mip_gap_abs", ""),
@@ -591,9 +623,15 @@ def main() -> None:
             "in_transit_t": "",
             "in_transit_growth_t": "",
             "shortfall_t": "",
+            "vessel_fuel": "",
+            "conditioning": "",
+            "reconditioning": "",
+            "loading": "",
+            "unloading": "",
             "operating_cost": "",
             "total_cost": "",
             "cost_per_stored_t": "",
+            "total_cost_per_stored_t": "",
             "time_limit_s": "",
             "mip_gap_rel": "",
             "mip_gap_abs": "",

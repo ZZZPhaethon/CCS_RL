@@ -36,6 +36,12 @@ class RunEpisodeTests(unittest.TestCase):
         self.assertAlmostEqual(metrics.net, env.ledger.net)
         self.assertAlmostEqual(metrics.total_cost, env.ledger.total_cost)
         self.assertAlmostEqual(metrics.storage_shortfall_penalty, env.ledger.storage_shortfall_penalty)
+        self.assertAlmostEqual(metrics.vessel_fuel, env.ledger.vessel_fuel)
+        self.assertAlmostEqual(metrics.conditioning, env.ledger.conditioning)
+        self.assertAlmostEqual(metrics.reconditioning, env.ledger.reconditioning)
+        self.assertAlmostEqual(metrics.loading, env.ledger.loading)
+        self.assertAlmostEqual(metrics.unloading, env.ledger.unloading)
+        self.assertAlmostEqual(metrics.total_cost_per_stored_t, metrics.total_cost / metrics.stored_t)
         self.assertEqual(metrics.horizon_hours, 48)
 
     def test_kpis_are_in_sensible_ranges(self):

@@ -85,7 +85,18 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         from experiments import compare_controllers_same_scenarios as compare
         from sim.metrics import EpisodeMetrics
 
-        metrics = EpisodeMetrics(elapsed_hours=2, stored_t=10.0, total_cost=5.0)
+        metrics = EpisodeMetrics(
+            elapsed_hours=2,
+            stored_t=10.0,
+            operating_cost=5.0,
+            total_cost=15.0,
+            total_cost_per_stored_t=1.5,
+            vessel_fuel=1.0,
+            conditioning=2.0,
+            reconditioning=3.0,
+            loading=4.0,
+            unloading=5.0,
+        )
 
         row = compare.metric_row(
             seed=1,
@@ -98,6 +109,32 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
 
         self.assertEqual(row["solve_time_s"], 1.25)
         self.assertEqual(summary[0]["solve_time_s_mean"], 1.25)
+        self.assertEqual(row["total_cost_per_stored_t"], 1.5)
+        self.assertEqual(summary[0]["total_cost_per_stored_t_mean"], 1.5)
+        self.assertEqual(summary[0]["vessel_fuel_mean"], 1.0)
+        self.assertEqual(summary[0]["conditioning_mean"], 2.0)
+        self.assertEqual(summary[0]["reconditioning_mean"], 3.0)
+        self.assertEqual(summary[0]["loading_mean"], 4.0)
+        self.assertEqual(summary[0]["unloading_mean"], 5.0)
+
+    def test_summary_keeps_per_tonne_columns_when_controller_stores_nothing(self):
+        from experiments import compare_controllers_same_scenarios as compare
+        from sim.metrics import EpisodeMetrics
+
+        row = compare.metric_row(
+            seed=1,
+            controller="idle",
+            metrics=EpisodeMetrics(stored_t=0.0, cost_per_stored_t=None, total_cost_per_stored_t=None),
+            signature="sig",
+            solve_time_s=1.25,
+        )
+
+        summary = compare.summarize([row])
+
+        self.assertEqual(summary[0]["cost_per_stored_t_mean"], "")
+        self.assertEqual(summary[0]["cost_per_stored_t_std"], "")
+        self.assertEqual(summary[0]["total_cost_per_stored_t_mean"], "")
+        self.assertEqual(summary[0]["total_cost_per_stored_t_std"], "")
 
     def test_report_includes_solve_time(self):
         from experiments import compare_controllers_same_scenarios as compare
@@ -318,6 +355,12 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
             shortfall_t=4.0,
             total_cost=5.0,
             cost_per_stored_t=2.0,
+            total_cost_per_stored_t=5.0,
+            vessel_fuel=0.5,
+            conditioning=0.6,
+            reconditioning=0.7,
+            loading=0.8,
+            unloading=0.9,
         )
         with patch.object(compare, "solve_max_storage_fixed_horizon", return_value=result) as solve:
             row = compare.static_fixed_horizon_milp_benchmark(
@@ -339,6 +382,12 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         self.assertEqual(row["in_transit_growth_t"], 7.0)
         self.assertEqual(row["shortfall_t"], 4.0)
         self.assertEqual(row["total_cost"], 5.0)
+        self.assertEqual(row["total_cost_per_stored_t"], 5.0)
+        self.assertEqual(row["vessel_fuel"], 0.5)
+        self.assertEqual(row["conditioning"], 0.6)
+        self.assertEqual(row["reconditioning"], 0.7)
+        self.assertEqual(row["loading"], 0.8)
+        self.assertEqual(row["unloading"], 0.9)
         self.assertEqual(row["mip_gap_rel"], 0.01)
         self.assertEqual(row["mip_gap_abs"], 100.0)
         solve.assert_called_once()
@@ -367,6 +416,12 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
             shortfall_t=9_145.1,
             total_cost=824_048.0,
             cost_per_stored_t=2.33,
+            total_cost_per_stored_t=2.33,
+            vessel_fuel=1.0,
+            conditioning=2.0,
+            reconditioning=3.0,
+            loading=4.0,
+            unloading=5.0,
         )
         with patch.object(compare, "solve_max_storage_fixed_horizon", return_value=result):
             row = compare.static_fixed_horizon_milp_benchmark(
@@ -383,6 +438,12 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         self.assertEqual(row["stored_t"], "")
         self.assertEqual(row["deliveries"], "")
         self.assertEqual(row["total_cost"], "")
+        self.assertEqual(row["total_cost_per_stored_t"], "")
+        self.assertEqual(row["vessel_fuel"], "")
+        self.assertEqual(row["conditioning"], "")
+        self.assertEqual(row["reconditioning"], "")
+        self.assertEqual(row["loading"], "")
+        self.assertEqual(row["unloading"], "")
         self.assertIn("Not Solved", row["validation_error"])
 
     def test_fixed_target_cli_options_are_removed(self):
