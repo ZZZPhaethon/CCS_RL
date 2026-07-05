@@ -53,3 +53,65 @@ python -m sim.scenario_generation.wave_height.prediction.train_lstm `
 ```
 
 The LSTM command writes the best validation model, not the final epoch model.
+
+Rolling prediction for MPC/scenario generation:
+
+```powershell
+python -m sim.scenario_generation.wave_height.prediction.predict_lstm `
+  --model output\wave_height\wave_height_lstm_168h.pt `
+  --csv output\wave_height\phase1_route_wave_2010_2014.csv `
+  --target-year 2014 `
+  --replan-every-hours 24 `
+  --device cuda `
+  --output output\wave_height\wave_height_lstm_2014_rolling24_predictions.csv
+```
+
+Use the rolling LSTM forecast as the environment scenario generator:
+
+```python
+from sim.environment.factories import make_phase1_env
+from sim.scenario_generation import ScenarioConfig
+from sim.scenario_generation.wave_height import LSTMWaveHeightScenarioGenerator
+
+env = make_phase1_env()
+scenario_generator = LSTMWaveHeightScenarioGenerator.from_env(
+    env,
+    "output/wave_height/wave_height_lstm_2014_rolling24_predictions.csv",
+    config=ScenarioConfig(episode_hours=168, enable_weather=False),
+)
+env.scenario_generator = scenario_generator
+```
+
+If ``fixed_start_global_record`` is omitted, each sampled scenario chooses one
+available rolling forecast start deterministically from the episode seed. To pin
+one MPC window, pass a ``global_record`` that appears at ``horizon_index=0`` in
+the rolling prediction CSV.
+
+Leg-level weather for non-fixed routes:
+
+```powershell
+python -m sim.scenario_generation.wave_height.export_leg_dataset `
+  --wave-dir "D:\wave Height" `
+  --output output\wave_height\phase1_leg_wave_2010_2014.csv
+```
+
+This writes weather by ``leg_id`` such as ``brevik->oygarden_terminal`` or
+``brevik->yara_sluiskil``. Use the five-year seasonal mean speed factor as a
+leg-aware scenario generator:
+
+```python
+from sim.environment.factories import build_phase1_env
+from sim.scenario_generation import ScenarioConfig
+from sim.scenario_generation.wave_height import LegWaveClimatologyScenarioGenerator
+
+env = build_phase1_env()
+env.scenario_generator = LegWaveClimatologyScenarioGenerator(
+    "output/wave_height/phase1_leg_wave_2010_2014.csv",
+    config=ScenarioConfig(episode_hours=168, enable_weather=False),
+    fixed_start_hour_of_year=0,
+)
+```
+
+The simulator and rolling MILP now prefer ``Scenario.leg_speed_factor`` for the
+current ``origin->destination`` leg and fall back to ``vessel_speed_factor`` when
+a leg-specific series is absent.

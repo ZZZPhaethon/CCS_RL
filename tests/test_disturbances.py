@@ -3,6 +3,7 @@ import unittest
 from sim.actions import ActionFrame, ActionProposal
 from sim.scenario_generation.disturbance_resolver import (
     emitter_availability,
+    leg_speed_factor,
     terminal_berth_count,
     vessel_speed_factor,
     well_injectivity_factor,
@@ -33,6 +34,7 @@ class DisturbanceResolverTests(unittest.TestCase):
         self.assertEqual(well_injectivity_factor(state, well), 1.0)
         self.assertEqual(well_max_injection_tph(state, well), 200.0)
         self.assertEqual(vessel_speed_factor(state, "ship"), 1.0)
+        self.assertEqual(leg_speed_factor(state, "a", "b"), 1.0)
         self.assertEqual(terminal_berth_count(state, terminal), 2)
 
     def test_overrides_take_precedence_and_are_clamped(self):
@@ -44,6 +46,7 @@ class DisturbanceResolverTests(unittest.TestCase):
             well_available={"w": False},
             injectivity_factor={"w": -0.5},  # clamped to 0.0
             vessel_speed_factor={"ship": 0.25},
+            leg_speed_factor={"a->b": 0.5},
             berth_count_override={"t": 0},
         )
 
@@ -52,6 +55,7 @@ class DisturbanceResolverTests(unittest.TestCase):
         self.assertEqual(well_injectivity_factor(state, well), 0.0)
         self.assertEqual(well_max_injection_tph(state, well), 0.0)
         self.assertEqual(vessel_speed_factor(state, "ship"), 0.25)
+        self.assertEqual(leg_speed_factor(state, "a", "b"), 0.5)
         self.assertEqual(terminal_berth_count(state, terminal), 0)
 
 
@@ -204,6 +208,21 @@ class DisturbanceVoyageTests(unittest.TestCase):
 
         self.assertGreater(nominal_lon, 0.0)
         self.assertAlmostEqual(slowed_lon, nominal_lon * 0.5, places=6)
+
+    def test_leg_speed_factor_overrides_vessel_factor_for_current_leg(self):
+        slowed = self._make_simulator()
+        slowed.state.vessel_speed_factor["ship_1"] = 1.0
+        slowed.state.leg_speed_factor["origin->terminal"] = 0.5
+        slowed_record = self._sail_step(slowed)
+
+        nominal = self._make_simulator()
+        nominal_record = self._sail_step(nominal)
+
+        self.assertAlmostEqual(
+            slowed_record.vessel_positions["ship_1"]["lon"],
+            nominal_record.vessel_positions["ship_1"]["lon"] * 0.5,
+            places=6,
+        )
 
     def test_zero_speed_factor_stalls_vessel_in_place(self):
         stalled = self._make_simulator()

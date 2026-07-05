@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from .actions import ActionFrame, ActionResolver, CommittedActionFrame
-from .scenario_generation.disturbance_resolver import vessel_speed_factor
+from .scenario_generation.disturbance_resolver import leg_speed_factor, vessel_speed_factor
 from .entities.state import PhysicalState, StepResult
 from .network import PhysicalNetwork
 from .routes import route_distance_km, sea_route
@@ -162,7 +162,13 @@ class PhysicalSimulator:
             route = self.routes[vessel_id]
             speed_knots = route.get("speed_knots")
             distance_km = float(state.get("distance_km") or route.get("distance_km") or 0.0)
-            speed_factor = vessel_speed_factor(self.state, vessel_id)
+            vessel_factor = vessel_speed_factor(self.state, vessel_id)
+            speed_factor = leg_speed_factor(
+                self.state,
+                str(state["origin"]),
+                str(state["destination"]),
+                fallback=vessel_factor,
+            )
             effective_speed_knots = float(speed_knots) * speed_factor if speed_knots else 0.0
             if effective_speed_knots <= 0.0 or distance_km <= 0.0:
                 # No nominal speed/distance falls back to instant arrival; a

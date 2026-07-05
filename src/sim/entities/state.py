@@ -27,6 +27,7 @@ class PhysicalState:
     well_available: dict[str, bool] = field(default_factory=dict)
     injectivity_factor: dict[str, float] = field(default_factory=dict)
     vessel_speed_factor: dict[str, float] = field(default_factory=dict)
+    leg_speed_factor: dict[str, float] = field(default_factory=dict)
     berth_count_override: dict[str, int] = field(default_factory=dict)
 
     def copy(self) -> "PhysicalState":
@@ -47,6 +48,7 @@ class PhysicalState:
             well_available=dict(self.well_available),
             injectivity_factor=dict(self.injectivity_factor),
             vessel_speed_factor=dict(self.vessel_speed_factor),
+            leg_speed_factor=dict(self.leg_speed_factor),
             berth_count_override=dict(self.berth_count_override),
         )
 
@@ -68,6 +70,7 @@ class PhysicalState:
             "well_available": dict(self.well_available),
             "injectivity_factor": dict(self.injectivity_factor),
             "vessel_speed_factor": dict(self.vessel_speed_factor),
+            "leg_speed_factor": dict(self.leg_speed_factor),
             "berth_count_override": dict(self.berth_count_override),
         }
 

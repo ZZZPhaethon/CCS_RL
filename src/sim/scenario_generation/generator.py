@@ -80,6 +80,7 @@ class Scenario:
     initial_inventory_t: dict[str, float] = field(default_factory=dict)
     emitter_availability: dict[str, list[float]] = field(default_factory=dict)
     vessel_speed_factor: dict[str, list[float]] = field(default_factory=dict)
+    leg_speed_factor: dict[str, list[float]] = field(default_factory=dict)
     well_available: dict[str, list[bool]] = field(default_factory=dict)
     injectivity_factor: dict[str, list[float]] = field(default_factory=dict)
     seed: int | None = None
@@ -99,6 +100,7 @@ class Scenario:
         i = self.step_index(time_h)
         state.emitter_availability = {k: v[i] for k, v in self.emitter_availability.items()}
         state.vessel_speed_factor = {k: v[i] for k, v in self.vessel_speed_factor.items()}
+        state.leg_speed_factor = {k: v[i] for k, v in self.leg_speed_factor.items()}
         state.well_available = {k: v[i] for k, v in self.well_available.items()}
         state.injectivity_factor = {k: v[i] for k, v in self.injectivity_factor.items()}
 

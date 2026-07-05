@@ -160,6 +160,7 @@ class ScenarioApplyTests(unittest.TestCase):
             initial_inventory_t={"brevik": 250.0},
             emitter_availability={"brevik": [1.0, 0.0, 0.5]},
             vessel_speed_factor={"ship_1": [1.0, 0.6, 0.6]},
+            leg_speed_factor={"brevik->oygarden": [1.0, 0.5, 0.4]},
             well_available={"well_1": [True, True, False]},
             injectivity_factor={"well_1": [1.0, 0.9, 0.8]},
         )
@@ -175,6 +176,7 @@ class ScenarioApplyTests(unittest.TestCase):
         scenario.apply_to_state(state, time_h=1.0)
         self.assertEqual(state.emitter_availability["brevik"], 0.0)
         self.assertEqual(state.vessel_speed_factor["ship_1"], 0.6)
+        self.assertEqual(state.leg_speed_factor["brevik->oygarden"], 0.5)
         self.assertTrue(state.well_available["well_1"])
 
     def test_step_index_clamps_past_the_horizon(self):

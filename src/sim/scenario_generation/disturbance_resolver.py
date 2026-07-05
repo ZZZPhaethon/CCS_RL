@@ -53,6 +53,18 @@ def vessel_speed_factor(state: PhysicalState, vessel_id: str) -> float:
     return max(0.0, float(state.vessel_speed_factor.get(vessel_id, 1.0)))
 
 
+def leg_speed_factor(
+    state: PhysicalState,
+    origin_id: str,
+    destination_id: str,
+    *,
+    fallback: float = 1.0,
+) -> float:
+    """Non-negative speed multiplier for a specific sailing leg."""
+    leg_id = f"{origin_id}->{destination_id}"
+    return max(0.0, float(state.leg_speed_factor.get(leg_id, fallback)))
+
+
 def terminal_berth_count(state: PhysicalState, terminal: Terminal) -> int:
     """Number of usable berths after any explicit state override."""
     value = state.berth_count_override.get(terminal.entity_id, terminal.berth_count)

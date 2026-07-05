@@ -1,14 +1,22 @@
+import csv
+import tempfile
 import unittest
+from pathlib import Path
 
 from sim.entities import Emitter, InjectionWell, PhysicalState, Terminal, Vessel
 from sim.network import PhysicalNetwork
 from sim.scenario_generation import ScenarioConfig
 from sim.scenario_generation.wave_height import (
+    LegWaveClimatologyScenarioGenerator,
+    LSTMWaveHeightScenarioGenerator,
     WaveHeightScenarioGenerator,
     aggregate_wave_heights,
+    build_candidate_leg_routes,
     densify_route,
 )
 from sim.ship_speed import BJERKETVEDT_2020_SHIPS, speed_factor_series
+from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
+from sim.environment import CCSEnv, CCSEnvConfig
 
 
 class FakeWaveReader:
@@ -60,6 +68,22 @@ class RouteWaveHelpersTests(unittest.TestCase):
         self.assertEqual(route[0], (0.0, 0.0))
         self.assertEqual(route[-1], (0.0, 1.0))
         self.assertGreater(len(route), 2)
+
+    def test_build_candidate_leg_routes_includes_emitter_to_emitter_legs(self):
+        env = CCSEnv(
+            make_toy_two_source_network(),
+            TOY_TWO_SOURCE_LOCATIONS,
+            config=CCSEnvConfig(episode_hours=3),
+        )
+        legs = build_candidate_leg_routes(env, default_speed_knots=12.0)
+
+        self.assertIn("source_a->source_b", legs)
+        self.assertIn("source_b->source_a", legs)
+        self.assertIn("source_a->terminal", legs)
+        self.assertIn("terminal->source_a", legs)
+        self.assertEqual(legs["source_a->source_b"]["origin"], "source_a")
+        self.assertEqual(legs["source_a->source_b"]["destination"], "source_b")
+        self.assertGreater(legs["source_a->source_b"]["distance_km"], 0.0)
 
 
 class WaveHeightScenarioGeneratorTests(unittest.TestCase):
@@ -118,6 +142,105 @@ class WaveHeightScenarioGeneratorTests(unittest.TestCase):
 
         self.assertEqual(a.last_start_record, b.last_start_record)
         self.assertEqual(scenario_a.vessel_speed_factor, scenario_b.vessel_speed_factor)
+
+
+class LSTMWaveHeightScenarioGeneratorTests(unittest.TestCase):
+    def test_lstm_forecast_generator_uses_prediction_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "predictions.csv"
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "sample_index",
+                        "vessel_id",
+                        "horizon_index",
+                        "global_record",
+                        "actual",
+                        "predicted",
+                        "error",
+                    ],
+                )
+                writer.writeheader()
+                for horizon_index, height in enumerate((0.0, 2.0, 4.0)):
+                    writer.writerow(
+                        {
+                            "sample_index": 0,
+                            "vessel_id": "ship",
+                            "horizon_index": horizon_index,
+                            "global_record": 100 + horizon_index,
+                            "actual": 0.0,
+                            "predicted": height,
+                            "error": 0.0,
+                        }
+                    )
+
+            routes = {
+                "ship": {
+                    "coordinates": [(0.0, 0.0), (0.0, 1.0)],
+                    "speed_knots": 12.0,
+                }
+            }
+            parameters = BJERKETVEDT_2020_SHIPS[5000]
+            generator = LSTMWaveHeightScenarioGenerator(
+                path,
+                routes=routes,
+                default_ship_parameters=parameters,
+                fixed_start_global_record=100,
+                config=_quiet_config(),
+            )
+
+            scenario = generator.sample(_network(), seed=2)
+
+        expected = speed_factor_series((0.0, 2.0, 4.0), parameters, nominal_speed_knots=12.0)
+        self.assertEqual(generator.last_start_global_record, 100)
+        self.assertEqual(scenario.vessel_speed_factor["ship"], expected)
+
+
+class LegWaveClimatologyScenarioGeneratorTests(unittest.TestCase):
+    def test_leg_climatology_generator_uses_mean_by_hour_of_year(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "leg_wave.csv"
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "global_record",
+                        "source_file",
+                        "source_record",
+                        "leg_id",
+                        "origin",
+                        "destination",
+                        "speed_factor_p75",
+                    ],
+                )
+                writer.writeheader()
+                for year, offset in ((2010, 0.0), (2011, 0.2)):
+                    for hour, value in ((5, 0.6), (6, 0.8), (7, 1.0)):
+                        writer.writerow(
+                            {
+                                "global_record": hour,
+                                "source_file": f"wam10ei_{year}.nc",
+                                "source_record": hour,
+                                "leg_id": "source->terminal",
+                                "origin": "source",
+                                "destination": "terminal",
+                                "speed_factor_p75": value + offset,
+                            }
+                        )
+
+            generator = LegWaveClimatologyScenarioGenerator(
+                path,
+                config=_quiet_config(),
+                fixed_start_hour_of_year=5,
+            )
+            scenario = generator.sample(_network(), seed=2)
+
+        self.assertEqual(generator.last_start_hour_of_year, 5)
+        self.assertEqual(
+            scenario.leg_speed_factor["source->terminal"],
+            [0.7, 0.9, 1.0],
+        )
 
 
 if __name__ == "__main__":
