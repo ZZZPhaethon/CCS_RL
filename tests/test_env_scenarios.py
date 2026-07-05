@@ -1,9 +1,13 @@
 import unittest
+import csv
+import tempfile
+from pathlib import Path
 
 from sim.control.baselines import greedy_shuttle_policy, idle_policy
 from sim.environment import CCSEnvConfig, build_phase1_env
 from sim.metrics import run_episode
 from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
+from sim.scenario_generation.wave_height import LegWaveClimatologyScenarioGenerator
 
 
 class Phase1EnvTests(unittest.TestCase):
@@ -48,6 +52,42 @@ class Phase1EnvTests(unittest.TestCase):
         self.assertGreater(metrics.stored_t, 0.0)
         # Real buffers give ~7 days of autonomy, so a short run should not vent.
         self.assertEqual(metrics.vented_t, 0.0)
+
+    def test_phase1_default_scenario_uses_leg_wave_weather_when_csv_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "leg_wave.csv"
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "global_record",
+                        "source_file",
+                        "source_record",
+                        "leg_id",
+                        "origin",
+                        "destination",
+                        "speed_factor_p75",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "global_record": 0,
+                        "source_file": "wam10ei_2010.nc",
+                        "source_record": 0,
+                        "leg_id": "brevik->oygarden_terminal",
+                        "origin": "brevik",
+                        "destination": "oygarden_terminal",
+                        "speed_factor_p75": 0.8,
+                    }
+                )
+
+            env = build_phase1_env(
+                config=CCSEnvConfig(episode_hours=3),
+                leg_wave_csv=path,
+            )
+
+        self.assertIsInstance(env.scenario_generator, LegWaveClimatologyScenarioGenerator)
 
 
 if __name__ == "__main__":

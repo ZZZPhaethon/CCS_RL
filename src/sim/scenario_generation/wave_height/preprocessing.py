@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ...environment import build_phase1_env
 from ...routes import route_distance_km, sea_route
 from ...ship_speed import NORTHERN_LIGHTS_SHIP, ShipSpeedParameters, speed_factor
 from .routes import RouteWaveConfig, WaveHeightReader, aggregate_wave_heights
@@ -45,7 +44,9 @@ def write_phase1_route_wave_dataset(
     progress: ProgressCallback | None = None,
 ) -> Path:
     """Export Phase 1 route-level wave-height and speed-factor rows to CSV."""
-    env = build_phase1_env()
+    from ...environment import build_phase1_env
+
+    env = build_phase1_env(use_leg_wave_weather=False)
     nc_paths = (
         discover_wave_height_files(wave_dir_or_paths)
         if isinstance(wave_dir_or_paths, (str, Path)) and Path(wave_dir_or_paths).is_dir()
@@ -105,7 +106,9 @@ def write_phase1_leg_wave_dataset(
     include_terminal_to_emitter: bool = True,
 ) -> Path:
     """Export Phase 1 leg-level wave-height rows for all controllable legs."""
-    env = build_phase1_env()
+    from ...environment import build_phase1_env
+
+    env = build_phase1_env(use_leg_wave_weather=False)
     nc_paths = (
         discover_wave_height_files(wave_dir_or_paths)
         if isinstance(wave_dir_or_paths, (str, Path)) and Path(wave_dir_or_paths).is_dir()

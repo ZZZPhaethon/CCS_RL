@@ -228,7 +228,7 @@ dashboard 和可视化生成代码。
 
 部分数据文件体积较大,未纳入 git 仓库,存放在 Google Drive:
 
-- [数据文件（Google Drive）](https://drive.google.com/file/d/1IlseiDmvowxYsci3Ilt8Dg0HXjKRsETk/view?usp=drive_link)
+- [数据文件（Google Drive）](https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN?usp=sharing)
 
 下载后请放回对应的数据目录再运行相关脚本。
 

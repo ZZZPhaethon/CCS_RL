@@ -18,7 +18,7 @@ from .control.baselines import greedy_shuttle_policy, idle_policy
 from .environment import CCSEnvConfig, build_phase1_env
 from .environment.gym_adapter import make_ppo_policy
 from .metrics import evaluate
-from .scenario_generation import ScenarioConfig, ScenarioGenerator
+from .scenario_generation import ScenarioConfig
 
 
 def make_native_env(
@@ -34,11 +34,9 @@ def make_native_env(
     """
     cost_model = CostModel(EconomicParameters(storage_shortfall_eur_per_t=storage_shortfall_penalty))
     return build_phase1_env(
-        scenario_generator=ScenarioGenerator(
-            config=ScenarioConfig(episode_hours=episode_hours, warm_start=warm_start)
-        ),
         cost_model=cost_model,
         config=CCSEnvConfig(episode_hours=episode_hours, storage_target_rate=storage_target_rate),
+        scenario_config=ScenarioConfig(episode_hours=episode_hours, warm_start=warm_start),
     )
 
 

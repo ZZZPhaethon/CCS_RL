@@ -96,22 +96,19 @@ python -m sim.scenario_generation.wave_height.export_leg_dataset `
 ```
 
 This writes weather by ``leg_id`` such as ``brevik->oygarden_terminal`` or
-``brevik->yara_sluiskil``. Use the five-year seasonal mean speed factor as a
-leg-aware scenario generator:
+``brevik->yara_sluiskil``. When this file exists at the default output path,
+``build_phase1_env()`` uses the five-year seasonal mean speed factor as the
+default leg-aware scenario generator:
 
 ```python
 from sim.environment.factories import build_phase1_env
-from sim.scenario_generation import ScenarioConfig
-from sim.scenario_generation.wave_height import LegWaveClimatologyScenarioGenerator
 
 env = build_phase1_env()
-env.scenario_generator = LegWaveClimatologyScenarioGenerator(
-    "output/wave_height/phase1_leg_wave_2010_2014.csv",
-    config=ScenarioConfig(episode_hours=168, enable_weather=False),
-    fixed_start_hour_of_year=0,
-)
+env.reset(seed=1)
 ```
 
 The simulator and rolling MILP now prefer ``Scenario.leg_speed_factor`` for the
 current ``origin->destination`` leg and fall back to ``vessel_speed_factor`` when
-a leg-specific series is absent.
+a leg-specific series is absent. ``LegWaveClimatologyScenarioGenerator`` sets
+``vessel_speed_factor`` to 1.0 by default, so the weather slowdown comes from
+the leg-level CSV rather than the old random vessel-level weather.

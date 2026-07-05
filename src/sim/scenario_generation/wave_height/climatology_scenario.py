@@ -5,6 +5,8 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
+from ...entities.storage import InjectionWell
+from ...entities.vessel import Vessel
 from ..generator import Scenario, ScenarioConfig, ScenarioGenerator
 
 
@@ -77,6 +79,8 @@ class LegWaveClimatologyScenarioGenerator(ScenarioGenerator):
         speed_factor_column: str = "speed_factor_p75",
         period_hours: int = 8784,
         fixed_start_hour_of_year: int | None = None,
+        keep_base_vessel_weather: bool = False,
+        keep_base_injectivity: bool = False,
         config: ScenarioConfig | None = None,
         seed: int | None = None,
         climatology: LegWaveClimatology | None = None,
@@ -88,10 +92,22 @@ class LegWaveClimatologyScenarioGenerator(ScenarioGenerator):
             period_hours=period_hours,
         )
         self.fixed_start_hour_of_year = fixed_start_hour_of_year
+        self.keep_base_vessel_weather = keep_base_vessel_weather
+        self.keep_base_injectivity = keep_base_injectivity
         self.last_start_hour_of_year: int | None = None
 
     def sample(self, network, seed: int | None = None) -> Scenario:
         scenario = super().sample(network, seed=seed)
+        if not self.keep_base_vessel_weather:
+            scenario.vessel_speed_factor = {
+                vessel_id: [1.0] * scenario.n_steps
+                for vessel_id in network._entities_of_type(Vessel)
+            }
+        if not self.keep_base_injectivity:
+            scenario.injectivity_factor = {
+                well_id: [1.0] * scenario.n_steps
+                for well_id in network._entities_of_type(InjectionWell)
+            }
         start_hour = self._sample_start_hour(seed)
         self.last_start_hour_of_year = start_hour
         scenario.leg_speed_factor = {

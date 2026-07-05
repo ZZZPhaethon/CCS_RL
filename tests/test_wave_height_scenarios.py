@@ -242,6 +242,55 @@ class LegWaveClimatologyScenarioGeneratorTests(unittest.TestCase):
             [0.7, 0.9, 1.0],
         )
 
+    def test_leg_climatology_generator_disables_base_vessel_weather_and_injectivity_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "leg_wave.csv"
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "global_record",
+                        "source_file",
+                        "source_record",
+                        "leg_id",
+                        "origin",
+                        "destination",
+                        "speed_factor_p75",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "global_record": 0,
+                        "source_file": "wam10ei_2010.nc",
+                        "source_record": 0,
+                        "leg_id": "source->terminal",
+                        "origin": "source",
+                        "destination": "terminal",
+                        "speed_factor_p75": 0.8,
+                    }
+                )
+
+            generator = LegWaveClimatologyScenarioGenerator(
+                path,
+                config=ScenarioConfig(
+                    episode_hours=3,
+                    capture_noise_std=0.0,
+                    capture_outage_rate_per_week=0.0,
+                    enable_weather=True,
+                    well_maintenance_rate_per_week=0.0,
+                    injectivity_max_decline=0.0,
+                    injectivity_noise_std=0.0,
+                    randomize_initial_inventory=False,
+                ),
+                fixed_start_hour_of_year=0,
+            )
+            scenario = generator.sample(_network(), seed=5)
+
+        self.assertTrue(all(value == 1.0 for value in scenario.vessel_speed_factor["ship"]))
+        self.assertTrue(all(value == 1.0 for value in scenario.injectivity_factor["well"]))
+        self.assertEqual(scenario.leg_speed_factor["source->terminal"], [0.8, 0.8, 0.8])
+
 
 if __name__ == "__main__":
     unittest.main()
