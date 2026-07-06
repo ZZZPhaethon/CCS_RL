@@ -23,8 +23,8 @@ from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, SubseaMani
 from sim.environment import (
     CCSEnv,
     CCSEnvConfig,
-    MAX_WELL_RATE_MTPA,
-    MIN_WELL_RATE_MTPA,
+    MIN_WELL_RATE_INDEX,
+    WELL_RATE_LEVELS_MTPA,
     VESSEL_GO_TERMINAL,
     VESSEL_WAIT,
 )
@@ -174,7 +174,7 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         messages: list[str] = []
         fallback_action = {
             "vessels": [VESSEL_WAIT] * len(env.vessel_ids),
-            "wells": [MIN_WELL_RATE_MTPA] * len(env.well_ids),
+            "wells": [MIN_WELL_RATE_INDEX] * len(env.well_ids),
         }
 
         invalid_plan = SimpleNamespace(
@@ -303,7 +303,13 @@ class RollingMilpInterfaceTests(unittest.TestCase):
 class RollingMilpTests(unittest.TestCase):
     def test_controller_runs_to_horizon_and_stores_co2(self):
         env = _cold_env(cap_hours=96)
-        controller = RollingMilpController(env, replan_every=48, planning_horizon_h=48, time_limit_s=1.0)
+        controller = RollingMilpController(
+            env,
+            replan_every=48,
+            planning_horizon_h=48,
+            time_limit_s=1.0,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
+        )
         metrics = run_episode(env, controller, seed=1)
         self.assertEqual(metrics.elapsed_hours, 96)
         self.assertGreater(metrics.stored_t, 0.0)
@@ -322,7 +328,7 @@ class RollingMilpTests(unittest.TestCase):
         action = controller.policy(env)
         self.assertEqual(len(action["vessels"]), len(env.vessel_ids))
         self.assertEqual(len(action["wells"]), len(env.well_ids))
-        self.assertTrue(all(MIN_WELL_RATE_MTPA <= rate <= MAX_WELL_RATE_MTPA for rate in action["wells"]))
+        self.assertTrue(all(0 <= index < len(WELL_RATE_LEVELS_MTPA) for index in action["wells"]))
 
     def test_empty_vessel_returns_to_best_available_emitter_not_fixed_home(self):
         env = _cold_env(cap_hours=96)

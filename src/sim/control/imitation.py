@@ -3,7 +3,7 @@
 The old behavior-cloning loss targeted a flat discrete MaskablePPO action. The
 collector now records hybrid demonstrator actions; the supervised loss must be
 reintroduced with a policy distribution that has categorical vessel heads and
-continuous well-rate heads.
+categorical well-rate heads.
 """
 
 from __future__ import annotations
@@ -47,5 +47,5 @@ def behavior_clone(
     """Supervise ``model.policy`` to imitate the demonstrator's actions in place."""
     raise NotImplementedError(
         "Behavior cloning must be updated for the hybrid action distribution "
-        "(discrete vessels + continuous well rates)."
+        "(discrete vessels + discrete well-rate indices)."
     )

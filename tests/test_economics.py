@@ -43,6 +43,7 @@ class EconomicParameterTests(unittest.TestCase):
         self.assertAlmostEqual(params.hoteling_power_fraction, 0.05)
         self.assertAlmostEqual(params.conditioning_eur_per_t, 7.82)
         self.assertAlmostEqual(params.reconditioning_eur_per_t, 0.41)
+        self.assertAlmostEqual(params.storage_shortfall_eur_per_t, 0.0)
         self.assertFalse(hasattr(params, "backlog_penalty_eur_per_t"))
 
     def test_fuel_hourly_rates_are_derived_from_ship_energy_inputs(self):
@@ -138,7 +139,7 @@ class ShortfallPenaltyTests(unittest.TestCase):
         self.assertEqual(penalty, 0.0)
 
     def test_penalty_prices_the_tonnage_gap(self):
-        model = CostModel()
+        model = CostModel(EconomicParameters(storage_shortfall_eur_per_t=100.0))
         # Need 900 stored, only 800 -> 100 t short * 100 EUR/t.
         penalty = model.storage_shortfall_penalty(
             cumulative_captured_t=1_000.0,

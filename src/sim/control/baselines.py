@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from ..environment import (
     CCSEnv,
-    MAX_WELL_RATE_MTPA,
-    MIN_WELL_RATE_MTPA,
+    MIN_WELL_RATE_INDEX,
     VESSEL_GO_TERMINAL,
     VESSEL_WAIT,
 )
@@ -17,7 +16,7 @@ def idle_policy(env: CCSEnv) -> dict[str, list]:
     """Do nothing with vessels while holding wells at their minimum stable mode."""
     return {
         "vessels": [VESSEL_WAIT] * len(env.vessel_ids),
-        "wells": [MIN_WELL_RATE_MTPA] * len(env.well_ids),
+        "wells": [MIN_WELL_RATE_INDEX] * len(env.well_ids),
     }
 
 
@@ -48,7 +47,10 @@ def greedy_shuttle_policy(env: CCSEnv) -> dict[str, list]:
             action.append(VESSEL_GO_TERMINAL)
         else:
             action.append(VESSEL_WAIT)
-    return {"vessels": action, "wells": [MAX_WELL_RATE_MTPA] * len(env.well_ids)}
+    return {
+        "vessels": action,
+        "wells": [env.highest_feasible_well_rate_index(well_id) for well_id in env.well_ids],
+    }
 
 
 def _best_emitter_action(env: CCSEnv, mask: list[bool]) -> int | None:

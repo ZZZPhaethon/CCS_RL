@@ -43,10 +43,9 @@ class EconomicParameters:
     # Terminal-side adjustment to pipeline/injection conditions.
     reconditioning_eur_per_t: float = 0.41
 
-    # Feasibility penalties, not market prices.
-    # Annual storage-target shortfall: only meaningful over a long (>= multi-month)
-    # horizon, where in-transit CO2 is negligible. Used by storage_shortfall_penalty.
-    storage_shortfall_eur_per_t: float = 100.0
+    # Diagnostic storage-target shortfall weight. Default is zero so shortfall is
+    # reported as a KPI instead of being treated as an operating cost.
+    storage_shortfall_eur_per_t: float = 0.0
 
     @property
     def vessel_fuel_eur_per_h_sailing(self) -> float:

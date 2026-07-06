@@ -17,6 +17,7 @@ corresponding emitter or terminal.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 import math
 import time
 from typing import Callable
@@ -25,7 +26,7 @@ from ..economics import EconomicParameters
 from ..entities.storage import InjectionWell
 from ..entities.terminal import Terminal
 from ..environment import (
-    MAX_WELL_RATE_MTPA,
+    WELL_RATE_LEVELS_MTPA,
     VESSEL_GO_TERMINAL,
     VESSEL_WAIT,
     CCSEnv,
@@ -346,7 +347,7 @@ class RollingMilpController:
             self._planned_vessel_action(env, vessel_id, now, masks[index])
             for index, vessel_id in enumerate(env.vessel_ids)
         ]
-        return {"vessels": vessel_actions, "wells": self._well_rates_for_plan(env, now)}
+        return {"vessels": vessel_actions, "wells": self._well_rate_indices_for_plan(env, now)}
 
     def _replan(self, env: CCSEnv, now: float) -> None:
         state = env.simulator.state
@@ -410,34 +411,31 @@ class RollingMilpController:
             return choice
         return VESSEL_WAIT
 
-    def _well_rates_for_plan(self, env: CCSEnv, now: float) -> list[float]:
+    def _well_rate_indices_for_plan(self, env: CCSEnv, now: float) -> list[int]:
         if not self._planned_injection_tph:
-            return [MAX_WELL_RATE_MTPA if upper > 0.0 else 0.0 for _lower, upper in env.well_rate_bounds()]
+            return [
+                env.highest_feasible_well_rate_index(well_id)
+                for well_id in env.well_ids
+            ]
         elapsed = int(max(0.0, math.floor(now - self._plan_origin_h)))
         index = min(elapsed, len(self._planned_injection_tph) - 1)
-        return self._well_rates_from_total_tph(env, self._planned_injection_tph[index])
+        return self._well_rate_indices_from_total_tph(env, self._planned_injection_tph[index])
 
-    def _well_rates_from_total_tph(self, env: CCSEnv, target_tph: float) -> list[float]:
-        bounds = env.well_rate_bounds()
-        rates = [0.0] * len(bounds)
-        available = [(i, lower, upper) for i, (lower, upper) in enumerate(bounds) if upper > 0.0]
-        if not available:
-            return rates
-
-        min_total_tph = sum(lower * _MTPA_TO_TPH for _i, lower, _upper in available)
-        max_total_tph = sum(upper * _MTPA_TO_TPH for _i, _lower, upper in available)
-        target_tph = min(max(float(target_tph), min_total_tph), max_total_tph)
-
-        for i, lower, _upper in available:
-            rates[i] = lower
-        remaining_tph = target_tph - min_total_tph
-        for i, lower, upper in available:
-            extra_tph = min(remaining_tph, (upper - lower) * _MTPA_TO_TPH)
-            rates[i] += extra_tph / _MTPA_TO_TPH
-            remaining_tph -= extra_tph
-            if remaining_tph <= 1e-9:
-                break
-        return rates
+    def _well_rate_indices_from_total_tph(self, env: CCSEnv, target_tph: float) -> list[int]:
+        feasible_by_well = [
+            [index for index, allowed in enumerate(mask) if allowed]
+            for mask in env.well_rate_action_mask()
+        ]
+        if not feasible_by_well:
+            return []
+        best: tuple[tuple[float, int], tuple[int, ...]] | None = None
+        for indices in product(*feasible_by_well):
+            total_tph = sum(WELL_RATE_LEVELS_MTPA[index] * _MTPA_TO_TPH for index in indices)
+            over_target = 1 if total_tph > float(target_tph) + 1e-9 else 0
+            score = (over_target, abs(total_tph - float(target_tph)))
+            if best is None or score < best[0]:
+                best = (score, tuple(int(index) for index in indices))
+        return list(best[1]) if best is not None else []
 
 
 def _build_action_arcs(env: CCSEnv, horizon_h: int) -> tuple[list[_ActionArc], dict[str, _PathStart]]:

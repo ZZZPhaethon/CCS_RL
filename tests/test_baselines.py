@@ -1,7 +1,7 @@
 import unittest
 
 from sim.control.baselines import greedy_shuttle_policy
-from sim.environment import CCSEnv, CCSEnvConfig
+from sim.environment import CCSEnv, CCSEnvConfig, MIN_WELL_RATE_INDEX
 from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
 from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
 
@@ -36,6 +36,8 @@ class GreedyBaselineTests(unittest.TestCase):
 
         self.assertEqual(action["vessels"][0], env.vessel_go_emitter_action(other))
         self.assertEqual(len(action["wells"]), len(env.well_ids))
+        self.assertTrue(all(isinstance(index, int) for index in action["wells"]))
+        self.assertTrue(all(index >= MIN_WELL_RATE_INDEX for index in action["wells"]))
 
 
 if __name__ == "__main__":

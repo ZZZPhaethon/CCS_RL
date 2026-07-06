@@ -12,23 +12,24 @@ The interface is gym-style (``reset`` / ``step`` returning
 ``(obs, reward, done, info)``) but intentionally has **no numpy or gymnasium
 dependency** so it stays importable anywhere. Observations are flat ``list[float]``
 and the native action is a dictionary with discrete vessel choices plus
-continuous well rates in Mt/y.
+discrete well rate-level indices.
 
 Controls (section 7.2 of the research note):
 - per vessel: ``WAIT`` / ``GO_TERMINAL`` / ``GO_EMITTER[id]``;
-- per well: continuous injection rate, bounded to 0.5-2.0 Mt/y when available
-  and forced to 0 while the well is under maintenance.
+- per well: a discrete injection-rate level index over
+  ``(0.0, 0.5, 1.0, 1.5, 2.0, 2.5)`` Mt/y.
 
 Loading at any emitter berth and unloading at the terminal are issued
 automatically (they are never the interesting decision); the agent chooses which
 emitter or terminal to send vessels to and how hard to inject. A vessel action
 mask exposes which destination choices are physically legal, while
-``well_rate_bounds()`` exposes the continuous injection bounds.
+``well_rate_action_mask()`` exposes the currently feasible well rate levels.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Integral
 
 from ..actions import ActionFrame, ActionProposal
 from ..economics import CostModel, EconomicLedger
@@ -41,7 +42,13 @@ from ..entities.terminal import Terminal
 from ..entities.vessel import Vessel
 from ..routes import route_distance_km, sea_route
 from ..scenario_generation import Scenario, ScenarioGenerator
+from ..scenario_generation.disturbance_resolver import well_max_injection_tph
 from ..simulator import PhysicalSimulator
+from ..operations.pressure_limits import (
+    WELL_RATE_LEVELS_MTPA,
+    mtpa_to_tph,
+    pressure_limited_rate_level_mask,
+)
 
 # Vessel action ids. Emitter actions are dynamic:
 # VESSEL_GO_EMITTER_BASE + env.emitter_ids.index(emitter_id).
@@ -49,13 +56,15 @@ VESSEL_WAIT, VESSEL_GO_TERMINAL = 0, 1
 VESSEL_GO_EMITTER_BASE = 2
 VESSEL_ACTIONS = VESSEL_GO_EMITTER_BASE
 
-MIN_WELL_RATE_MTPA = 0.5
-MAX_WELL_RATE_MTPA = 2.5
+OFF_WELL_RATE_INDEX = 0
+MIN_WELL_RATE_INDEX = 1
+MAX_WELL_RATE_INDEX = len(WELL_RATE_LEVELS_MTPA) - 1
+MIN_WELL_RATE_MTPA = WELL_RATE_LEVELS_MTPA[MIN_WELL_RATE_INDEX]
+MAX_WELL_RATE_MTPA = WELL_RATE_LEVELS_MTPA[MAX_WELL_RATE_INDEX]
 WELL_RATE_BOUNDS_MTPA = (MIN_WELL_RATE_MTPA, MAX_WELL_RATE_MTPA)
-_MTPA_TO_TPH = 1_000_000.0 / (365.25 * 24.0)
 
 Coordinate = tuple[float, float]
-CCSAction = dict[str, list[int] | list[float]]
+CCSAction = dict[str, list[int]]
 
 
 @dataclass
@@ -117,9 +126,8 @@ class CCSEnv:
     def action_dims(self) -> list[int]:
         """Discrete dimensions for vessel decisions.
 
-        The well controls are continuous and exposed through
-        :meth:`well_rate_bounds`, so this compatibility alias intentionally only
-        covers vessel dimensions.
+        The modern action spec also includes :attr:`well_rate_action_dims`.
+        This compatibility alias intentionally only covers vessel dimensions.
         """
         return self.vessel_action_dims
 
@@ -130,9 +138,18 @@ class CCSEnv:
     def well_rate_bounds(self) -> list[tuple[float, float]]:
         return [self._well_rate_bound(wid) for wid in self.well_ids]
 
+    @property
+    def well_rate_action_dims(self) -> list[int]:
+        return [len(WELL_RATE_LEVELS_MTPA)] * len(self.well_ids)
+
+    def well_rate_levels_mtpa(self) -> list[float]:
+        return list(WELL_RATE_LEVELS_MTPA)
+
     def action_spec(self) -> dict[str, object]:
         return {
             "vessel_action_dims": self.vessel_action_dims,
+            "well_rate_action_dims": self.well_rate_action_dims,
+            "well_rate_levels_mtpa": self.well_rate_levels_mtpa(),
             "well_rate_bounds": self.well_rate_bounds(),
         }
 
@@ -221,7 +238,7 @@ class CCSEnv:
 
         in_transit_now = self._in_transit_inventory()
         in_transit_growth = in_transit_now - self.initial_in_transit_t
-        reward = (economics.net - shortfall_delta_penalty) * self.config.reward_scale
+        reward = economics.net * self.config.reward_scale
 
         self.t += 1
         # The operational task is fixed-horizon: there is no early terminal
@@ -272,10 +289,13 @@ class CCSEnv:
     # -- action mask ------------------------------------------------------
     def _action_info(self) -> dict:
         vessel_mask = self.vessel_action_mask()
+        well_mask = self.well_rate_action_mask()
         bounds = self.well_rate_bounds()
         return {
             "action_mask": vessel_mask,
             "vessel_action_mask": vessel_mask,
+            "well_rate_action_mask": well_mask,
+            "well_rate_levels_mtpa": self.well_rate_levels_mtpa(),
             "well_rate_bounds": bounds,
         }
 
@@ -287,6 +307,14 @@ class CCSEnv:
         for vid in self.vessel_ids:
             mask.append(self._vessel_mask(vid))
         return mask
+
+    def well_rate_action_mask(self) -> list[list[bool]]:
+        return [self._well_rate_action_mask(well_id) for well_id in self.well_ids]
+
+    def highest_feasible_well_rate_index(self, well_id: str) -> int:
+        mask = self._well_rate_action_mask(well_id)
+        feasible = [index for index, allowed in enumerate(mask) if allowed]
+        return feasible[-1] if feasible else OFF_WELL_RATE_INDEX
 
     def _vessel_mask(self, vessel_id: str) -> list[bool]:
         vstate = self.simulator.vessel_states[vessel_id]
@@ -307,6 +335,27 @@ class CCSEnv:
             return (0.0, 0.0)
         return WELL_RATE_BOUNDS_MTPA
 
+    def _well_rate_action_mask(self, well_id: str) -> list[bool]:
+        if self.simulator is None:
+            return [True] * len(WELL_RATE_LEVELS_MTPA)
+        state = self.simulator.state
+        well = self.network.entities[well_id]
+        assert isinstance(well, InjectionWell)
+        if not state.well_available.get(well_id, well.available):
+            return [True] + [False] * (len(WELL_RATE_LEVELS_MTPA) - 1)
+        effective_max_tph = well_max_injection_tph(state, well)
+        return list(
+            pressure_limited_rate_level_mask(
+                self.network,
+                state,
+                well_id,
+                rate_levels_mtpa=WELL_RATE_LEVELS_MTPA,
+                physical_max_rate_tph=effective_max_tph,
+                evaluation_time_h=state.time_h + self.network.time_step_hours,
+                interval_start_h=state.time_h,
+            )
+        )
+
     # -- action translation ----------------------------------------------
     def _normalize_action(self, action: CCSAction) -> dict[str, list]:
         if not isinstance(action, dict):
@@ -315,20 +364,34 @@ class CCSEnv:
             raise ValueError("Expected action dict with 'vessels' and 'wells' entries.")
 
         vessel_actions = list(action["vessels"])
-        well_rates = list(action["wells"])
+        well_rate_indices = list(action["wells"])
         if len(vessel_actions) != len(self.vessel_ids):
-            raise ValueError(f"Expected {len(self.vessel_ids)} vessel actions, got {len(vessel_actions)}.")
-        if len(well_rates) != len(self.well_ids):
-            raise ValueError(f"Expected {len(self.well_ids)} well rates, got {len(well_rates)}.")
+            raise ValueError(
+                f"Expected {len(self.vessel_ids)} vessel actions, got {len(vessel_actions)}."
+            )
+        if len(well_rate_indices) != len(self.well_ids):
+            raise ValueError(
+                f"Expected {len(self.well_ids)} well rate actions, got {len(well_rate_indices)}."
+            )
 
         return {
             "vessels": [int(choice) for choice in vessel_actions],
-            "wells": [float(rate) for rate in well_rates],
+            "wells": [self._normalize_well_rate_index(index) for index in well_rate_indices],
         }
+
+    def _normalize_well_rate_index(self, index) -> int:
+        if not isinstance(index, Integral) or isinstance(index, bool):
+            raise ValueError("Well action entries must be integer rate-level indices.")
+        index = int(index)
+        if index < 0 or index >= len(WELL_RATE_LEVELS_MTPA):
+            raise ValueError(
+                f"Well action index {index} is outside 0..{len(WELL_RATE_LEVELS_MTPA) - 1}."
+            )
+        return index
 
     def _build_proposals(self, action: dict[str, list]) -> list[ActionProposal]:
         vessel_actions = action["vessels"]
-        well_rates = action["wells"]
+        well_rate_indices = action["wells"]
         proposals: list[ActionProposal] = []
 
         # Always capture at full rate (capture is not an RL control here).
@@ -338,7 +401,7 @@ class CCSEnv:
         departing = self._vessel_dispatch_proposals(vessel_actions, proposals)
         self._auto_loading_proposals(proposals, departing)
         self._auto_unloading_proposals(proposals, departing)
-        self._injection_proposals(well_rates, proposals)
+        self._injection_proposals(well_rate_indices, proposals)
         return proposals
 
     def _vessel_dispatch_proposals(self, vessel_actions, proposals) -> set[str]:
@@ -399,15 +462,11 @@ class CCSEnv:
                 candidates.append(vessel_id)
         return sorted(candidates)[0] if candidates else None
 
-    def _injection_proposals(self, well_rates, proposals) -> None:
+    def _injection_proposals(self, well_rate_indices, proposals) -> None:
         desired: dict[str, float] = {}
-        for well_id, requested_rate_mtpa in zip(self.well_ids, well_rates):
-            lower, upper = self._well_rate_bound(well_id)
-            if upper <= 0.0:
-                desired[well_id] = 0.0
-                continue
-            rate_mtpa = min(max(float(requested_rate_mtpa), lower), upper)
-            desired[well_id] = rate_mtpa * _MTPA_TO_TPH
+        for well_id, rate_index in zip(self.well_ids, well_rate_indices):
+            rate_mtpa = WELL_RATE_LEVELS_MTPA[int(rate_index)]
+            desired[well_id] = mtpa_to_tph(rate_mtpa)
 
         for pipeline_id in self.network._entities_of_type(Pipeline):
             wells = self._pipeline_wells(pipeline_id)

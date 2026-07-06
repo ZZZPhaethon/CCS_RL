@@ -1,22 +1,29 @@
 import unittest
 
 from sim.environment import (
-    MAX_WELL_RATE_MTPA,
+    MAX_WELL_RATE_INDEX,
+    MIN_WELL_RATE_INDEX,
     MIN_WELL_RATE_MTPA,
     VESSEL_GO_TERMINAL,
     VESSEL_WAIT,
     CCSEnv,
     CCSEnvConfig,
+    WELL_RATE_LEVELS_MTPA,
 )
+from sim.economics import CostModel, EconomicParameters
+from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, Terminal, Vessel
+from sim.line_source import LineSourceParameters, bottomhole_pressure_bar
+from sim.network import PhysicalNetwork
 from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
 from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
 
 
-def _env(**config) -> CCSEnv:
+def _env(cost_model=None, **config) -> CCSEnv:
     return CCSEnv(
         make_toy_two_source_network(),
         TOY_TWO_SOURCE_LOCATIONS,
         scenario_generator=ScenarioGenerator(config=ScenarioConfig(episode_hours=48)),
+        cost_model=cost_model,
         config=CCSEnvConfig(episode_hours=48, **config),
     )
 
@@ -24,7 +31,7 @@ def _env(**config) -> CCSEnv:
 def _action(vessels=None, wells=None):
     return {
         "vessels": [VESSEL_WAIT, VESSEL_WAIT] if vessels is None else vessels,
-        "wells": [MIN_WELL_RATE_MTPA, MIN_WELL_RATE_MTPA] if wells is None else wells,
+        "wells": [MIN_WELL_RATE_INDEX, MIN_WELL_RATE_INDEX] if wells is None else wells,
     }
 
 
@@ -32,7 +39,8 @@ class EnvSpaceTests(unittest.TestCase):
     def test_action_and_observation_dimensions(self):
         env = _env()
         self.assertEqual(env.vessel_action_dims, [4, 4])  # 2 vessels, 2 emitters
-        self.assertEqual(env.well_rate_bounds(), [(MIN_WELL_RATE_MTPA, MAX_WELL_RATE_MTPA)] * 2)
+        self.assertEqual(env.well_rate_action_dims, [len(WELL_RATE_LEVELS_MTPA)] * 2)
+        self.assertEqual(env.well_rate_levels_mtpa(), list(WELL_RATE_LEVELS_MTPA))
         obs = env.reset(seed=0)
         self.assertEqual(len(obs), env.observation_size)
         self.assertEqual(len(obs), len(env.feature_names))
@@ -76,13 +84,78 @@ class EnvDynamicsTests(unittest.TestCase):
         for i in range(len(env.vessel_ids)):
             self.assertEqual(env.vessel_action_mask()[i], [True, False, False, False])
 
-    def test_well_rate_bounds_are_stable_min_max_with_zero_only_for_maintenance(self):
+    def test_well_rate_action_mask_respects_well_capacity_and_maintenance(self):
         env = _env()
         env.reset(seed=0)
-        self.assertEqual(env.well_rate_bounds()[0], (MIN_WELL_RATE_MTPA, MAX_WELL_RATE_MTPA))
+        self.assertEqual(env.well_rate_action_mask()[0], [True, True, True, True, False, False])
 
         env.simulator.state.well_available[env.well_ids[0]] = False
-        self.assertEqual(env.well_rate_bounds()[0], (0.0, 0.0))
+        self.assertEqual(env.well_rate_action_mask()[0], [True, False, False, False, False, False])
+
+    def test_well_rate_action_mask_respects_bottomhole_pressure_limit(self):
+        parameters = LineSourceParameters(
+            initial_pressure_bar=300.0,
+            permeability_md=10.0,
+            thickness_m=100.0,
+            porosity_fraction=0.22,
+            total_compressibility_1_pa=7e-10,
+            viscosity_pa_s=6e-5,
+            co2_density_kg_m3=630.0,
+            well_radius_m=0.10795,
+            skin=0.0,
+        )
+        pressure_limit_bar = bottomhole_pressure_bar(
+            parameters,
+            1.0,
+            elapsed_days=1.0 / 24.0,
+        )
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(Emitter("source", nominal_capture_tph=0.0, buffer_capacity_t=1_000.0))
+        network.add_entity(
+            Vessel(
+                "ship",
+                capacity_t=500.0,
+                loading_rate_tph=500.0,
+                unloading_rate_tph=500.0,
+                speed_knots=1.0,
+            )
+        )
+        network.add_entity(Terminal("terminal", storage_capacity_t=1_000.0, berth_count=1))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
+        network.add_entity(InjectionWell("well", max_injection_tph=500.0))
+        network.add_entity(
+            Reservoir(
+                "reservoir",
+                storage_capacity_t=1_000_000.0,
+                initial_pressure_bar=300.0,
+                pressure_at_capacity_bar=350.0,
+                max_pressure_bar=350.0,
+                well_bottomhole_pressure_limit_bar=pressure_limit_bar,
+                line_source_parameters=parameters,
+            )
+        )
+        network.connect("source", "ship")
+        network.connect("ship", "terminal")
+        network.connect("terminal", "pipeline")
+        network.connect("pipeline", "well")
+        network.connect("well", "reservoir")
+        env = CCSEnv(
+            network,
+            {"source": (0.0, 0.0), "terminal": (0.0, 1.0)},
+            scenario_generator=ScenarioGenerator(config=ScenarioConfig(episode_hours=2)),
+            config=CCSEnvConfig(episode_hours=2),
+            routes={
+                "ship": {
+                    "origin": "source",
+                    "destination": "terminal",
+                    "distance_km": 1.0,
+                    "speed_knots": 1.0,
+                }
+            },
+        )
+        env.reset(seed=0)
+
+        self.assertEqual(env.well_rate_action_mask()[0], [True, True, True, False, False, False])
 
     def test_lowest_available_well_rate_injects_half_mtpa_per_year(self):
         env = _env()
@@ -92,13 +165,13 @@ class EnvDynamicsTests(unittest.TestCase):
         env.simulator.state.entity_inventory_t[terminal_id] = 1_000.0
         before = env.simulator.state.entity_inventory_t.get(reservoir_id, 0.0)
 
-        env.step(_action(wells=[MIN_WELL_RATE_MTPA, MIN_WELL_RATE_MTPA]))
+        env.step(_action(wells=[MIN_WELL_RATE_INDEX, MIN_WELL_RATE_INDEX]))
 
         expected_per_well_tph = 0.5 * 1_000_000.0 / (365.25 * 24.0)
         after = env.simulator.state.entity_inventory_t.get(reservoir_id, 0.0)
         self.assertAlmostEqual(after - before, 2 * expected_per_well_tph)
 
-    def test_continuous_well_rates_are_clamped_to_bounds(self):
+    def test_well_rate_indices_map_to_discrete_rate_levels(self):
         env = _env()
         env.reset(seed=0)
         terminal_id = env.terminal_ids[0]
@@ -106,9 +179,9 @@ class EnvDynamicsTests(unittest.TestCase):
         env.simulator.state.entity_inventory_t[terminal_id] = 1_000.0
         before = env.simulator.state.entity_inventory_t.get(reservoir_id, 0.0)
 
-        env.step(_action(wells=[0.1, 3.0]))
+        env.step(_action(wells=[0, 3]))
 
-        expected_tph = (MIN_WELL_RATE_MTPA + MAX_WELL_RATE_MTPA) * 1_000_000.0 / (365.25 * 24.0)
+        expected_tph = 1.5 * 1_000_000.0 / (365.25 * 24.0)
         after = env.simulator.state.entity_inventory_t.get(reservoir_id, 0.0)
         self.assertAlmostEqual(after - before, expected_tph)
 
@@ -149,8 +222,8 @@ class EnvDynamicsTests(unittest.TestCase):
         self.assertEqual(steps, env.n_steps)
         self.assertIn("storage_rate", info)
 
-    def test_reward_uses_shortfall_delta_as_the_storage_obligation_signal(self):
-        env = _env()
+    def test_reward_excludes_shortfall_delta_penalty(self):
+        env = _env(cost_model=CostModel(EconomicParameters(storage_shortfall_eur_per_t=100.0)))
         env.reset(seed=0)
 
         _obs, reward, _terminated, _truncated, info = env.step(_action())
@@ -164,7 +237,7 @@ class EnvDynamicsTests(unittest.TestCase):
         self.assertAlmostEqual(env.ledger.storage_shortfall_penalty, info["shortfall_penalty"])
         self.assertAlmostEqual(
             reward,
-            (info["economics"]["net"] - info["shortfall_delta_penalty"]) * env.config.reward_scale,
+            info["economics"]["net"] * env.config.reward_scale,
         )
 
     def test_horizon_end_is_truncation_not_termination(self):
@@ -191,7 +264,7 @@ class EnvDynamicsTests(unittest.TestCase):
             env.reset(seed=123)
             rewards = []
             for _ in range(env.n_steps):
-                _, r, _terminated, _truncated, _ = env.step(_action(wells=[1.5, 1.5]))
+                _, r, _terminated, _truncated, _ = env.step(_action(wells=[3, 3]))
                 rewards.append(r)
             return rewards
 
@@ -209,7 +282,10 @@ class EnvDynamicsTests(unittest.TestCase):
                     vessel_actions.append(VESSEL_GO_TERMINAL)
                 else:
                     vessel_actions.append(VESSEL_WAIT)
-            action = {"vessels": vessel_actions, "wells": [MAX_WELL_RATE_MTPA] * len(env.well_ids)}
+            action = {
+                "vessels": vessel_actions,
+                "wells": [MAX_WELL_RATE_INDEX] * len(env.well_ids),
+            }
             _, _, terminated, truncated, info = env.step(action)
             done = terminated or truncated
         self.assertGreater(env.cumulative_stored_t, 0.0)
@@ -226,7 +302,13 @@ class EnvGuardTests(unittest.TestCase):
         env = _env()
         env.reset(seed=0)
         with self.assertRaises(ValueError):
-            env.step({"vessels": [VESSEL_WAIT], "wells": [MIN_WELL_RATE_MTPA]})
+            env.step({"vessels": [VESSEL_WAIT], "wells": [MIN_WELL_RATE_INDEX]})
+
+    def test_invalid_well_action_index_raises(self):
+        env = _env()
+        env.reset(seed=0)
+        with self.assertRaises(ValueError):
+            env.step(_action(wells=[len(WELL_RATE_LEVELS_MTPA), MIN_WELL_RATE_INDEX]))
 
 
 if __name__ == "__main__":

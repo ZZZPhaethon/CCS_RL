@@ -10,6 +10,7 @@ except ImportError:
 from sim import control
 from sim.control import milp as milp_module
 from sim.control.milp import extract_params
+from sim.economics import EconomicParameters
 from sim.environment import CCSEnv, CCSEnvConfig
 from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, SubseaManifold, Terminal, Vessel
 from sim.network import PhysicalNetwork
@@ -173,7 +174,11 @@ class MilpTests(unittest.TestCase):
             self.assertGreater(v.round_trip_h, v.startup_h)
 
     def test_fixed_horizon_cost_objective_stores_co2(self):
-        result = milp_module.solve_max_storage_fixed_horizon(_env(), horizon_h=168)
+        result = milp_module.solve_max_storage_fixed_horizon(
+            _env(),
+            horizon_h=168,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
+        )
         self.assertEqual(result.status, "Optimal")
         self.assertEqual(result.horizon_h, 168)
         self.assertGreater(result.stored_t, 0.0)
@@ -186,7 +191,11 @@ class MilpTests(unittest.TestCase):
         self.assertAlmostEqual(result.total_cost_per_stored_t, result.total_cost / result.stored_t)
 
     def test_fixed_horizon_can_pool_capture_under_flexible_emitter_actions(self):
-        result = milp_module.solve_max_storage_fixed_horizon(_unbalanced_source_env(), horizon_h=120)
+        result = milp_module.solve_max_storage_fixed_horizon(
+            _unbalanced_source_env(),
+            horizon_h=120,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
+        )
         self.assertEqual(result.status, "Optimal")
         self.assertGreater(len(result.schedule["short_ship"]), 0)
         self.assertGreater(result.stored_t, 1_000.0)
@@ -216,7 +225,12 @@ class MilpTests(unittest.TestCase):
         scenario = _scenario_for_env(env, horizon_h=8, capture=0.0)
         scenario.initial_inventory_t = {"source": 1_000.0}
 
-        result = milp_module.solve_max_storage_fixed_horizon(env, horizon_h=8, scenario=scenario)
+        result = milp_module.solve_max_storage_fixed_horizon(
+            env,
+            horizon_h=8,
+            scenario=scenario,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
+        )
 
         self.assertEqual(result.status, "Optimal")
         self.assertAlmostEqual(result.stored_t, 900.0)
@@ -240,6 +254,7 @@ class MilpTests(unittest.TestCase):
             _two_berth_parallel_env(),
             horizon_h=3,
             initial_buffer_t=2_000.0,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
         )
 
         self.assertEqual(result.status, "Optimal")
