@@ -26,6 +26,7 @@ def make_native_env(
     warm_start: bool = True,
     storage_shortfall_penalty: float = 0.0,
     injection_reward_eur_per_t: float = 0.0,
+    include_weather_obs: bool = False,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
@@ -34,6 +35,8 @@ def make_native_env(
     ``injection_reward_eur_per_t`` adds a dense per-step reward for injected
     CO2 (0.0 = off); a positive value fixes the short-horizon objective, which
     otherwise rewards idling until the delayed venting penalty kicks in.
+    ``include_weather_obs`` exposes per-leg wave weather + seasonality in the
+    observation so the policy can route around rough legs.
     """
     cost_model = CostModel(EconomicParameters(storage_shortfall_eur_per_t=storage_shortfall_penalty))
     return build_phase1_env(
@@ -42,6 +45,7 @@ def make_native_env(
             episode_hours=episode_hours,
             storage_target_rate=storage_target_rate,
             injection_reward_eur_per_t=injection_reward_eur_per_t,
+            include_weather_obs=include_weather_obs,
         ),
         scenario_config=ScenarioConfig(episode_hours=episode_hours, warm_start=warm_start),
     )

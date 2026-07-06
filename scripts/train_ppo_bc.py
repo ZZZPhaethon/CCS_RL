@@ -24,7 +24,7 @@ from sim.control.imitation import bc_pretrain
 from sim.metrics import run_episode
 
 
-def eval_policies(model, episode_hours, seeds):
+def eval_policies(model, episode_hours, seeds, include_weather_obs=False):
     entries = [
         ("idle", idle_policy),
         ("greedy_shuttle", greedy_shuttle_policy),
@@ -35,7 +35,8 @@ def eval_policies(model, episode_hours, seeds):
     for name, policy in entries:
         srs, losses = [], []
         for s in seeds:
-            env = make_native_env(episode_hours=episode_hours, warm_start=True)
+            env = make_native_env(episode_hours=episode_hours, warm_start=True,
+                                  include_weather_obs=include_weather_obs)
             m = run_episode(env, policy, seed=s)
             srs.append(m.storage_rate); losses.append(m.loss_rate)
         line = f"{name:20s} storage={np.mean(srs):6.1%}  loss={np.mean(losses):6.1%}"
@@ -52,6 +53,8 @@ def main() -> None:
     p.add_argument("--bc-epochs", type=int, default=10)
     p.add_argument("--nonwait-weight", type=float, default=10.0,
                    help="loss up-weight for dispatch (non-WAIT) steps in BC")
+    p.add_argument("--weather-obs", action="store_true",
+                   help="expose per-leg wave weather + seasonality in the observation")
     p.add_argument("--timesteps", type=int, default=100_000)
     p.add_argument("--n-steps", type=int, default=512)
     p.add_argument("--seed", type=int, default=0)
@@ -63,12 +66,14 @@ def main() -> None:
     from sb3_contrib import MaskablePPO
 
     out = Path("output/rl_ppo"); out.mkdir(parents=True, exist_ok=True)
-    tag = f"bc_phase1_{args.episode_hours}h_inj{args.injection_reward_eur_per_t:.0f}_ts{args.timesteps}"
+    weather_tag = "_weather" if args.weather_obs else ""
+    tag = f"bc_phase1_{args.episode_hours}h_inj{args.injection_reward_eur_per_t:.0f}{weather_tag}_ts{args.timesteps}"
     report = []
 
     native_env = make_native_env(
         episode_hours=args.episode_hours, warm_start=True,
         injection_reward_eur_per_t=args.injection_reward_eur_per_t,
+        include_weather_obs=args.weather_obs,
     )
     gym_env = CCSGymEnv(native_env)
     model = MaskablePPO(
@@ -85,14 +90,16 @@ def main() -> None:
 
     print(f"[{dt.datetime.now():%H:%M:%S}] === eval AFTER BC (before PPO) ===", flush=True)
     report.append("## After BC (before PPO)")
-    report += eval_policies(model, args.episode_hours, args.eval_seeds)
+    report += eval_policies(model, args.episode_hours, args.eval_seeds,
+                            include_weather_obs=args.weather_obs)
 
     if args.timesteps > 0:
         print(f"[{dt.datetime.now():%H:%M:%S}] === PPO fine-tune ({args.timesteps} steps) ===", flush=True)
         model.learn(total_timesteps=args.timesteps, progress_bar=args.progress_bar)
         print(f"[{dt.datetime.now():%H:%M:%S}] === eval AFTER PPO fine-tune ===", flush=True)
         report.append("\n## After PPO fine-tune")
-        report += eval_policies(model, args.episode_hours, args.eval_seeds)
+        report += eval_policies(model, args.episode_hours, args.eval_seeds,
+                            include_weather_obs=args.weather_obs)
 
     model_path = out / f"ppo_{tag}.zip"
     model.save(str(model_path))

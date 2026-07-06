@@ -79,6 +79,11 @@ class CCSEnvConfig:
     # storing CO2 instead of waiting for the delayed venting penalty once buffers
     # overflow, which is what makes short-horizon training reward idling.
     injection_reward_eur_per_t: float = 0.0
+    # Expose per-leg wave-height weather (current + 24 h/168 h forecast) and an
+    # annual clock in the observation. Off by default so existing (no-weather)
+    # models keep their observation size; turn on to let the policy route around
+    # rough legs and exploit seasonality.
+    include_weather_obs: bool = False
 
 
 class CCSEnv:
@@ -189,6 +194,16 @@ class CCSEnv:
             names += [f"{wid}.inject_norm", f"{wid}.injectivity", f"{wid}.available"]
         for rid in self.reservoir_ids:
             names += [f"{rid}.pressure_margin"]
+        if self.config.include_weather_obs:
+            names += ["hour_of_year"]
+            for vid in self.vessel_ids:
+                names += [
+                    f"{vid}.leg_speed_now",
+                    f"{vid}.leg_speed_24h_mean",
+                    f"{vid}.leg_speed_24h_min",
+                    f"{vid}.leg_speed_168h_mean",
+                    f"{vid}.leg_speed_168h_min",
+                ]
         return names
 
     # -- episode lifecycle ------------------------------------------------
@@ -562,7 +577,42 @@ class CCSEnv:
             inv = state.entity_inventory_t.get(rid, 0.0)
             span = reservoir.max_pressure_bar - reservoir.initial_pressure_bar
             obs += [_safe_div(reservoir.pressure_margin_bar(inv), span) if span > 0 else 1.0]
+        if self.config.include_weather_obs:
+            obs.append((state.time_h % 8760.0) / 8760.0)  # hour_of_year (seasonality)
+            for vid in self.vessel_ids:
+                route = self._routes[vid]
+                leg_id = f"{route['origin']}->{route['destination']}"
+                now = self._leg_speed_at(leg_id, 0)
+                mean24, min24 = self._leg_speed_forecast(leg_id, 24)
+                mean168, min168 = self._leg_speed_forecast(leg_id, 168)
+                obs += [now, mean24, min24, mean168, min168]
         return obs
+
+    def _leg_speed_series(self, leg_id: str) -> list[float] | None:
+        """Full per-leg wave speed-factor series for the episode, if present."""
+        if self.scenario is None:
+            return None
+        series = self.scenario.leg_speed_factor.get(leg_id)
+        return series if series else None
+
+    def _leg_speed_at(self, leg_id: str, offset_h: int) -> float:
+        series = self._leg_speed_series(leg_id)
+        if not series:
+            return 1.0
+        idx = int(round(self.simulator.state.time_h / self.network.time_step_hours)) + offset_h
+        idx = max(0, min(idx, len(series) - 1))
+        return float(series[idx])
+
+    def _leg_speed_forecast(self, leg_id: str, window_h: int) -> tuple[float, float]:
+        """(mean, min) leg speed factor over the next ``window_h`` hours."""
+        series = self._leg_speed_series(leg_id)
+        if not series:
+            return 1.0, 1.0
+        start = int(round(self.simulator.state.time_h / self.network.time_step_hours))
+        window = series[start : start + window_h]
+        if not window:
+            window = [series[min(start, len(series) - 1)]]
+        return sum(window) / len(window), min(window)
 
     # -- helpers ----------------------------------------------------------
     def _apply_disturbances(self) -> None:
