@@ -1,0 +1,83 @@
+import sys
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+try:
+    import gymnasium  # noqa: F401
+
+    HAVE_GYM = True
+except ImportError:
+    HAVE_GYM = False
+
+from sim.environment import CCSEnv, CCSEnvConfig
+from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
+from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
+
+
+def _native_env() -> CCSEnv:
+    return CCSEnv(
+        make_toy_two_source_network(),
+        TOY_TWO_SOURCE_LOCATIONS,
+        scenario_generator=ScenarioGenerator(config=ScenarioConfig(episode_hours=2)),
+        config=CCSEnvConfig(episode_hours=2),
+    )
+
+
+@unittest.skipUnless(HAVE_GYM, "gymnasium not installed")
+class TrainPPOTests(unittest.TestCase):
+    def test_train_ppo_builds_maskable_ppo_with_flat_multidiscrete_env(self):
+        from sim import train
+
+        captured = {}
+
+        class FakeMaskablePPO:
+            def __init__(self, policy, env, **kwargs):
+                captured["policy"] = policy
+                captured["env"] = env
+                captured["kwargs"] = kwargs
+
+            def learn(self, total_timesteps):
+                captured["total_timesteps"] = total_timesteps
+                return self
+
+        native = _native_env()
+        fake_sb3_contrib = SimpleNamespace(MaskablePPO=FakeMaskablePPO)
+
+        with (
+            patch.dict(sys.modules, {"sb3_contrib": fake_sb3_contrib}),
+            patch.object(train, "make_native_env", return_value=native) as make_native_env,
+        ):
+            model = train.train_ppo(
+                total_timesteps=7,
+                seed=11,
+                gamma=0.95,
+                episode_hours=2,
+                warm_start=False,
+                storage_shortfall_penalty=0.0,
+                verbose=0,
+                n_steps=4,
+                batch_size=2,
+            )
+
+        self.assertIsInstance(model, FakeMaskablePPO)
+        make_native_env.assert_called_once_with(
+            episode_hours=2,
+            warm_start=False,
+            storage_shortfall_penalty=0.0,
+        )
+        self.assertEqual(captured["policy"], "MlpPolicy")
+        self.assertEqual(
+            list(captured["env"].action_space.nvec),
+            native.vessel_action_dims + native.well_rate_action_dims,
+        )
+        self.assertEqual(captured["kwargs"]["seed"], 11)
+        self.assertEqual(captured["kwargs"]["gamma"], 0.95)
+        self.assertEqual(captured["kwargs"]["verbose"], 0)
+        self.assertEqual(captured["kwargs"]["n_steps"], 4)
+        self.assertEqual(captured["kwargs"]["batch_size"], 2)
+        self.assertEqual(captured["total_timesteps"], 7)
+
+
+if __name__ == "__main__":
+    unittest.main()

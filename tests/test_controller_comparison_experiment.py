@@ -59,7 +59,7 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
 
     def test_rule_based_controller_factory_translates_to_hybrid_env_action(self):
         from experiments import compare_controllers_same_scenarios as compare
-        from sim.environment import MAX_WELL_RATE_MTPA, MIN_WELL_RATE_MTPA, VESSEL_WAIT
+        from sim.environment import VESSEL_WAIT, WELL_RATE_LEVELS_MTPA
         from sim.scenario_generation import ScenarioConfig
 
         factories = compare.controller_factories(
@@ -79,7 +79,7 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         action = factories["rule_based"](env)(env)
 
         self.assertEqual(action["vessels"], [VESSEL_WAIT] * len(env.vessel_ids))
-        self.assertEqual(action["wells"], [MAX_WELL_RATE_MTPA])
+        self.assertEqual(action["wells"], [list(WELL_RATE_LEVELS_MTPA).index(1.5)])
 
     def test_metric_rows_and_summary_include_solve_time(self):
         from experiments import compare_controllers_same_scenarios as compare
@@ -252,6 +252,7 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         self.assertEqual(args.rolling_replan_every, 24)
         self.assertEqual(args.rolling_time_limit_s, 30.0)
         self.assertEqual(args.scenario, "toy")
+        self.assertEqual(args.storage_shortfall_penalty_eur_per_t, 0.0)
 
     def test_controller_comparison_cli_accepts_fixed_scenario_choice(self):
         from experiments import compare_controllers_same_scenarios as compare

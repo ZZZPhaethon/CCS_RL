@@ -26,10 +26,10 @@ from sim.control.rolling_milp import RollingMilpController
 from sim.environment import (
     CCSEnv,
     CCSEnvConfig,
-    MAX_WELL_RATE_MTPA,
-    MIN_WELL_RATE_MTPA,
+    OFF_WELL_RATE_INDEX,
     VESSEL_GO_TERMINAL,
     VESSEL_WAIT,
+    WELL_RATE_LEVELS_MTPA,
 )
 from sim.metrics import EpisodeMetrics, run_episode
 from sim.network_scenarios import (
@@ -42,6 +42,7 @@ from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
 
 ProgressLogger = Callable[[str], None]
 PolicyFactory = Callable[[CCSEnv], Callable[[CCSEnv], dict[str, list]]]
+RULE_BASED_WELL_RATE_INDEX = list(WELL_RATE_LEVELS_MTPA).index(1.5)
 
 def make_env(
     *,
@@ -78,7 +79,7 @@ def rule_based_env_policy(env: CCSEnv) -> Callable[[CCSEnv], dict[str, list]]:
     def policy(current_env: CCSEnv) -> dict[str, list]:
         frame = generator.next_action_frame(current_env.simulator.state)
         vessel_actions = [VESSEL_WAIT] * len(current_env.vessel_ids)
-        well_rates = [MIN_WELL_RATE_MTPA] * len(current_env.well_ids)
+        well_actions = [RULE_BASED_WELL_RATE_INDEX] * len(current_env.well_ids)
         mask = current_env.vessel_action_mask()
         vessel_index = {vessel_id: i for i, vessel_id in enumerate(current_env.vessel_ids)}
         well_index = {well_id: i for i, well_id in enumerate(current_env.well_ids)}
@@ -96,11 +97,15 @@ def rule_based_env_policy(env: CCSEnv) -> Callable[[CCSEnv], dict[str, list]]:
                     vessel_actions[i] = VESSEL_GO_TERMINAL
             elif proposal.verb == "set_well_split":
                 for well_id, split in proposal.params["well_splits"].items():
-                    if float(split) <= 0.0 or well_id not in well_index:
+                    if well_id not in well_index:
                         continue
-                    well_rates[well_index[well_id]] = MAX_WELL_RATE_MTPA
+                    well_actions[well_index[well_id]] = (
+                        RULE_BASED_WELL_RATE_INDEX
+                        if float(split) > 0.0
+                        else OFF_WELL_RATE_INDEX
+                    )
 
-        return {"vessels": vessel_actions, "wells": well_rates}
+        return {"vessels": vessel_actions, "wells": well_actions}
 
     return policy
 
@@ -505,7 +510,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--storage-shortfall-penalty-eur-per-t",
         type=float,
-        default=100.0,
+        default=0.0,
         help="Set to 0 for a vent-penalty-only objective; passed to env, rolling MILP, and static MILP.",
     )
     return parser.parse_args()

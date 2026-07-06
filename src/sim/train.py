@@ -1,9 +1,8 @@
 """Train a centralized RL policy on the CCS network and score it vs baselines.
 
-The environment now has a hybrid action space: discrete vessel destinations plus
-continuous well injection rates. The old flat ``MaskablePPO`` trainer cannot
-represent that distribution, so this module keeps evaluation helpers and fails
-fast if the legacy trainer is called.
+The Gym adapter presents vessel destinations plus discrete well injection-rate
+indices as one flat ``MultiDiscrete`` action, so ``sb3_contrib.MaskablePPO`` can
+consume the per-dimension action mask.
 
 Run as a script:
     PYTHONPATH=src python -m sim.train --timesteps 200000
@@ -16,7 +15,7 @@ import argparse
 from .economics import CostModel, EconomicParameters
 from .control.baselines import greedy_shuttle_policy, idle_policy
 from .environment import CCSEnvConfig, build_phase1_env
-from .environment.gym_adapter import make_ppo_policy
+from .environment.gym_adapter import CCSGymEnv, make_ppo_policy
 from .metrics import evaluate
 from .scenario_generation import ScenarioConfig
 
@@ -25,12 +24,12 @@ def make_native_env(
     episode_hours: int = 168,
     storage_target_rate: float = 0.9,
     warm_start: bool = True,
-    storage_shortfall_penalty: float = 100.0,
+    storage_shortfall_penalty: float = 0.0,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
-    ``storage_shortfall_penalty`` is the common storage-obligation weight used by
-    RL rewards and both MILP objectives.
+    ``storage_shortfall_penalty`` is passed through for experiments that
+    explicitly price storage shortfall; the default leaves it as a KPI only.
     """
     cost_model = CostModel(EconomicParameters(storage_shortfall_eur_per_t=storage_shortfall_penalty))
     return build_phase1_env(
@@ -46,14 +45,35 @@ def train_ppo(
     gamma: float = 0.999,
     episode_hours: int = 168,
     warm_start: bool = True,
-    storage_shortfall_penalty: float = 100.0,
+    storage_shortfall_penalty: float = 0.0,
     verbose: int = 1,
+    n_steps: int = 128,
+    batch_size: int = 64,
+    learning_rate: float = 3e-4,
 ):
-    raise NotImplementedError(
-        "The CCS env now uses hybrid actions (discrete vessels + continuous wells). "
-        "sb3_contrib.MaskablePPO only handled the removed flat discrete action space; "
-        "use a hybrid PPO policy/distribution before training PPO here."
+    try:
+        from sb3_contrib import MaskablePPO
+    except ImportError as exc:  # pragma: no cover - dependency guard
+        raise ImportError("train_ppo requires sb3-contrib. Install with `pip install sb3-contrib`.") from exc
+
+    native_env = make_native_env(
+        episode_hours=episode_hours,
+        warm_start=warm_start,
+        storage_shortfall_penalty=storage_shortfall_penalty,
     )
+    gym_env = CCSGymEnv(native_env)
+    model = MaskablePPO(
+        "MlpPolicy",
+        gym_env,
+        seed=seed,
+        gamma=gamma,
+        verbose=verbose,
+        n_steps=n_steps,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+    )
+    model.learn(total_timesteps=total_timesteps)
+    return model
 
 
 def compare(model, seeds: list[int], episode_hours: int = 168, warm_start: bool = False):
