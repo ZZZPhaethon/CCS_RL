@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..entities.state import PhysicalState
 from ..entities.storage import InjectionWell, Reservoir
 from ..line_source import (
@@ -19,6 +21,19 @@ def tph_to_mtpa(rate_tph: float) -> float:
     return rate_tph * HOURS_PER_YEAR / 1_000_000.0
 
 
+def line_source_parameters_for_state(
+    reservoir: Reservoir,
+    state: PhysicalState,
+    *,
+    inventory_delta_t: float = 0.0,
+):
+    parameters = reservoir.line_source_parameters
+    if parameters is None:
+        return None
+    inventory_t = state.entity_inventory_t.get(reservoir.entity_id, 0.0) + inventory_delta_t
+    return replace(parameters, initial_pressure_bar=reservoir.pressure_bar(inventory_t))
+
+
 def projected_bottomhole_pressure_bar(
     network,
     state: PhysicalState,
@@ -33,18 +48,22 @@ def projected_bottomhole_pressure_bar(
         return None
     reservoir = network.entities[reservoir_id]
     assert isinstance(reservoir, Reservoir)
-    parameters = reservoir.line_source_parameters
-    if parameters is None:
-        return None
-
     evaluation_h = state.time_h if evaluation_time_h is None else evaluation_time_h
-    if evaluation_h <= 0.0:
-        return parameters.initial_pressure_bar
     start_h = (
         evaluation_h - network.time_step_hours
         if interval_start_h is None
         else interval_start_h
     )
+    interval_hours = max(0.0, evaluation_h - start_h)
+    parameters = line_source_parameters_for_state(
+        reservoir,
+        state,
+        inventory_delta_t=max(0.0, candidate_rate_tph) * interval_hours,
+    )
+    if parameters is None:
+        return None
+    if evaluation_h <= 0.0:
+        return parameters.initial_pressure_bar
     elapsed_days = evaluation_h / 24.0
 
     upstream_wells = network._upstream_of_type(reservoir.entity_id, InjectionWell)

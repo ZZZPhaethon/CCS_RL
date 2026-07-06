@@ -11,9 +11,10 @@ from sim.environment import (
     WELL_RATE_LEVELS_MTPA,
 )
 from sim.economics import CostModel, EconomicParameters
-from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, Terminal, Vessel
+from sim.entities import Emitter, InjectionWell, PhysicalState, Pipeline, Reservoir, Terminal, Vessel
 from sim.line_source import LineSourceParameters, bottomhole_pressure_bar
 from sim.network import PhysicalNetwork
+from sim.operations.pressure_limits import mtpa_to_tph, projected_bottomhole_pressure_bar
 from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
 from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
 
@@ -117,7 +118,7 @@ class EnvDynamicsTests(unittest.TestCase):
             parameters,
             1.0,
             elapsed_days=1.0 / 24.0,
-        )
+        ) + mtpa_to_tph(1.0) / 1_000_000.0 * 50.0
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Emitter("source", nominal_capture_tph=0.0, buffer_capacity_t=1_000.0))
         network.add_entity(
@@ -165,6 +166,44 @@ class EnvDynamicsTests(unittest.TestCase):
         env.reset(seed=0)
 
         self.assertEqual(env.well_rate_action_mask()[0], [True, True, True, False, False, False])
+
+    def test_bottomhole_pressure_baseline_uses_current_reservoir_pressure(self):
+        parameters = LineSourceParameters(
+            initial_pressure_bar=300.0,
+            permeability_md=10.0,
+            thickness_m=100.0,
+            porosity_fraction=0.22,
+            total_compressibility_1_pa=7e-10,
+            viscosity_pa_s=6e-5,
+            co2_density_kg_m3=630.0,
+            well_radius_m=0.10795,
+            skin=0.0,
+        )
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(InjectionWell("well", max_injection_tph=500.0))
+        network.add_entity(
+            Reservoir(
+                "reservoir",
+                storage_capacity_t=1_000_000.0,
+                initial_pressure_bar=300.0,
+                pressure_at_capacity_bar=350.0,
+                max_pressure_bar=350.0,
+                line_source_parameters=parameters,
+            )
+        )
+        network.connect("well", "reservoir")
+        state = PhysicalState(entity_inventory_t={"reservoir": 500_000.0})
+
+        pressure = projected_bottomhole_pressure_bar(
+            network,
+            state,
+            "well",
+            candidate_rate_tph=0.0,
+            evaluation_time_h=0.0,
+        )
+
+        reservoir = network.entities["reservoir"]
+        self.assertAlmostEqual(pressure, reservoir.pressure_bar(500_000.0))
 
     def test_lowest_available_well_rate_injects_half_mtpa_per_year(self):
         env = _env()

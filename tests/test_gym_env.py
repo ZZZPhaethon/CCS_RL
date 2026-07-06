@@ -65,8 +65,12 @@ class GymWrapperTests(unittest.TestCase):
         self.assertEqual(list(flat), [True, False, True, True, True])
 
     def test_make_ppo_policy_splits_flat_action_back_to_native_action(self):
+        captured = {}
+
         class FakeModel:
-            def predict(self, obs, deterministic=True):
+            def predict(self, obs, deterministic=True, action_masks=None):
+                captured["deterministic"] = deterministic
+                captured["action_masks"] = action_masks
                 return np.array([1, 2, 3, 4], dtype=np.int64), None
 
         env = _gym_env().env
@@ -75,6 +79,8 @@ class GymWrapperTests(unittest.TestCase):
         action = make_ppo_policy(FakeModel())(env)
 
         self.assertEqual(action, {"vessels": [1, 2], "wells": [3, 4]})
+        self.assertFalse(captured["deterministic"])
+        self.assertEqual(captured["action_masks"].shape, (sum(env.vessel_action_dims + env.well_rate_action_dims),))
 
 
 if __name__ == "__main__":

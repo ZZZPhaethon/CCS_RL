@@ -77,11 +77,11 @@ class ScenarioTests(unittest.TestCase):
         self.assertAlmostEqual(reservoir.pressure_at_capacity_bar, 350.0)
         self.assertAlmostEqual(reservoir.max_pressure_bar, 350.0)
         self.assertAlmostEqual(reservoir.seawater_depth_m, 300.0)
-        self.assertAlmostEqual(reservoir.well_fracture_gradient_psi_per_ft, 0.65)
+        self.assertAlmostEqual(reservoir.well_fracture_gradient_psi_per_ft, 0.7)
         self.assertAlmostEqual(reservoir.well_fracture_gradient_reference_depth_m, 2900.0)
-        self.assertAlmostEqual(reservoir.well_fracture_pressure_bar, 426.4)
+        self.assertAlmostEqual(reservoir.well_fracture_pressure_bar, 459.2)
         self.assertAlmostEqual(reservoir.well_bottomhole_pressure_safety_factor, 0.9)
-        self.assertAlmostEqual(reservoir.well_bottomhole_pressure_limit_bar, 383.8)
+        self.assertAlmostEqual(reservoir.well_bottomhole_pressure_limit_bar, 413.3)
 
     def test_phase1_demo_emitters_can_be_fully_curtailed(self):
         network, _ = build_northern_lights_phase1_demo()

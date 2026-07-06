@@ -37,8 +37,9 @@ class TrainPPOTests(unittest.TestCase):
                 captured["env"] = env
                 captured["kwargs"] = kwargs
 
-            def learn(self, total_timesteps):
+            def learn(self, total_timesteps, **kwargs):
                 captured["total_timesteps"] = total_timesteps
+                captured["learn_kwargs"] = kwargs
                 return self
 
         native = _native_env()
@@ -65,6 +66,7 @@ class TrainPPOTests(unittest.TestCase):
             episode_hours=2,
             warm_start=False,
             storage_shortfall_penalty=0.0,
+            injection_reward_eur_per_t=0.0,
         )
         self.assertEqual(captured["policy"], "MlpPolicy")
         self.assertEqual(
@@ -76,7 +78,9 @@ class TrainPPOTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["verbose"], 0)
         self.assertEqual(captured["kwargs"]["n_steps"], 4)
         self.assertEqual(captured["kwargs"]["batch_size"], 2)
+        self.assertEqual(captured["kwargs"]["device"], "auto")
         self.assertEqual(captured["total_timesteps"], 7)
+        self.assertEqual(captured["learn_kwargs"]["progress_bar"], False)
 
 
 if __name__ == "__main__":

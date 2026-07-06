@@ -23,6 +23,7 @@ from ..line_source import (
 from .pressure_limits import (
     WELL_RATE_LEVELS_MTPA,
     bottomhole_pressure_limited_rate_tph,
+    line_source_parameters_for_state,
     pressure_limited_rate_level_mask,
     tph_to_mtpa,
 )
@@ -101,7 +102,7 @@ def _add_line_source_well_snapshot(
         return
     reservoir = network.entities[reservoir_id]
     assert isinstance(reservoir, Reservoir)
-    parameters = reservoir.line_source_parameters
+    parameters = line_source_parameters_for_state(reservoir, state)
     if parameters is None:
         return
     rate_tph = state.last_injection_flow_tph.get(well.entity_id, 0.0)
@@ -197,7 +198,7 @@ def _add_line_source_reservoir_snapshot(
     reservoir: Reservoir,
     state: PhysicalState,
 ) -> None:
-    parameters = reservoir.line_source_parameters
+    parameters = line_source_parameters_for_state(reservoir, state)
     if parameters is None:
         return
     elapsed_days = state.time_h / 24.0

@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 from sim.entities import (
     Emitter,
@@ -226,7 +227,7 @@ class PhysicalLayerTests(unittest.TestCase):
             parameters,
             expected_rate_mtpa,
             elapsed_days=1.0 / 24.0,
-        )
+        ) + expected_rate_tph / 1_000_000.0 * 50.0
 
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
@@ -278,7 +279,7 @@ class PhysicalLayerTests(unittest.TestCase):
             parameters,
             1.0,
             elapsed_days=1.0 / 24.0,
-        )
+        ) + (1.0 * 1_000_000.0 / (365.25 * 24.0)) / 1_000_000.0 * 50.0
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
         network.add_entity(
@@ -343,8 +344,15 @@ class PhysicalLayerTests(unittest.TestCase):
         snapshot = network.snapshot(second.state)
 
         history = second.state.injection_rate_history_tph["well_1"]
-        expected_pressure = variable_rate_pressure_at_radius_bar(
+        reservoir = network.entities["reservoir_1"]
+        expected_parameters = replace(
             parameters,
+            initial_pressure_bar=reservoir.pressure_bar(
+                second.state.entity_inventory_t["reservoir_1"]
+            ),
+        )
+        expected_pressure = variable_rate_pressure_at_radius_bar(
+            expected_parameters,
             [(start_h / 24.0, rate_tph * 365.25 * 24.0 / 1_000_000.0) for start_h, rate_tph in history],
             elapsed_days=second.state.time_h / 24.0,
             radius_m=100.0,
@@ -411,18 +419,25 @@ class PhysicalLayerTests(unittest.TestCase):
         single_well_bhp = snapshot["entities"]["well_1"]["bottomhole_pressure_bar"]
         interference_delta = snapshot["entities"]["well_1"]["line_source_interference_delta_bar"]
         elapsed_days = result.state.time_h / 24.0
-        expected_bhp = bottomhole_pressure_bar(
+        reservoir = network.entities["reservoir_1"]
+        expected_parameters = replace(
             parameters,
+            initial_pressure_bar=reservoir.pressure_bar(
+                result.state.entity_inventory_t["reservoir_1"]
+            ),
+        )
+        expected_bhp = bottomhole_pressure_bar(
+            expected_parameters,
             result.state.last_injection_flow_tph["well_1"] * 365.25 * 24.0 / 1_000_000.0,
             elapsed_days=elapsed_days,
         ) + (
             pressure_at_radius_bar(
-                parameters,
+                expected_parameters,
                 result.state.last_injection_flow_tph["well_2"] * 365.25 * 24.0 / 1_000_000.0,
                 elapsed_days=elapsed_days,
                 radius_m=500.0,
             )
-            - parameters.initial_pressure_bar
+            - expected_parameters.initial_pressure_bar
         )
         self.assertGreater(interference_delta, 0.0)
         self.assertAlmostEqual(single_well_bhp, expected_bhp)

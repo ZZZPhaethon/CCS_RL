@@ -68,7 +68,7 @@ class ScenarioConfig:
     # during a long (e.g. one-year) evaluation rollout.
     warm_start: bool = False
     injectivity_warmstart_min: float = 0.5
-    reservoir_initial_pressure_fill_range: tuple[float, float] = (0.0, 0.8)
+    reservoir_initial_pressure_fill_range: tuple[float, float] = (0.0, 0.5)
 
 
 @dataclass

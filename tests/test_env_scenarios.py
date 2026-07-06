@@ -89,6 +89,27 @@ class Phase1EnvTests(unittest.TestCase):
 
         self.assertIsInstance(env.scenario_generator, LegWaveClimatologyScenarioGenerator)
 
+    def test_warm_start_reservoir_inventory_is_capped_at_half_pressure_capacity(self):
+        env = build_phase1_env(
+            scenario_generator=ScenarioGenerator(
+                config=ScenarioConfig(
+                    episode_hours=1,
+                    warm_start=True,
+                    randomize_initial_inventory=False,
+                )
+            ),
+            config=CCSEnvConfig(episode_hours=1),
+        )
+        reservoir = env.network.entities["aurora_reservoir"]
+
+        for seed in range(20):
+            scenario = env.scenario_generator.sample(env.network, seed=seed)
+            inventory_t = scenario.initial_inventory_t["aurora_reservoir"]
+            self.assertLessEqual(
+                inventory_t,
+                0.5 * reservoir.pressure_limited_capacity_t(),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

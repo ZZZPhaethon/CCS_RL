@@ -245,11 +245,11 @@
     "reservoir_pressure_model": "linear_average_reservoir_pressure_proxy",
     "reservoir_depth_below_seabed_m": 2600.0,
     "seawater_depth_m": 300.0,
-    "well_fracture_gradient_psi_per_ft": 0.65,
+    "well_fracture_gradient_psi_per_ft": 0.7,
     "well_fracture_gradient_reference_depth_m": 2900.0,
-    "well_fracture_pressure_bar": 426.4,
+    "well_fracture_pressure_bar": 459.2,
     "well_bottomhole_pressure_safety_factor": 0.9,
-    "well_bottomhole_pressure_limit_bar": 383.8,
+    "well_bottomhole_pressure_limit_bar": 413.3,
     "line_source_observation_radii_m": [
       100.0,
       1000.0
@@ -287,7 +287,7 @@
     "active_wells": "current_two_public_well_locations_only",
     "well_fracture_gradient_psi_per_ft": "user_selected_pressure_limit_assumption",
     "well_bottomhole_pressure_safety_factor": "user_selected_pressure_limit_assumption",
-    "well_bottomhole_pressure_limit_bar": "derived_from_0_65_psi_per_ft_over_2900_m_with_0_9_safety_factor"
+    "well_bottomhole_pressure_limit_bar": "derived_from_0_7_psi_per_ft_over_2900_m_with_0_9_safety_factor"
   },
   "connections": [
     [
