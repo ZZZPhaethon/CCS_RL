@@ -30,6 +30,7 @@ def make_native_env(
     store_reward_eur_per_t: float | None = None,
     vent_penalty_weight: float = 1.0,
     operating_cost_weight: float = 1.0,
+    carbon_price_eur_per_t: float | None = None,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
@@ -40,8 +41,16 @@ def make_native_env(
     otherwise rewards idling until the delayed venting penalty kicks in.
     ``include_weather_obs`` exposes per-leg wave weather + seasonality in the
     observation so the policy can route around rough legs.
+    ``carbon_price_eur_per_t`` is the single, economically-faithful knob: it sets
+    both the venting carbon tax and (by default) the stored-CO2 credit to the
+    same value, so storing and avoiding a vent are worth the same (symmetric).
     """
-    cost_model = CostModel(EconomicParameters(storage_shortfall_eur_per_t=storage_shortfall_penalty))
+    econ_kwargs = {"storage_shortfall_eur_per_t": storage_shortfall_penalty}
+    if carbon_price_eur_per_t is not None:
+        econ_kwargs["carbon_price_eur_per_t"] = carbon_price_eur_per_t
+        if store_reward_eur_per_t is None:
+            store_reward_eur_per_t = carbon_price_eur_per_t  # symmetric credit = tax
+    cost_model = CostModel(EconomicParameters(**econ_kwargs))
     return build_phase1_env(
         cost_model=cost_model,
         config=CCSEnvConfig(

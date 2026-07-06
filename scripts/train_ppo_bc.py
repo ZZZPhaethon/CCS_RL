@@ -87,6 +87,8 @@ def main() -> None:
                    help="multiplier on the vent penalty in the reward")
     p.add_argument("--operating-cost-weight", type=float, default=1.0,
                    help="multiplier on operating cost in the reward (raise to reward efficiency)")
+    p.add_argument("--carbon-price", type=float, default=None,
+                   help="symmetric carbon price: sets both vent tax and stored-CO2 credit")
     p.add_argument("--timesteps", type=int, default=100_000)
     p.add_argument("--n-steps", type=int, default=512)
     p.add_argument("--seed", type=int, default=0)
@@ -100,8 +102,12 @@ def main() -> None:
     out = Path("output/rl_ppo"); out.mkdir(parents=True, exist_ok=True)
     weather_tag = "_weather" if args.weather_obs else ""
     kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0 else ""
-    store_v = args.store_reward if args.store_reward is not None else args.injection_reward_eur_per_t
-    rew_tag = f"_s{store_v:g}v{args.vent_weight:g}c{args.operating_cost_weight:g}"
+    if args.carbon_price is not None:
+        store_v = args.store_reward if args.store_reward is not None else args.carbon_price
+        rew_tag = f"_cp{args.carbon_price:g}v{args.vent_weight:g}c{args.operating_cost_weight:g}"
+    else:
+        store_v = args.store_reward if args.store_reward is not None else args.injection_reward_eur_per_t
+        rew_tag = f"_s{store_v:g}v{args.vent_weight:g}c{args.operating_cost_weight:g}"
     tag = (f"bc_phase1_{args.episode_hours}h{weather_tag}{kick_tag}{rew_tag}_ts{args.timesteps}")
     report = []
 
@@ -112,6 +118,7 @@ def main() -> None:
         store_reward_eur_per_t=args.store_reward,
         vent_penalty_weight=args.vent_weight,
         operating_cost_weight=args.operating_cost_weight,
+        carbon_price_eur_per_t=args.carbon_price,
     )
     gym_env = CCSGymEnv(native_env)
     model = MaskablePPO(
