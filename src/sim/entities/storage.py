@@ -23,6 +23,13 @@ class Reservoir:
     pressure_at_capacity_bar: float
     max_pressure_bar: float
     depth_m: float | None = None
+    reservoir_pressure_model: str | None = None
+    seawater_depth_m: float | None = None
+    well_fracture_gradient_psi_per_ft: float | None = None
+    well_fracture_gradient_reference_depth_m: float | None = None
+    well_fracture_pressure_bar: float | None = None
+    well_bottomhole_pressure_safety_factor: float | None = None
+    well_bottomhole_pressure_limit_bar: float | None = None
     line_source_parameters: LineSourceParameters | None = None
     line_source_observation_radii_m: tuple[float, ...] = ()
     line_source_well_distances_m: dict[str, dict[str, float]] = field(default_factory=dict)
