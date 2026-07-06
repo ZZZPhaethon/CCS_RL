@@ -11,7 +11,9 @@
 <p align="center">
   <strong><span style="font-size: 1.5em;">🎉 First version of CCUS operations optimization 🎉</span></strong>
 </p>
-
+<p align="center">
+  <img src="assets/CCUSRL_overview.png" alt="CCUS teaser" width="95%">
+</p>
 CCS_RLLLM is a modular research codebase for ship-based carbon capture, transport, terminal receiving, pipeline transfer, and injection workflows. The current implementation uses Northern Lights as the primary reference scenario and brings physical-layer simulation, action protocols, rule-based controllers, MILP/MPC, RL environments, disturbance generation, and visualization dashboards into one reproducible experiment framework.
 
 The core chain is:
