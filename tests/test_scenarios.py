@@ -73,6 +73,15 @@ class ScenarioTests(unittest.TestCase):
         self.assertAlmostEqual(manifold.max_flow_tph, 5_000_000.0 / 8760.0)
         self.assertIsInstance(reservoir, Reservoir)
         self.assertAlmostEqual(reservoir.depth_m, 2_600.0)
+        self.assertAlmostEqual(reservoir.initial_pressure_bar, 300.0)
+        self.assertAlmostEqual(reservoir.pressure_at_capacity_bar, 350.0)
+        self.assertAlmostEqual(reservoir.max_pressure_bar, 350.0)
+        self.assertAlmostEqual(reservoir.seawater_depth_m, 300.0)
+        self.assertAlmostEqual(reservoir.well_fracture_gradient_psi_per_ft, 0.65)
+        self.assertAlmostEqual(reservoir.well_fracture_gradient_reference_depth_m, 2900.0)
+        self.assertAlmostEqual(reservoir.well_fracture_pressure_bar, 426.4)
+        self.assertAlmostEqual(reservoir.well_bottomhole_pressure_safety_factor, 0.9)
+        self.assertAlmostEqual(reservoir.well_bottomhole_pressure_limit_bar, 383.8)
 
     def test_phase1_demo_emitters_can_be_fully_curtailed(self):
         network, _ = build_northern_lights_phase1_demo()
@@ -87,7 +96,9 @@ class ScenarioTests(unittest.TestCase):
 
         self.assertIsInstance(reservoir, Reservoir)
         self.assertIsNotNone(reservoir.line_source_parameters)
-        self.assertAlmostEqual(reservoir.line_source_parameters.permeability_md, 100.0)
+        self.assertAlmostEqual(reservoir.line_source_parameters.initial_pressure_bar, 300.0)
+        self.assertAlmostEqual(reservoir.line_source_parameters.permeability_md, 10.0)
+        self.assertAlmostEqual(reservoir.line_source_parameters.thickness_m, 100.0)
         self.assertEqual(reservoir.line_source_parameter_status["well_radius_m"], "derived_from_concept_report")
         self.assertEqual(reservoir.line_source_parameter_status["viscosity_pa_s"], "assumed")
         self.assertEqual(reservoir.line_source_parameter_status["co2_density_kg_m3"], "assumed")
@@ -100,8 +111,20 @@ class ScenarioTests(unittest.TestCase):
 
         reservoir = network.entities["aurora_reservoir"]
         pipeline = network.entities["oygarden_pipeline"]
+        reservoir_payload = payload["reservoir"]
 
         self.assertIsInstance(reservoir, Reservoir)
+        self.assertIn("reservoir_average_pressure_at_capacity_bar", reservoir_payload)
+        self.assertIn("reservoir_average_pressure_limit_bar", reservoir_payload)
+        self.assertIn("well_bottomhole_pressure_limit_bar", reservoir_payload)
+        self.assertNotIn("initial_pressure_bar", reservoir_payload)
+        self.assertNotIn("pressure_at_capacity_bar", reservoir_payload)
+        self.assertNotIn("max_pressure_bar", reservoir_payload)
+        self.assertNotIn("depth_m", reservoir_payload)
+        self.assertNotIn("pressure_at_capacity_bar_status", reservoir_payload)
+        self.assertNotIn("max_pressure_bar_status", reservoir_payload)
+        self.assertIn("initial_reservoir_pressure_bar", payload["line_source_parameters"])
+        self.assertNotIn("initial_pressure_bar", payload["line_source_parameters"])
         self.assertAlmostEqual(
             reservoir.line_source_parameters.permeability_md,
             payload["line_source_parameters"]["permeability_md"],
@@ -245,6 +268,38 @@ class ScenarioTests(unittest.TestCase):
                     payload = json.load(handle)
 
                 self.assertEqual(payload["scenario_id"], path.stem)
+
+    def test_fixed_scenarios_use_explicit_pressure_field_names(self):
+        old_reservoir_fields = {
+            "initial_pressure_bar",
+            "pressure_at_capacity_bar",
+            "max_pressure_bar",
+            "depth_m",
+        }
+        required_reservoir_fields = {
+            "reservoir_initial_pressure_bar",
+            "reservoir_average_pressure_at_capacity_bar",
+            "reservoir_average_pressure_limit_bar",
+            "reservoir_pressure_model",
+            "reservoir_depth_below_seabed_m",
+            "seawater_depth_m",
+            "well_fracture_gradient_psi_per_ft",
+            "well_fracture_gradient_reference_depth_m",
+            "well_fracture_pressure_bar",
+            "well_bottomhole_pressure_safety_factor",
+            "well_bottomhole_pressure_limit_bar",
+        }
+
+        for path in scenarios.SCENARIO_ROOT.glob("*.json"):
+            with self.subTest(path=path.name):
+                with path.open(encoding="utf-8") as handle:
+                    payload = json.load(handle)
+
+                reservoir_payload = payload["reservoir"]
+                self.assertFalse(old_reservoir_fields & reservoir_payload.keys())
+                self.assertLessEqual(required_reservoir_fields, reservoir_payload.keys())
+                self.assertIn("initial_reservoir_pressure_bar", payload["line_source_parameters"])
+                self.assertNotIn("initial_pressure_bar", payload["line_source_parameters"])
 
     def test_fixed_scenario_selector_accepts_file_stems(self):
         network, _state = build_fixed_scenario_demo("northern_lights_phase2")

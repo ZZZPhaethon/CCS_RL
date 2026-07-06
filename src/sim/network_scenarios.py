@@ -228,15 +228,33 @@ def _build_network_from_scenario_data(
         )
 
     reservoir = data["reservoir"]
+    line_source_parameters = data["line_source_parameters"]
     network.add_entity(
         Reservoir(
             reservoir["entity_id"],
             storage_capacity_t=float(reservoir["storage_capacity_t"]),
-            initial_pressure_bar=float(reservoir["initial_pressure_bar"]),
-            pressure_at_capacity_bar=float(reservoir["pressure_at_capacity_bar"]),
-            max_pressure_bar=float(reservoir["max_pressure_bar"]),
-            depth_m=float(reservoir["depth_m"]),
-            line_source_parameters=LineSourceParameters(**data["line_source_parameters"]),
+            initial_pressure_bar=float(reservoir["reservoir_initial_pressure_bar"]),
+            pressure_at_capacity_bar=float(reservoir["reservoir_average_pressure_at_capacity_bar"]),
+            max_pressure_bar=float(reservoir["reservoir_average_pressure_limit_bar"]),
+            depth_m=float(reservoir["reservoir_depth_below_seabed_m"]),
+            reservoir_pressure_model=reservoir["reservoir_pressure_model"],
+            seawater_depth_m=float(reservoir["seawater_depth_m"]),
+            well_fracture_gradient_psi_per_ft=float(reservoir["well_fracture_gradient_psi_per_ft"]),
+            well_fracture_gradient_reference_depth_m=float(reservoir["well_fracture_gradient_reference_depth_m"]),
+            well_fracture_pressure_bar=float(reservoir["well_fracture_pressure_bar"]),
+            well_bottomhole_pressure_safety_factor=float(reservoir["well_bottomhole_pressure_safety_factor"]),
+            well_bottomhole_pressure_limit_bar=float(reservoir["well_bottomhole_pressure_limit_bar"]),
+            line_source_parameters=LineSourceParameters(
+                initial_pressure_bar=float(line_source_parameters["initial_reservoir_pressure_bar"]),
+                permeability_md=float(line_source_parameters["permeability_md"]),
+                thickness_m=float(line_source_parameters["thickness_m"]),
+                porosity_fraction=float(line_source_parameters["porosity_fraction"]),
+                total_compressibility_1_pa=float(line_source_parameters["total_compressibility_1_pa"]),
+                viscosity_pa_s=float(line_source_parameters["viscosity_pa_s"]),
+                co2_density_kg_m3=float(line_source_parameters["co2_density_kg_m3"]),
+                well_radius_m=float(line_source_parameters["well_radius_m"]),
+                skin=float(line_source_parameters["skin"]),
+            ),
             line_source_observation_radii_m=tuple(
                 float(radius_m)
                 for radius_m in reservoir["line_source_observation_radii_m"]

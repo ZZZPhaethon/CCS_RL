@@ -172,10 +172,17 @@
   "reservoir": {
     "entity_id": "aurora",
     "storage_capacity_t": 10000000.0,
-    "initial_pressure_bar": 100.0,
-    "pressure_at_capacity_bar": 200.0,
-    "max_pressure_bar": 200.0,
-    "depth_m": 2600.0,
+    "reservoir_initial_pressure_bar": 100.0,
+    "reservoir_average_pressure_at_capacity_bar": 200.0,
+    "reservoir_average_pressure_limit_bar": 200.0,
+    "reservoir_pressure_model": "linear_average_reservoir_pressure_proxy",
+    "reservoir_depth_below_seabed_m": 2600.0,
+    "seawater_depth_m": 0.0,
+    "well_fracture_gradient_psi_per_ft": 0.65,
+    "well_fracture_gradient_reference_depth_m": 2600.0,
+    "well_fracture_pressure_bar": 382.3,
+    "well_bottomhole_pressure_safety_factor": 0.9,
+    "well_bottomhole_pressure_limit_bar": 344.1,
     "line_source_observation_radii_m": [
       100.0,
       1000.0
@@ -183,7 +190,7 @@
     "line_source_well_distances_m": {}
   },
   "line_source_parameters": {
-    "initial_pressure_bar": 100.0,
+    "initial_reservoir_pressure_bar": 100.0,
     "permeability_md": 100.0,
     "thickness_m": 100.0,
     "porosity_fraction": 0.2,
@@ -194,7 +201,7 @@
     "skin": 0.0
   },
   "line_source_parameter_status": {
-    "initial_pressure_bar": "toy_assumption",
+    "initial_reservoir_pressure_bar": "toy_assumption",
     "permeability_md": "toy_assumption",
     "thickness_m": "toy_assumption",
     "porosity_fraction": "toy_assumption",
@@ -202,7 +209,10 @@
     "viscosity_pa_s": "toy_assumption",
     "co2_density_kg_m3": "toy_assumption",
     "well_radius_m": "toy_assumption",
-    "skin": "toy_assumption"
+    "skin": "toy_assumption",
+    "well_fracture_gradient_psi_per_ft": "toy_assumption",
+    "well_bottomhole_pressure_safety_factor": "toy_assumption",
+    "well_bottomhole_pressure_limit_bar": "toy_assumption"
   },
   "connections": [
     [

@@ -225,10 +225,17 @@
   "reservoir": {
     "entity_id": "aurora_reservoir",
     "storage_capacity_t": 100000000.0,
-    "initial_pressure_bar": 260.0,
-    "pressure_at_capacity_bar": 300.0,
-    "max_pressure_bar": 315.0,
-    "depth_m": 2600.0,
+    "reservoir_initial_pressure_bar": 300.0,
+    "reservoir_average_pressure_at_capacity_bar": 350.0,
+    "reservoir_average_pressure_limit_bar": 350.0,
+    "reservoir_pressure_model": "linear_average_reservoir_pressure_proxy",
+    "reservoir_depth_below_seabed_m": 2600.0,
+    "seawater_depth_m": 300.0,
+    "well_fracture_gradient_psi_per_ft": 0.65,
+    "well_fracture_gradient_reference_depth_m": 2900.0,
+    "well_fracture_pressure_bar": 426.4,
+    "well_bottomhole_pressure_safety_factor": 0.9,
+    "well_bottomhole_pressure_limit_bar": 383.8,
     "line_source_observation_radii_m": [
       100.0,
       1000.0
@@ -236,9 +243,9 @@
     "line_source_well_distances_m": {}
   },
   "line_source_parameters": {
-    "initial_pressure_bar": 260.0,
-    "permeability_md": 100.0,
-    "thickness_m": 173.0,
+    "initial_reservoir_pressure_bar": 300.0,
+    "permeability_md": 10.0,
+    "thickness_m": 100.0,
     "porosity_fraction": 0.22,
     "total_compressibility_1_pa": 7e-10,
     "viscosity_pa_s": 6e-05,
@@ -247,16 +254,19 @@
     "skin": 0.0
   },
   "line_source_parameter_status": {
-    "initial_pressure_bar": "selected_from_reported_range",
-    "permeability_md": "selected_moderate_value_from_reported_model_range",
-    "thickness_m": "reported_model_value",
+    "initial_reservoir_pressure_bar": "selected_upper_value_from_reported_200_300_bar_range",
+    "permeability_md": "conservative_pressure_screening_value",
+    "thickness_m": "conservative_pressure_screening_value",
     "porosity_fraction": "selected_from_reported_model_range",
     "total_compressibility_1_pa": "assumed",
     "viscosity_pa_s": "assumed",
     "co2_density_kg_m3": "assumed",
     "well_radius_m": "derived_from_concept_report",
     "skin": "assumed",
-    "active_wells": "phase1_a7_ah_injection_well_only"
+    "active_wells": "phase1_a7_ah_injection_well_only",
+    "well_fracture_gradient_psi_per_ft": "user_selected_pressure_limit_assumption",
+    "well_bottomhole_pressure_safety_factor": "user_selected_pressure_limit_assumption",
+    "well_bottomhole_pressure_limit_bar": "derived_from_0_65_psi_per_ft_over_2900_m_with_0_9_safety_factor"
   },
   "connections": [
     [
@@ -311,7 +321,9 @@
   "model_assumptions": {
     "scenario_scope": "This is not strict Longship Phase 1. It adds Yara as a 2026 commercial cross-border customer to the completed Phase 1 shipping fleet.",
     "capacity_vs_contracts": "Named annual volumes sum to 1.55 Mt/y, slightly above the 1.5 Mt/y initial system capacity. This scenario keeps the public contract volumes and system capacity explicit.",
-    "vessel_assignment": "Connections are initial service eligibility for visualization and simple dispatch, not exclusive long-term ship assignments."
+    "vessel_assignment": "Connections are initial service eligibility for visualization and simple dispatch, not exclusive long-term ship assignments.",
+    "reservoir_pressure_assumption": "Reservoir pressure fields are average/static reservoir-pressure proxies, not bottomhole pressure. The linear proxy rises from 300 bar at zero stored CO2 to 350 bar at 100 Mt stored CO2, giving about 0.5 bar per Mt.",
+    "pressure_limit_assumption": "Bottomhole pressure limit is derived from a 0.65 psi/ft fracture-gradient proxy over 300 m water depth plus 2600 m reservoir depth, multiplied by a 0.9 safety factor."
   },
   "public_sources": [
     {
