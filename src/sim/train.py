@@ -27,6 +27,9 @@ def make_native_env(
     storage_shortfall_penalty: float = 0.0,
     injection_reward_eur_per_t: float = 0.0,
     include_weather_obs: bool = False,
+    store_reward_eur_per_t: float | None = None,
+    vent_penalty_weight: float = 1.0,
+    operating_cost_weight: float = 1.0,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
@@ -46,6 +49,9 @@ def make_native_env(
             storage_target_rate=storage_target_rate,
             injection_reward_eur_per_t=injection_reward_eur_per_t,
             include_weather_obs=include_weather_obs,
+            store_reward_eur_per_t=store_reward_eur_per_t,
+            vent_penalty_weight=vent_penalty_weight,
+            operating_cost_weight=operating_cost_weight,
         ),
         scenario_config=ScenarioConfig(episode_hours=episode_hours, warm_start=warm_start),
     )

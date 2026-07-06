@@ -79,6 +79,18 @@ class CCSEnvConfig:
     # storing CO2 instead of waiting for the delayed venting penalty once buffers
     # overflow, which is what makes short-horizon training reward idling.
     injection_reward_eur_per_t: float = 0.0
+    # Tunable economic reward weights. The step reward is
+    #   reward_scale * ( store_reward * stored_t
+    #                    - vent_penalty_weight * vent_penalty
+    #                    - operating_cost_weight * operating_cost )
+    # Defaults reproduce the legacy reward exactly: store_reward falls back to
+    # injection_reward_eur_per_t, and both weights are 1.0 (so vent penalty and
+    # operating cost enter at the cost model's own EUR values). Raise
+    # operating_cost_weight to make inefficient routing hurt, i.e. to align the
+    # objective with cost-per-stored-tonne instead of "any storage is worth 80".
+    store_reward_eur_per_t: float | None = None
+    vent_penalty_weight: float = 1.0
+    operating_cost_weight: float = 1.0
     # Expose per-leg wave-height weather (current + 24 h/168 h forecast) and an
     # annual clock in the observation. Off by default so existing (no-weather)
     # models keep their observation size; turn on to let the policy route around
@@ -259,10 +271,18 @@ class CCSEnv:
 
         in_transit_now = self._in_transit_inventory()
         in_transit_growth = in_transit_now - self.initial_in_transit_t
-        # Dense shaping term (off by default): reward CO2 actually injected this
-        # step so credit assignment does not depend on the delayed venting penalty.
-        storage_shaping_reward = self.config.injection_reward_eur_per_t * economics.stored_t
-        reward = (economics.net + storage_shaping_reward) * self.config.reward_scale
+        # Tunable economic reward: credit stored CO2, charge venting and operating
+        # cost with adjustable weights. Defaults reproduce the legacy reward
+        # (net + injection_reward * stored_t) exactly.
+        store_reward = self.config.store_reward_eur_per_t
+        if store_reward is None:
+            store_reward = self.config.injection_reward_eur_per_t
+        storage_shaping_reward = store_reward * economics.stored_t
+        reward = (
+            storage_shaping_reward
+            - self.config.vent_penalty_weight * economics.vent_penalty
+            - self.config.operating_cost_weight * economics.operating_cost
+        ) * self.config.reward_scale
 
         self.t += 1
         # The operational task is fixed-horizon: there is no early terminal

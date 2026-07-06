@@ -81,6 +81,12 @@ def main() -> None:
                    help="expose per-leg wave weather + seasonality in the observation")
     p.add_argument("--kickstart-coef", type=float, default=0.0,
                    help="initial weight of the decaying BC anchor during PPO fine-tune (0 = off)")
+    p.add_argument("--store-reward", type=float, default=None,
+                   help="EUR/t credit for stored CO2 in the reward (default: injection-reward)")
+    p.add_argument("--vent-weight", type=float, default=1.0,
+                   help="multiplier on the vent penalty in the reward")
+    p.add_argument("--operating-cost-weight", type=float, default=1.0,
+                   help="multiplier on operating cost in the reward (raise to reward efficiency)")
     p.add_argument("--timesteps", type=int, default=100_000)
     p.add_argument("--n-steps", type=int, default=512)
     p.add_argument("--seed", type=int, default=0)
@@ -93,13 +99,19 @@ def main() -> None:
 
     out = Path("output/rl_ppo"); out.mkdir(parents=True, exist_ok=True)
     weather_tag = "_weather" if args.weather_obs else ""
-    tag = f"bc_phase1_{args.episode_hours}h_inj{args.injection_reward_eur_per_t:.0f}{weather_tag}_ts{args.timesteps}"
+    kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0 else ""
+    store_v = args.store_reward if args.store_reward is not None else args.injection_reward_eur_per_t
+    rew_tag = f"_s{store_v:g}v{args.vent_weight:g}c{args.operating_cost_weight:g}"
+    tag = (f"bc_phase1_{args.episode_hours}h{weather_tag}{kick_tag}{rew_tag}_ts{args.timesteps}")
     report = []
 
     native_env = make_native_env(
         episode_hours=args.episode_hours, warm_start=True,
         injection_reward_eur_per_t=args.injection_reward_eur_per_t,
         include_weather_obs=args.weather_obs,
+        store_reward_eur_per_t=args.store_reward,
+        vent_penalty_weight=args.vent_weight,
+        operating_cost_weight=args.operating_cost_weight,
     )
     gym_env = CCSGymEnv(native_env)
     model = MaskablePPO(
