@@ -139,10 +139,12 @@ def bc_pretrain(
     lr: float = 1e-3,
     seed0: int = 0,
     nonwait_weight: float = 10.0,
-) -> None:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Collect demonstrations from ``demo_policy`` and behavior-clone into ``model``.
 
-    ``nonwait_weight`` up-weights the loss on dispatch (non-WAIT) steps.
+    ``nonwait_weight`` up-weights the loss on dispatch (non-WAIT) steps. Returns
+    the ``(obs, actions, masks, weights)`` demo arrays so they can be reused for
+    kickstarting during PPO fine-tune.
     """
     obs, acts, masks = collect_demonstrations(gym_env, demo_policy, n_episodes, seed0=seed0)
     if len(obs) == 0:
@@ -159,3 +161,80 @@ def bc_pretrain(
         model, obs, acts, masks=masks, weights=weights,
         epochs=epochs, batch_size=batch_size, lr=lr,
     )
+    return obs, acts, masks, weights
+
+
+def make_kickstart_callback(
+    observations: np.ndarray,
+    actions: np.ndarray,
+    masks: np.ndarray | None,
+    weights: np.ndarray | None,
+    total_timesteps: int,
+    coef0: float = 1.0,
+    n_batches: int = 4,
+    batch_size: int = 256,
+    lr: float = 3e-4,
+    verbose: int = 0,
+):
+    """A callback that interleaves decaying BC updates into PPO fine-tuning.
+
+    Kickstarting: before each PPO update, take a few weighted behavior-cloning
+    gradient steps toward the demonstrator, with a coefficient that decays
+    linearly to 0 over training. This anchors the policy to the teacher so RL
+    refines it instead of drifting away (which degraded plain BC+PPO).
+    """
+    import numpy as _np
+    import torch
+    from stable_baselines3.common.callbacks import BaseCallback
+
+    class _KickstartBC(BaseCallback):
+        def __init__(self):
+            super().__init__(verbose)
+            self._opt = None
+
+        def _on_training_start(self) -> None:
+            policy = self.model.policy
+            device = policy.device
+            self._obs = torch.as_tensor(_np.asarray(observations, dtype=_np.float32), device=device)
+            self._act = torch.as_tensor(_np.asarray(actions, dtype=_np.int64), device=device)
+            self._mask = (
+                torch.as_tensor(_np.asarray(masks, dtype=bool), device=device)
+                if masks is not None else None
+            )
+            self._w = (
+                torch.as_tensor(_np.asarray(weights, dtype=_np.float32), device=device)
+                if weights is not None else None
+            )
+            self._opt = torch.optim.Adam(policy.parameters(), lr=lr)
+
+        def _on_step(self) -> bool:
+            return True
+
+        def _on_rollout_end(self) -> None:
+            progress = min(1.0, self.num_timesteps / max(1, total_timesteps))
+            coef = coef0 * (1.0 - progress)
+            if coef <= 1e-6:
+                return
+            policy = self.model.policy
+            policy.set_training_mode(True)
+            n = self._obs.shape[0]
+            bc_val = 0.0
+            for _ in range(n_batches):
+                idx = torch.randint(0, n, (batch_size,), device=self._obs.device)
+                bm = self._mask[idx] if self._mask is not None else None
+                _v, log_prob, _e = policy.evaluate_actions(self._obs[idx], self._act[idx], action_masks=bm)
+                nll = -log_prob
+                if self._w is not None:
+                    wb = self._w[idx]
+                    bc = (nll * wb).sum() / wb.sum().clamp_min(1e-8)
+                else:
+                    bc = nll.mean()
+                loss = coef * bc
+                self._opt.zero_grad()
+                loss.backward()
+                self._opt.step()
+                bc_val = float(bc.item())
+            if self.verbose:
+                print(f"[kickstart] t={self.num_timesteps} coef={coef:.3f} bc_nll={bc_val:.3f}", flush=True)
+
+    return _KickstartBC()

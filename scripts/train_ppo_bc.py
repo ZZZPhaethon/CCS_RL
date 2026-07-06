@@ -20,7 +20,7 @@ import numpy as np
 from sim.train import make_native_env
 from sim.environment.gym_adapter import CCSGymEnv, make_ppo_policy
 from sim.control.baselines import idle_policy, greedy_shuttle_policy
-from sim.control.imitation import bc_pretrain
+from sim.control.imitation import bc_pretrain, make_kickstart_callback
 from sim.metrics import run_episode
 
 
@@ -55,6 +55,8 @@ def main() -> None:
                    help="loss up-weight for dispatch (non-WAIT) steps in BC")
     p.add_argument("--weather-obs", action="store_true",
                    help="expose per-leg wave weather + seasonality in the observation")
+    p.add_argument("--kickstart-coef", type=float, default=0.0,
+                   help="initial weight of the decaying BC anchor during PPO fine-tune (0 = off)")
     p.add_argument("--timesteps", type=int, default=100_000)
     p.add_argument("--n-steps", type=int, default=512)
     p.add_argument("--seed", type=int, default=0)
@@ -84,9 +86,11 @@ def main() -> None:
     print(f"[{dt.datetime.now():%H:%M:%S}] policy device = {model.policy.device}", flush=True)
 
     print(f"[{dt.datetime.now():%H:%M:%S}] === BC pretrain (greedy, {args.bc_episodes} eps) ===", flush=True)
-    bc_pretrain(model, gym_env, greedy_shuttle_policy,
-                n_episodes=args.bc_episodes, epochs=args.bc_epochs,
-                nonwait_weight=args.nonwait_weight)
+    demo_obs, demo_acts, demo_masks, demo_weights = bc_pretrain(
+        model, gym_env, greedy_shuttle_policy,
+        n_episodes=args.bc_episodes, epochs=args.bc_epochs,
+        nonwait_weight=args.nonwait_weight,
+    )
 
     print(f"[{dt.datetime.now():%H:%M:%S}] === eval AFTER BC (before PPO) ===", flush=True)
     report.append("## After BC (before PPO)")
@@ -94,8 +98,15 @@ def main() -> None:
                             include_weather_obs=args.weather_obs)
 
     if args.timesteps > 0:
+        callback = None
+        if args.kickstart_coef > 0:
+            print(f"[{dt.datetime.now():%H:%M:%S}] kickstart anchor on, coef0={args.kickstart_coef}", flush=True)
+            callback = make_kickstart_callback(
+                demo_obs, demo_acts, demo_masks, demo_weights,
+                total_timesteps=args.timesteps, coef0=args.kickstart_coef, verbose=0,
+            )
         print(f"[{dt.datetime.now():%H:%M:%S}] === PPO fine-tune ({args.timesteps} steps) ===", flush=True)
-        model.learn(total_timesteps=args.timesteps, progress_bar=args.progress_bar)
+        model.learn(total_timesteps=args.timesteps, progress_bar=args.progress_bar, callback=callback)
         print(f"[{dt.datetime.now():%H:%M:%S}] === eval AFTER PPO fine-tune ===", flush=True)
         report.append("\n## After PPO fine-tune")
         report += eval_policies(model, args.episode_hours, args.eval_seeds,
