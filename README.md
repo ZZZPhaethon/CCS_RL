@@ -1,7 +1,16 @@
-# CCS_RLLLM
-### A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains
+<h1 align="center">CCS_RLLLM</h1>
 
-Languages: English | [简体中文](README_CN.md)
+<h3 align="center">A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains</h3>
+
+<p align="center">Languages: English | <a href="README_CN.md">简体中文</a></p>
+
+<p align="center">
+  <a href="https://github.com/ZZZPhaethon/CCS_RLLLM"><img src="https://img.shields.io/badge/project-page-brightgreen" alt="Project Page"></a>
+</p>
+
+<p align="center">
+  <strong><span style="font-size: 1.5em;">🎉 First version of CCUS operations optimization 🎉</span></strong>
+</p>
 
 CCS_RLLLM is a modular research codebase for ship-based carbon capture, transport, terminal receiving, pipeline transfer, and injection workflows. The current implementation uses Northern Lights as the primary reference scenario and brings physical-layer simulation, action protocols, rule-based controllers, MILP/MPC, RL environments, disturbance generation, and visualization dashboards into one reproducible experiment framework.
 
