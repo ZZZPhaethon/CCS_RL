@@ -1,277 +1,235 @@
 # CCS_RLLLM
+### A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains
 
-面向船运 CCS 链条的物理层仿真、控制算法、RL 环境和实验评估项目。当前代码以 Northern Lights 场景为主，核心流程是：
+Languages: English | [简体中文](README_CN.md)
+
+CCS_RLLLM is a modular research codebase for ship-based carbon capture, transport, terminal receiving, pipeline transfer, and injection workflows. The current implementation uses Northern Lights as the primary reference scenario and brings physical-layer simulation, action protocols, rule-based controllers, MILP/MPC, RL environments, disturbance generation, and visualization dashboards into one reproducible experiment framework.
+
+The core chain is:
 
 ```text
 Emitter -> Vessel -> Terminal -> Pipeline -> SubseaManifold -> InjectionWell -> Reservoir
 ```
 
-上层控制器、MILP、RL policy 或实验脚本提交动作；物理层负责验证动作、推进仿真、更新库存/运输/注入/压力状态，并输出可审计的结果。
+High-level controllers, MILP solvers, RL policies, or experiment scripts submit actions. The physical layer validates those actions, advances vessel movement, updates capture, inventory, unloading, transport, injection, and pressure states, and returns auditable trajectories and KPIs.
 
-## 环境依赖
+## Highlights
 
-- Python `>=3.10`(GPU 环境使用 3.12)
-- 核心依赖:`searoute>=1.6`、`CoolProp>=6.6`(见 `pyproject.toml`)
-- RL 相关(可选):`numpy`、`gymnasium`、`stable-baselines3`、`sb3-contrib`
-- 波高预测(GPU)相关:`torch`、`torchvision`、`torchaudio`、`numpy`、`pandas`、`scikit-learn`、`matplotlib`、`tqdm`、`jupyterlab`
+- **End-to-end CCUS logistics simulation:** Covers emitters, LCO2 vessels, terminals, pipelines, subsea manifolds, injection wells, and reservoirs.
+- **Decoupled action protocol and physics layer:** `sim.actions` defines action representation and resolution, while `sim.control` focuses on control decisions.
+- **Multiple controller families:** Includes idle/greedy baselines, rule-based controllers, static MILP benchmarks, rolling MILP/MPC, and RL policies.
+- **Reproducible scenarios:** `scenarios/` stores Northern Lights Phase 1/Phase 2 JSON scenarios, and `data/capture_rates/` stores capture-rate profiles.
+- **Disturbance and weather modeling:** Includes capture outages, injectivity decline, maintenance, wave-height scenarios, and vessel-speed effects.
+- **Training and evaluation loop:** Provides a Gymnasium/SB3 adapter, PPO/BC training scripts, controller comparison experiments, and HTML dashboard outputs.
 
-### CPU / 基础安装(pip)
+## Roadmap
+
+- [x] Physical entities, operation modules, and network step.
+- [x] Northern Lights Phase 1/Phase 2 scenario configuration.
+- [x] Action proposal/resolver protocol layer.
+- [x] Rule-based, MILP, and rolling MILP/MPC controllers.
+- [x] Gymnasium/SB3 RL environment and training entry points.
+- [x] Controller comparison, KPI aggregation, and dashboard generation.
+- [x] Wave-height scenarios, prediction models, and vessel-speed disturbances.
+- [ ] Unified experiment configuration files and CLI entry points.
+- [ ] Package large external datasets and model weights as downloadable release assets.
+- [ ] Move `economics.py` and `metrics.py` into an evaluation package.
+- [ ] Replace personal paths in HPC scripts with environment-variable configuration.
+
+## Environment Requirements
+
+- Python `>=3.10`; the current GPU training environment uses Python 3.12.
+- `uv` for dependency resolution, virtual environment creation, and script execution.
+- Core physical-layer dependencies: `searoute>=1.6`, `CoolProp>=6.6`.
+- Optional RL dependencies: `numpy`, `gymnasium`, `stable-baselines3`, `sb3-contrib`.
+- Wave-height GPU training dependencies: `torch`, `torchvision`, `torchaudio`, `pandas`, `scikit-learn`, `matplotlib`, `tqdm`, `jupyterlab`.
+- NVIDIA GPU and a matching CUDA/PyTorch environment are recommended for deep learning training.
+
+## Installation
+
+Run all commands from the repository root.
+
+### CPU / Basic Setup
+
+```powershell
+uv sync
+uv run python -m pip install -e .
+```
+
+For the RL environment:
+
+```powershell
+uv sync --extra rl
+uv run python -m pip install -e ".[rl]"
+```
+
+If you do not use `uv`, install with pip:
 
 ```powershell
 pip install -e .
-pip install -e ".[rl]"   # 需要 RL 环境时
+pip install -e ".[rl]"
 ```
 
-### GPU 环境(conda)
+### GPU / Wave-Height Training Environment
 
-波高预测的深度学习模型需要 GPU（CUDA 12.8）,使用 `environment-gpu.yml` 一键创建:
+The wave-height prediction models are best run in the conda environment:
 
 ```powershell
 conda env create -f environment-gpu.yml
 conda activate ccs-rlllm-gpu
+pip install -e ".[rl]"
 ```
 
-## 快速运行
+## Quick Start
 
-PowerShell:
+### Physical-Layer Demo
 
 ```powershell
-$env:PYTHONPATH='E:\CCS_RLLLM\src'
-python examples\run_physical_layer_demo.py
+uv run python examples\run_physical_layer_demo.py
+```
+
+### Dashboards
+
+```powershell
+uv run python examples\build_phase1_dashboard.py
+uv run python examples\build_rule_based_dashboards.py
+```
+
+Generated HTML or image artifacts are written to the script-defined `output/` or visualization directories.
+
+### Controller Comparison
+
+```powershell
+uv run python experiments\compare_controllers_same_scenarios.py
+```
+
+This experiment compares episode controllers under the same disturbance scenarios and writes CSV/report outputs. Static MILP is reported separately as a perfect-foresight benchmark.
+
+### RL Training
+
+```powershell
+uv run python -m sim.train --timesteps 200000
+```
+
+Full PPO/BC training entry point:
+
+```powershell
+uv run python scripts\train_ppo_bc.py --weather-obs --bc-episodes 30 --bc-epochs 20 --timesteps 150000
+```
+
+### Wave-Height Prediction
+
+```powershell
+uv run python -m sim.scenario_generation.wave_height.prediction.train_lstm
+uv run python -m sim.scenario_generation.wave_height.prediction.train_gru
+```
+
+See `src/sim/scenario_generation/wave_height/prediction/README.md` for details.
+
+## Tests
+
+```powershell
+uv run python -m unittest discover -s tests
+```
+
+If running without an editable install, set the source path explicitly:
+
+```powershell
+$env:PYTHONPATH="$PWD\src"
 python -m unittest discover -s tests
 ```
 
-生成 dashboard:
-
-```powershell
-$env:PYTHONPATH='E:\CCS_RLLLM\src'
-python examples\build_physical_dashboard.py
-python examples\build_phase1_dashboard.py
-```
-
-训练入口:
-
-```powershell
-$env:PYTHONPATH='E:\CCS_RLLLM\src'
-python -m sim.train --timesteps 200000
-```
-
-## 顶层文件树
+## Repository Layout
 
 ```text
 CCS_RLLLM/
-|-- data/                 # 原始数据、capture-rate 曲线、网络收集资料
-|   |-- capture_rates/     # Phase 1 emitter capture-rate CSV 和元数据
-|   `-- 网络收集资料/       # 从网络收集/整理的外部资料
-|-- scenarios/            # 可复现实验场景 JSON
-|-- docs/                 # 项目说明、研究记录、压力模型说明等文档
-|-- examples/             # 小型运行示例和 dashboard 生成脚本
-|-- experiments/          # 实验入口和 controller comparison 脚本
-|-- hpc/                  # 集群/HPC 提交脚本和 smoke test
-|-- src/sim/              # 主 Python 包
-|-- tests/                # 单元测试和结构测试
-|-- tmp/                  # 临时文献/PDF/截图材料；不属于核心代码
-|-- visualisation html/   # 旧 HTML 产物目录；建议后续删除或归档
-|-- pyproject.toml        # Python 包配置
+|-- data/                 # Capture-rate profiles, external references, experiment data
+|-- docs/                 # Research notes, design docs, and historical ideas
+|-- examples/             # Small demos and dashboard builders
+|-- experiments/          # Research experiment entry points
+|-- hpc/                  # Cluster submission scripts and smoke tests
+|-- scenarios/            # Reproducible scenario JSON files
+|-- scripts/              # PPO/BC training and model evaluation scripts
+|-- src/sim/              # Main Python package
+|-- tests/                # Unit, structure, and experiment smoke tests
+|-- visualisation html/   # Legacy visualization artifact directory
+|-- environment-gpu.yml   # GPU training environment
+|-- pyproject.toml        # Python package and dependency configuration
+|-- uv.lock               # uv lock file
 `-- README.md
 ```
 
-## `src/sim` 代码结构
+## `src/sim` Structure
 
 ```text
 src/sim/
-|-- actions/
-|   |-- action.py
-|   |-- resolver.py
-|   `-- __init__.py
-|-- control/
-|   |-- baselines.py
-|   |-- rule_based.py
-|   |-- milp.py
-|   |-- rolling_milp.py
-|   `-- imitation.py
-|-- entities/
-|   |-- emitter.py
-|   |-- vessel.py
-|   |-- terminal.py
-|   |-- pipeline.py
-|   |-- manifold.py
-|   |-- storage.py
-|   `-- state.py
-|-- environment/
-|   |-- env.py
-|   |-- factories.py
-|   `-- gym_adapter.py
-|-- operations/
-|   |-- capture.py
-|   |-- loading.py
-|   |-- unloading.py
-|   |-- transport.py
-|   |-- injection.py
-|   `-- snapshot.py
-|-- scenario_generation/
-|   |-- generator.py
-|   `-- disturbance_resolver.py
-|-- visualization/
-|   |-- core.py
-|   |-- html.py
-|   `-- writers.py
-|-- economics.py
-|-- metrics.py
-|-- line_source.py
-|-- network.py
-|-- network_scenarios.py
-|-- routes.py
-|-- simulator.py
-|-- train.py
-`-- __init__.py
+|-- actions/              # ActionProposal, ActionFrame, ActionResolver
+|-- control/              # Baselines, rule-based, MILP, rolling MILP, imitation
+|-- entities/             # Emitter, vessel, terminal, pipeline, well, state
+|-- environment/          # CCSEnv, factories, Gymnasium/SB3 adapter
+|-- operations/           # Capture, loading, unloading, transport, injection
+|-- scenario_generation/  # Disturbance and wave-height scenario generation
+|-- visualization/        # Dashboard payloads, HTML rendering, writer entry points
+|-- economics.py          # Cost and revenue model
+|-- line_source.py        # Reservoir/well pressure line-source model
+|-- metrics.py            # Rollouts, KPIs, and evaluation summaries
+|-- network.py            # Physical network graph and single-step settlement
+|-- network_scenarios.py  # Build Northern Lights networks from JSON/data
+|-- routes.py             # Route and distance calculation
+|-- ship_speed.py         # Sea-state effects on vessel speed
+|-- simulator.py          # High-level simulation runner
+`-- train.py              # RL training entry point
 ```
 
-## 主要目录职责
+## Data
 
-### `src/sim/actions/`
+Some external data files are large and are not fully tracked in git. Download them and place them back into the corresponding data directories before running related scripts.
 
-动作协议层。它不做控制决策，只规定“动作如何表达”和“动作如何进入物理层”。
+- Google Drive data folder: <https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN?usp=sharing>
+- `scenarios/`: reproducible scenario JSON files such as `northern_lights_phase1.json` and `northern_lights_phase2.json`.
+- `data/capture_rates/`: Phase 1/Phase 1+ emitter capture-rate profiles and metadata.
+- `data/网络收集资料/`: curated external references, such as Climate TRACE source mapping and monthly profiles.
 
-- `action.py`：定义 `ActionProposal`、`ActionFrame`、`ActionDecision`、`CommittedActionFrame`。
-- `resolver.py`：定义 `ActionResolver`，负责验证动作是否合法、参数是否完整、是否冲突，并把 proposal 翻译成 `network.step()` 能执行的字典。
+## Main Workflows
 
-典型导入：
+### Add a Controller
 
-```python
-from sim.actions import ActionFrame, ActionProposal, ActionResolver
-```
+1. Implement the control logic in `src/sim/control/`.
+2. Express actions with `ActionProposal` / `ActionFrame`.
+3. Route actions through `ActionResolver` into `network.step()`.
+4. Register evaluation in `experiments/compare_controllers_same_scenarios.py` or a new experiment script.
+5. Add behavior tests or smoke tests under `tests/`.
 
-### `src/sim/control/`
+### Add a Scenario
 
-控制器和算法层，负责“决定做什么”。
+1. Add a JSON configuration under `scenarios/`.
+2. If a new capture profile is required, place it under `data/capture_rates/`.
+3. Add a loading entry point in `src/sim/network_scenarios.py` or an environment factory.
+4. Validate with a demo, controller comparison, or dashboard script.
 
-- `baselines.py`：简单 baseline 策略，例如 `idle_policy` 和 `greedy_shuttle_policy`。
-- `rule_based.py`：规则控制器/启发式 baseline。
-- `milp.py`：开环 MILP benchmark。
-- `rolling_milp.py`：滚动窗口 MILP/MPC controller。
-- `imitation.py`：imitation learning 相关工具。
+### Add a Disturbance
 
-注意：`control/` 负责产生动作，`actions/` 负责定义动作协议，二者不是同一层。
+1. Generate the episode time series in `src/sim/scenario_generation/generator.py`.
+2. Define runtime resolution rules in `disturbance_resolver.py`.
+3. Connect the disturbance to `CCSEnv` or the relevant physical operation module.
+4. Add fixed-seed tests to keep experiments reproducible.
 
-### `src/sim/entities/`
+## Related Documentation
 
-物理实体和状态定义。
+- `docs/CCS_RL_Research_Core_Idea.md`
+- `docs/previous ideas/northern_lights_development_plan_cn.md`
+- `docs/previous ideas/northern_lights_mechanism_ladder_L0_L3plus_cn.md`
+- `src/sim/scenario_generation/wave_height/prediction/README.md`
 
-- `Emitter`：排放端/捕集端。
-- `Vessel`：LCO2 船。
-- `Terminal`：接收终端。
-- `Pipeline`：终端到海底系统的外输管线。
-- `SubseaManifold`：海底分配节点。
-- `InjectionWell` / `Reservoir`：注入井和储层。
-- `PhysicalState` / `StepResult`：仿真状态、单步结果和违规记录。
+## Citation
 
-### `src/sim/environment/`
+If you use this repository in a paper or report, please cite:
 
-RL 环境层。
-
-- `env.py`：核心 `CCSEnv`，提供 `reset()` / `step()` / observation / reward / action mask。
-- `factories.py`：环境工厂，例如 `build_phase1_env()`，用于快速创建 Northern Lights Phase 1 训练环境。
-- `gym_adapter.py`：Gymnasium/SB3 适配器，把原生 `CCSEnv` 包装成 `gymnasium.Env`。
-
-典型导入：
-
-```python
-from sim.environment import CCSEnv, CCSEnvConfig, build_phase1_env
-from sim.environment.gym_adapter import CCSGymEnv
-```
-
-### `src/sim/operations/`
-
-物理操作模块。它们实现具体的物理动作和约束投影。
-
-- `capture.py`：捕集和 venting。
-- `loading.py`：emitter 到 vessel 的装船。
-- `unloading.py`：vessel 到 terminal 的卸船。
-- `transport.py`：pipeline 和 manifold 的输送/分配。
-- `injection.py`：注入井注入。
-- `snapshot.py`：生成实体级观测快照。
-
-### `src/sim/scenario_generation/`
-
-扰动场景生成和运行时扰动解析。
-
-- `generator.py`：生成一个 episode 的时间序列扰动，例如 capture outage、天气、well maintenance、injectivity decline。
-- `disturbance_resolver.py`：运行时解析当前 step 的有效值。它不生成扰动，只负责“state 里有扰动覆盖值就用扰动值，否则回退到实体 nominal 值”。
-
-### `src/sim/visualization/`
-
-dashboard 和可视化生成代码。
-
-- `core.py`：轨迹、地图 payload、仿真数据组装。
-- `html.py`：HTML dashboard 渲染。
-- `writers.py`：写出 Phase 1 / Phase 2 dashboard 的入口函数。
-
-## 根目录下仍保留的核心文件
-
-这些文件目前仍在 `src/sim/` 根目录下，因为它们是跨模块核心或尚未进一步归类：
-
-- `network.py`：物理网络图和单步物理结算逻辑。
-- `simulator.py`：仿真执行器，接收 `ActionFrame`，调用 `ActionResolver`，推进 vessel movement 和 network step。
-- `routes.py`：航线和距离计算。
-- `line_source.py`：储层/井底压力 line-source 模型。
-- `network_scenarios.py`：从 `scenarios/` JSON 和 capture profile 数据构建 Northern Lights 物理网络。
-- `economics.py`：运营成本/收益模型。
-- `metrics.py`：episode rollout、KPI 和评估汇总；具体控制策略放在 `control/`。
-- `train.py`：RL 训练入口。
-
-后续如果继续整理，建议优先把 `economics.py` 和 `metrics.py` 放入 `evaluation/`，再考虑把 `network.py` / `simulator.py` / `routes.py` / `line_source.py` 拆成 `physics/`、`navigation/`、`geology/` 等包。
-
-## 数据目录
-
-### 外部数据下载
-
-部分数据文件体积较大,未纳入 git 仓库,存放在 Google Drive:
-
-- [数据文件（Google Drive）](https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN?usp=sharing)
-
-下载后请放回对应的数据目录再运行相关脚本。
-
-### `scenarios/`
-
-只放可复现实验场景 JSON：
-
-- `northern_lights_phase1.json`
-- `northern_lights_phase2.json`
-
-### `data/capture_rates/`
-
-Phase 1 emitter capture-rate profile 数据和元数据。
-
-### `data/网络收集资料/`
-
-从网络收集并整理过的外部资料，例如 Climate TRACE source mapping 和 monthly profile。它属于数据资料，不属于代码输出。
-
-## 实验和部署目录
-
-### `experiments/`
-
-实验入口。这里放“如何组合已有模块跑一个研究实验”的脚本，不放底层算法实现。
-
-当前主要脚本：
-
-- `compare_controllers_same_scenarios.py`：在相同 disturbance scenario 下比较 episode controllers，并写出 CSV/report；static MILP 作为 perfect-foresight benchmark 单独报告。
-
-### `hpc/`
-
-集群运行脚本。
-
-- `submit_env_check.sh`：检查 HPC 环境依赖和 GPU。
-- `submit_rl_smoke.sh`：提交 RL smoke test。
-- `submit_train_336h.sh`：提交 336h 训练任务。
-- `rl_smoke.py`：最小 RL 训练/评估 smoke test。
-
-这些脚本目前包含个人集群路径，例如 `/scratch_root/hx721/CCS_RLLLM`。如果项目要共享给其他机器使用，建议后续改成环境变量配置。
-
-## 测试
-
-```powershell
-$env:PYTHONPATH='E:\CCS_RLLLM\src'
-$env:PYTHONDONTWRITEBYTECODE='1'
-python -m unittest discover -s tests
+```bibtex
+@software{ccs_rlllm,
+  title  = {CCS_RLLLM: Ship-Based CCUS Logistics Simulation and RL Playground},
+  author = {CCS_RLLLM contributors},
+  year   = {2026},
+  note   = {Research code for physical-layer CCUS simulation, control, and reinforcement learning}
+}
 ```
