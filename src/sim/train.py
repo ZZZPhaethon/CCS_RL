@@ -111,15 +111,28 @@ def compare(model, seeds: list[int], episode_hours: int = 168, warm_start: bool 
     return rows
 
 
+def _summary_mean(summary: dict, key: str) -> float:
+    return float(summary.get(key, {}).get("mean", float("nan")))
+
+
 def _format_comparison(rows: dict) -> str:
-    header = f"{'policy':16} {'storage%':>9} {'loss%':>7} {'shortfall EUR':>14} {'total EUR':>14}"
+    header = (
+        f"{'policy':18} {'storage%':>9} {'loss%':>7} {'stored t':>10} "
+        f"{'vented t':>10} {'op EUR':>12} {'vent EUR':>12} "
+        f"{'total EUR':>12} {'op/t':>8} {'total/t':>9}"
+    )
     lines = [header, "-" * len(header)]
     for name, s in rows.items():
         lines.append(
-            f"{name:16} {s['storage_rate']['mean'] * 100:8.1f}% "
-            f"{s['loss_rate']['mean'] * 100:6.1f}% "
-            f"{s['storage_shortfall_penalty']['mean']:14,.0f} "
-            f"{s['total_cost']['mean']:14,.0f}"
+            f"{name:18} {_summary_mean(s, 'storage_rate') * 100:8.1f}% "
+            f"{_summary_mean(s, 'loss_rate') * 100:6.1f}% "
+            f"{_summary_mean(s, 'stored_t'):10,.0f} "
+            f"{_summary_mean(s, 'vented_t'):10,.0f} "
+            f"{_summary_mean(s, 'operating_cost'):12,.0f} "
+            f"{_summary_mean(s, 'vent_penalty'):12,.0f} "
+            f"{_summary_mean(s, 'total_cost'):12,.0f} "
+            f"{_summary_mean(s, 'cost_per_stored_t'):8,.1f} "
+            f"{_summary_mean(s, 'total_cost_per_stored_t'):9,.1f}"
         )
     return "\n".join(lines)
 

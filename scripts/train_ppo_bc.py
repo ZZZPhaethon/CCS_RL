@@ -24,6 +24,30 @@ from sim.control.imitation import bc_pretrain, make_kickstart_callback
 from sim.metrics import run_episode
 
 
+def _mean_metric(metrics, name):
+    values = [getattr(m, name) for m in metrics if getattr(m, name) is not None]
+    return float(np.mean(values)) if values else float("nan")
+
+
+def _format_policy_metrics(name, metrics) -> str:
+    storage = _mean_metric(metrics, "storage_rate")
+    loss = _mean_metric(metrics, "loss_rate")
+    stored_t = _mean_metric(metrics, "stored_t")
+    vented_t = _mean_metric(metrics, "vented_t")
+    operating_cost = _mean_metric(metrics, "operating_cost")
+    vent_penalty = _mean_metric(metrics, "vent_penalty")
+    total_cost = _mean_metric(metrics, "total_cost")
+    cost_per_stored_t = _mean_metric(metrics, "cost_per_stored_t")
+    total_cost_per_stored_t = _mean_metric(metrics, "total_cost_per_stored_t")
+    return (
+        f"{name:20s} storage={storage:6.1%}  loss={loss:6.1%}  "
+        f"stored={stored_t:9,.0f}t  vented={vented_t:8,.0f}t  "
+        f"op_cost={operating_cost:11,.0f}  vent_pen={vent_penalty:10,.0f}  "
+        f"total={total_cost:11,.0f}  "
+        f"op/t={cost_per_stored_t:6,.1f}  total/t={total_cost_per_stored_t:7,.1f}"
+    )
+
+
 def eval_policies(model, episode_hours, seeds, include_weather_obs=False):
     entries = [
         ("idle", idle_policy),
@@ -33,13 +57,13 @@ def eval_policies(model, episode_hours, seeds, include_weather_obs=False):
     ]
     lines = []
     for name, policy in entries:
-        srs, losses = [], []
+        metrics = []
         for s in seeds:
             env = make_native_env(episode_hours=episode_hours, warm_start=True,
                                   include_weather_obs=include_weather_obs)
             m = run_episode(env, policy, seed=s)
-            srs.append(m.storage_rate); losses.append(m.loss_rate)
-        line = f"{name:20s} storage={np.mean(srs):6.1%}  loss={np.mean(losses):6.1%}"
+            metrics.append(m)
+        line = _format_policy_metrics(name, metrics)
         print(line, flush=True)
         lines.append(line)
     return lines
