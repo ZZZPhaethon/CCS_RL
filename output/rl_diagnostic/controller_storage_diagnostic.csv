@@ -1,0 +1,5 @@
+horizon_h,controller,seed,storage_rate,loss_rate,vented_t,net
+168,idle,1,0.0871,0.0,0.0,-230368.0
+168,greedy_shuttle,1,0.4328,0.0,0.0,-336457.0
+720,idle,1,0.0201,0.5775,69245.4,-5776134.0
+720,greedy_shuttle,1,0.8639,0.0,0.0,-1525189.0
