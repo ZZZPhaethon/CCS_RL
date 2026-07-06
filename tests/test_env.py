@@ -58,7 +58,7 @@ class EnvSpaceTests(unittest.TestCase):
 
 
 class EnvDynamicsTests(unittest.TestCase):
-    def test_vessels_start_at_emitters_and_can_choose_terminal_or_other_emitters(self):
+    def test_vessels_start_at_emitters_and_need_full_cargo_before_terminal(self):
         env = _env()
         env.reset(seed=0)
         source_a_action = env.vessel_go_emitter_action("source_a")
@@ -67,17 +67,26 @@ class EnvDynamicsTests(unittest.TestCase):
         vessel_a_mask = env.vessel_action_mask()[env.vessel_ids.index("vessel_a")]
         vessel_b_mask = env.vessel_action_mask()[env.vessel_ids.index("vessel_b")]
 
+        # Not full at reset -> GO_TERMINAL is masked; other emitters remain legal.
         self.assertTrue(vessel_a_mask[VESSEL_WAIT])
-        self.assertTrue(vessel_a_mask[VESSEL_GO_TERMINAL])
+        self.assertFalse(vessel_a_mask[VESSEL_GO_TERMINAL])
         self.assertFalse(vessel_a_mask[source_a_action])
         self.assertTrue(vessel_a_mask[source_b_action])
-        self.assertTrue(vessel_b_mask[VESSEL_GO_TERMINAL])
+        self.assertFalse(vessel_b_mask[VESSEL_GO_TERMINAL])
         self.assertTrue(vessel_b_mask[source_a_action])
         self.assertFalse(vessel_b_mask[source_b_action])
+
+        # Once full, sailing to the terminal becomes legal.
+        env.simulator.state.entity_inventory_t["vessel_a"] = env.network.entities["vessel_a"].capacity_t
+        vessel_a_mask = env.vessel_action_mask()[env.vessel_ids.index("vessel_a")]
+        self.assertTrue(vessel_a_mask[VESSEL_GO_TERMINAL])
 
     def test_sailing_vessel_can_only_wait(self):
         env = _env()
         env.reset(seed=0)
+        # Fill both vessels so GO_TERMINAL is legal and they actually depart.
+        for vessel_id in env.vessel_ids:
+            env.simulator.state.entity_inventory_t[vessel_id] = env.network.entities[vessel_id].capacity_t
         action = _action(vessels=[VESSEL_GO_TERMINAL, VESSEL_GO_TERMINAL])
         env.step(action)
         # Both ships are now sailing -> mask permits WAIT only.

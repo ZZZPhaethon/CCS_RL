@@ -73,6 +73,12 @@ class CCSEnvConfig:
     storage_target_rate: float = 0.9
     reward_scale: float = 1e-3
     default_speed_knots: float = 12.0
+    # Dense shaping: EUR-equivalent reward per tonne of CO2 injected this step.
+    # 0.0 keeps the pure economic-net reward (backward compatible). A positive
+    # value (e.g. the carbon price) gives the agent an immediate signal for
+    # storing CO2 instead of waiting for the delayed venting penalty once buffers
+    # overflow, which is what makes short-horizon training reward idling.
+    injection_reward_eur_per_t: float = 0.0
 
 
 class CCSEnv:
@@ -238,7 +244,10 @@ class CCSEnv:
 
         in_transit_now = self._in_transit_inventory()
         in_transit_growth = in_transit_now - self.initial_in_transit_t
-        reward = economics.net * self.config.reward_scale
+        # Dense shaping term (off by default): reward CO2 actually injected this
+        # step so credit assignment does not depend on the delayed venting penalty.
+        storage_shaping_reward = self.config.injection_reward_eur_per_t * economics.stored_t
+        reward = (economics.net + storage_shaping_reward) * self.config.reward_scale
 
         self.t += 1
         # The operational task is fixed-horizon: there is no early terminal
@@ -255,6 +264,7 @@ class CCSEnv:
             "in_transit_growth_t": in_transit_growth,
             "shortfall_penalty": shortfall_penalty,
             "shortfall_delta_penalty": shortfall_delta_penalty,
+            "storage_shaping_reward": storage_shaping_reward,
             "storage_rate": self.storage_rate(),
             "loss_rate": self.loss_rate(),
             "violations": [v.violation_type for v in step_result.violations],
@@ -323,7 +333,15 @@ class CCSEnv:
             return [True] + [False] * (self.vessel_action_count - 1)  # mid-voyage: can only WAIT
         berth = vstate["berth"]
         at_terminal = berth == route["destination"]
-        mask = [True, not at_terminal]
+        cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
+        vessel = self.network.entities[vessel_id]
+        # Business constraint: a loaded vessel at the terminal must finish
+        # unloading before it may leave (can only WAIT).
+        if at_terminal and cargo_t > 1e-9:
+            return [True] + [False] * (self.vessel_action_count - 1)
+        # Business constraint: only a full vessel may sail to the terminal.
+        terminal_allowed = (not at_terminal) and cargo_t >= vessel.capacity_t - 1e-9
+        mask = [True, terminal_allowed]
         mask.extend(berth != emitter_id for emitter_id in self.emitter_ids)
         return mask
 
@@ -413,6 +431,15 @@ class CCSEnv:
             berth = vstate["berth"]
             destination = self._vessel_action_destination(vessel_id, choice)
             if destination == berth:
+                destination = None
+            cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
+            route = self._routes[vessel_id]
+            vessel = self.network.entities[vessel_id]
+            # A loaded vessel at the terminal must unload before leaving.
+            if berth == route["destination"] and cargo_t > 1e-9:
+                destination = None
+            # Only a full vessel may sail to the terminal.
+            if destination == route["destination"] and cargo_t < vessel.capacity_t - 1e-9:
                 destination = None
             if destination is not None:
                 proposals.append(self._proposal(vessel_id, "sail_to", {"destination_id": destination}))

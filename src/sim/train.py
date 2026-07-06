@@ -25,16 +25,24 @@ def make_native_env(
     storage_target_rate: float = 0.9,
     warm_start: bool = True,
     storage_shortfall_penalty: float = 0.0,
+    injection_reward_eur_per_t: float = 0.0,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
     ``storage_shortfall_penalty`` is passed through for experiments that
     explicitly price storage shortfall; the default leaves it as a KPI only.
+    ``injection_reward_eur_per_t`` adds a dense per-step reward for injected
+    CO2 (0.0 = off); a positive value fixes the short-horizon objective, which
+    otherwise rewards idling until the delayed venting penalty kicks in.
     """
     cost_model = CostModel(EconomicParameters(storage_shortfall_eur_per_t=storage_shortfall_penalty))
     return build_phase1_env(
         cost_model=cost_model,
-        config=CCSEnvConfig(episode_hours=episode_hours, storage_target_rate=storage_target_rate),
+        config=CCSEnvConfig(
+            episode_hours=episode_hours,
+            storage_target_rate=storage_target_rate,
+            injection_reward_eur_per_t=injection_reward_eur_per_t,
+        ),
         scenario_config=ScenarioConfig(episode_hours=episode_hours, warm_start=warm_start),
     )
 
@@ -46,10 +54,13 @@ def train_ppo(
     episode_hours: int = 168,
     warm_start: bool = True,
     storage_shortfall_penalty: float = 0.0,
+    injection_reward_eur_per_t: float = 0.0,
     verbose: int = 1,
     n_steps: int = 128,
     batch_size: int = 64,
     learning_rate: float = 3e-4,
+    device: str = "auto",
+    progress_bar: bool = False,
 ):
     try:
         from sb3_contrib import MaskablePPO
@@ -60,6 +71,7 @@ def train_ppo(
         episode_hours=episode_hours,
         warm_start=warm_start,
         storage_shortfall_penalty=storage_shortfall_penalty,
+        injection_reward_eur_per_t=injection_reward_eur_per_t,
     )
     gym_env = CCSGymEnv(native_env)
     model = MaskablePPO(
@@ -71,8 +83,11 @@ def train_ppo(
         n_steps=n_steps,
         batch_size=batch_size,
         learning_rate=learning_rate,
+        device=device,
     )
-    model.learn(total_timesteps=total_timesteps)
+    if verbose:
+        print(f"[train_ppo] policy device = {model.policy.device}", flush=True)
+    model.learn(total_timesteps=total_timesteps, progress_bar=progress_bar)
     return model
 
 
@@ -81,7 +96,8 @@ def compare(model, seeds: list[int], episode_hours: int = 168, warm_start: bool 
     policies = {
         "idle": idle_policy,
         "greedy_shuttle": greedy_shuttle_policy,
-        "ppo": make_ppo_policy(model),
+        "ppo_stochastic": make_ppo_policy(model, deterministic=False),
+        "ppo_deterministic": make_ppo_policy(model, deterministic=True),
     }
     rows = {}
     for name, policy in policies.items():
@@ -110,6 +126,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--gamma", type=float, default=0.999)
     parser.add_argument("--episode-hours", type=int, default=168)
+    parser.add_argument(
+        "--injection-reward-eur-per-t",
+        type=float,
+        default=0.0,
+        help="Dense per-step reward per tonne injected (0 = off; try 80 to match the carbon price).",
+    )
     parser.add_argument("--eval-seeds", type=int, nargs="+", default=[101, 102, 103, 104, 105])
     args = parser.parse_args()
 
@@ -118,6 +140,7 @@ def main() -> None:
         seed=args.seed,
         gamma=args.gamma,
         episode_hours=args.episode_hours,
+        injection_reward_eur_per_t=args.injection_reward_eur_per_t,
     )
     rows = compare(model, seeds=args.eval_seeds, episode_hours=args.episode_hours)
     print("\n=== PPO vs baselines (Phase 1, evaluation seeds) ===")

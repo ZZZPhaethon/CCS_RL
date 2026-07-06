@@ -37,6 +37,20 @@ def flat_action_mask(
     )
 
 
+def flat_action_from_native(env: CCSEnv, native: dict[str, list]) -> np.ndarray:
+    """Concatenate a native action dict into flat MultiDiscrete order.
+
+    Inverse of :func:`native_action_from_flat`: ``[vessels..., wells...]``.
+    """
+    vessels = [int(a) for a in native["vessels"]]
+    wells = [int(a) for a in native["wells"]]
+    expected = len(env.vessel_ids) + len(env.well_ids)
+    flat = vessels + wells
+    if len(flat) != expected:
+        raise ValueError(f"Expected {expected} flat action entries, got {len(flat)}.")
+    return np.asarray(flat, dtype=np.int64)
+
+
 def native_action_from_flat(env: CCSEnv, action) -> dict[str, list[int]]:
     """Split a flat MultiDiscrete action into the native env action dict."""
     flat = np.asarray(action, dtype=np.int64).reshape(-1)
@@ -91,16 +105,23 @@ class CCSGymEnv(gym.Env):
         return native_action_from_flat(self.env, action)
 
 
-def make_ppo_policy(model):
+def make_ppo_policy(model, deterministic: bool = False):
     """Wrap a trained flat-action PPO model as a metrics ``policy(env) -> action``.
 
     Lets the trained policy be scored by the same ``sim.metrics`` harness as the
     heuristic baselines, on the native :class:`CCSEnv`.
+
+    ``deterministic`` defaults to ``False``: a still-stochastic policy relies on
+    sampling to dispatch vessels, so an argmax (``deterministic=True``) action can
+    collapse to all-WAIT and score like the idle baseline even when the sampled
+    policy stores well. Use ``deterministic=True`` only once the policy has become
+    confident (peaked) on its dispatch actions.
     """
 
     def policy(env: CCSEnv) -> dict[str, list]:
         obs = np.asarray(env._observation(), dtype=np.float32)
-        action, _ = model.predict(obs, deterministic=True)
+        masks = flat_action_mask(env.vessel_action_mask(), env.well_rate_action_mask())
+        action, _ = model.predict(obs, deterministic=deterministic, action_masks=masks)
         return native_action_from_flat(env, action)
 
     return policy
