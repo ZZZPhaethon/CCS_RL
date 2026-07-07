@@ -28,11 +28,15 @@ NORTHERN_LIGHTS_PHASE1_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1.json"
 NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1_2well.json"
 NORTHERN_LIGHTS_PHASE2_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase2.json"
 TOY_DATA_PATH = SCENARIO_ROOT / "toy.json"
+MILK_RUN_STRESS_DATA_PATH = SCENARIO_ROOT / "milk_run_stress.json"
+NORTHERN_LIGHTS_PHASE1_MILKRUN_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1_milkrun.json"
 NORTHERN_LIGHTS_PHASE1_CAPTURE_PROFILE_PATH = CAPTURE_RATE_ROOT / "phase1plus_emitters_capture_rate_profile_hourly.csv"
 
 _FIXED_SCENARIO_PATHS = {
     "toy": TOY_DATA_PATH,
+    "milk_run_stress": MILK_RUN_STRESS_DATA_PATH,
     "northern_lights_phase1": NORTHERN_LIGHTS_PHASE1_DATA_PATH,
+    "northern_lights_phase1_milkrun": NORTHERN_LIGHTS_PHASE1_MILKRUN_DATA_PATH,
     "northern_lights_phase1_2well": NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH,
     "northern_lights_phase2": NORTHERN_LIGHTS_PHASE2_DATA_PATH,
 }
@@ -82,6 +86,13 @@ def fixed_scenario_locations(identifier: str) -> dict[str, tuple[float, float]]:
         location_id: _coordinate(values)
         for location_id, values in _load_fixed_scenario_data(identifier)["locations"].items()
     }
+
+
+def recommended_fixed_scenario_episode_hours(identifier: str, default: int = 600) -> int:
+    """Scenario-specific recommended rollout horizon, if declared in JSON."""
+
+    payload = _load_fixed_scenario_data(identifier)
+    return int(payload.get("recommended_episode_hours", default))
 
 
 def _load_hourly_capture_profiles(path: Path) -> dict[str, tuple[float, ...]]:
@@ -138,6 +149,12 @@ def build_toy_demo() -> tuple[PhysicalNetwork, PhysicalState]:
     return build_fixed_scenario_demo("toy")
 
 
+def build_milk_run_stress_demo() -> tuple[PhysicalNetwork, PhysicalState]:
+    """One-vessel case where milk-run planning should beat greedy waiting."""
+
+    return build_fixed_scenario_demo("milk_run_stress")
+
+
 def build_fixed_scenario_demo(identifier: str) -> tuple[PhysicalNetwork, PhysicalState]:
     """Load any fixed-network scenario from the project ``scenarios`` folder."""
     scenario_id = resolve_fixed_scenario_id(identifier)
@@ -152,6 +169,10 @@ def build_fixed_scenario_demo(identifier: str) -> tuple[PhysicalNetwork, Physica
 
 def toy_locations() -> dict[str, tuple[float, float]]:
     return fixed_scenario_locations("toy")
+
+
+def milk_run_stress_locations() -> dict[str, tuple[float, float]]:
+    return fixed_scenario_locations("milk_run_stress")
 
 
 def _build_network_from_scenario_data(
