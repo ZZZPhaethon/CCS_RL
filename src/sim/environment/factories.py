@@ -13,7 +13,9 @@ from pathlib import Path
 
 from ..economics import CostModel
 from ..network_scenarios import (
+    _load_fixed_scenario_data,
     _load_phase1_data,
+    build_fixed_scenario_demo,
     build_northern_lights_phase1_demo,
 )
 from ..scenario_generation import ScenarioConfig, ScenarioGenerator
@@ -35,13 +37,24 @@ def build_phase1_env(
     cost_model: CostModel | None = None,
     config: CCSEnvConfig | None = None,
     *,
+    scenario: str = "northern_lights_phase1",
     scenario_config: ScenarioConfig | None = None,
     use_leg_wave_weather: bool = True,
     leg_wave_csv: str | Path = DEFAULT_PHASE1_LEG_WAVE_CSV,
 ) -> CCSEnv:
-    """A ``CCSEnv`` on the real Northern Lights Phase 1 network."""
-    network, _state = build_northern_lights_phase1_demo()
-    locations = _scenario_locations(_load_phase1_data())
+    """A ``CCSEnv`` on a registered fixed scenario (default Northern Lights Phase 1).
+
+    ``scenario`` selects any id in the fixed-scenario registry (e.g. the milk-run
+    variants). Non-phase1 scenarios have no leg-wave CSV, so leg-wave weather is
+    skipped for them automatically.
+    """
+    if scenario == "northern_lights_phase1":
+        network, _state = build_northern_lights_phase1_demo()
+        locations = _scenario_locations(_load_phase1_data())
+    else:
+        network, _state = build_fixed_scenario_demo(scenario)
+        locations = _scenario_locations(_load_fixed_scenario_data(scenario))
+        use_leg_wave_weather = False
     env_config = config or CCSEnvConfig()
     if scenario_generator is None:
         scenario_generator = _default_phase1_scenario_generator(

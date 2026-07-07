@@ -70,3 +70,63 @@ def _emitter_supply_score(env: CCSEnv, emitter_id: str) -> float:
     state = env.simulator.state
     availability = state.emitter_availability.get(emitter_id, emitter.availability)
     return state.entity_inventory_t.get(emitter_id, 0.0) + emitter.nominal_capture_tph * max(0.0, availability)
+
+
+def balanced_capture_assignment(env: CCSEnv) -> dict[str, str]:
+    """Assign each emitter to a vessel, balancing total capture rate per vessel.
+
+    Heaviest emitters first, each to the least-loaded vessel - a load-balanced
+    partition that avoids overloading one vessel with several high-rate sources.
+    """
+    rates = {e: env.network.entities[e].nominal_capture_tph for e in env.emitter_ids}
+    load = {v: 0.0 for v in env.vessel_ids}
+    assign: dict[str, str] = {}
+    for emitter_id in sorted(env.emitter_ids, key=lambda e: -rates[e]):
+        vessel_id = min(env.vessel_ids, key=lambda v: load[v])
+        assign[emitter_id] = vessel_id
+        load[vessel_id] += rates[emitter_id]
+    return assign
+
+
+def make_cluster_shuttle_policy(env: CCSEnv, assignment: dict[str, str] | None = None):
+    """Shuttle policy where each vessel only serves its assigned emitters.
+
+    Unlike ``greedy_shuttle_policy`` (which lets every vessel chase the globally
+    fullest emitter and mis-routes under a tight fleet), this partitions emitters
+    across vessels. ``assignment`` maps emitter->vessel; if ``None`` a
+    :func:`balanced_capture_assignment` is used.
+    """
+    assign = assignment or balanced_capture_assignment(env)
+
+    def policy(env: CCSEnv) -> dict[str, list]:
+        state = env.simulator.state
+        acts: list[int] = []
+        for i, vessel_id in enumerate(env.vessel_ids):
+            mask = env.vessel_action_mask()[i]
+            cargo = state.entity_inventory_t.get(vessel_id, 0.0)
+            vessel = env.network.entities[vessel_id]
+            berth = state.vessel_berths.get(vessel_id)
+            mine = [e for e in env.emitter_ids if assign.get(e) == vessel_id]
+            if berth in env.terminal_ids and cargo > _EPS:
+                acts.append(VESSEL_WAIT); continue
+            if mask[VESSEL_GO_TERMINAL] and cargo >= vessel.capacity_t - _EPS:
+                acts.append(VESSEL_GO_TERMINAL); continue
+            if berth in mine and cargo < vessel.capacity_t - _EPS and _emitter_supply_score(env, str(berth)) > _EPS:
+                acts.append(VESSEL_WAIT); continue
+            best = None
+            for e in mine:
+                a = env.vessel_go_emitter_action(e)
+                if not mask[a]:
+                    continue
+                sc = _emitter_supply_score(env, e)
+                if best is None or sc > best[0]:
+                    best = (sc, a)
+            if best is not None:
+                acts.append(best[1]); continue
+            acts.append(VESSEL_GO_TERMINAL if (mask[VESSEL_GO_TERMINAL] and cargo > _EPS) else VESSEL_WAIT)
+        return {
+            "vessels": acts,
+            "wells": [env.highest_feasible_well_rate_index(well_id) for well_id in env.well_ids],
+        }
+
+    return policy

@@ -32,6 +32,7 @@ def make_native_env(
     operating_cost_weight: float = 1.0,
     carbon_price_eur_per_t: float | None = None,
     enforce_full_load_dispatch: bool = True,
+    scenario: str = "northern_lights_phase1",
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
@@ -53,6 +54,7 @@ def make_native_env(
             store_reward_eur_per_t = carbon_price_eur_per_t  # symmetric credit = tax
     cost_model = CostModel(EconomicParameters(**econ_kwargs))
     return build_phase1_env(
+        scenario=scenario,
         cost_model=cost_model,
         config=CCSEnvConfig(
             episode_hours=episode_hours,

@@ -19,7 +19,7 @@ import numpy as np
 
 from sim.train import make_native_env
 from sim.environment.gym_adapter import CCSGymEnv, make_ppo_policy
-from sim.control.baselines import idle_policy, greedy_shuttle_policy
+from sim.control.baselines import idle_policy, greedy_shuttle_policy, make_cluster_shuttle_policy
 from sim.control.imitation import bc_pretrain, make_kickstart_callback
 from sim.metrics import run_episode
 
@@ -48,20 +48,21 @@ def _format_policy_metrics(name, metrics) -> str:
     )
 
 
-def eval_policies(model, episode_hours, seeds, include_weather_obs=False):
+def eval_policies(model, episode_hours, seeds, include_weather_obs=False, scenario="northern_lights_phase1"):
     entries = [
-        ("idle", idle_policy),
-        ("greedy_shuttle", greedy_shuttle_policy),
-        ("ppo_stochastic", make_ppo_policy(model, deterministic=False)),
-        ("ppo_deterministic", make_ppo_policy(model, deterministic=True)),
+        ("idle", lambda env: idle_policy),
+        ("greedy_shuttle", lambda env: greedy_shuttle_policy),
+        ("cluster_balanced", lambda env: make_cluster_shuttle_policy(env)),
+        ("ppo_stochastic", lambda env: make_ppo_policy(model, deterministic=False)),
+        ("ppo_deterministic", lambda env: make_ppo_policy(model, deterministic=True)),
     ]
     lines = []
-    for name, policy in entries:
+    for name, make_policy in entries:
         metrics = []
         for s in seeds:
             env = make_native_env(episode_hours=episode_hours, warm_start=True,
-                                  include_weather_obs=include_weather_obs)
-            m = run_episode(env, policy, seed=s)
+                                  include_weather_obs=include_weather_obs, scenario=scenario)
+            m = run_episode(env, make_policy(env), seed=s)
             metrics.append(m)
         line = _format_policy_metrics(name, metrics)
         print(line, flush=True)
@@ -89,6 +90,10 @@ def main() -> None:
                    help="multiplier on operating cost in the reward (raise to reward efficiency)")
     p.add_argument("--carbon-price", type=float, default=None,
                    help="symmetric carbon price: sets both vent tax and stored-CO2 credit")
+    p.add_argument("--scenario", type=str, default="northern_lights_phase1",
+                   help="fixed-scenario id to train on (e.g. northern_lights_phase1_milkrun_imbalanced)")
+    p.add_argument("--teacher", type=str, default="greedy", choices=["greedy", "cluster"],
+                   help="BC demonstrator: greedy_shuttle or load-balanced cluster")
     p.add_argument("--timesteps", type=int, default=100_000)
     p.add_argument("--n-steps", type=int, default=512)
     p.add_argument("--seed", type=int, default=0)
@@ -108,7 +113,8 @@ def main() -> None:
     else:
         store_v = args.store_reward if args.store_reward is not None else args.injection_reward_eur_per_t
         rew_tag = f"_s{store_v:g}v{args.vent_weight:g}c{args.operating_cost_weight:g}"
-    tag = (f"bc_phase1_{args.episode_hours}h{weather_tag}{kick_tag}{rew_tag}_ts{args.timesteps}")
+    scen_tag = args.scenario.replace("northern_lights_", "")
+    tag = (f"bc_{scen_tag}_{args.teacher}_{args.episode_hours}h{weather_tag}{kick_tag}{rew_tag}_ts{args.timesteps}")
     report = []
 
     native_env = make_native_env(
@@ -119,6 +125,7 @@ def main() -> None:
         vent_penalty_weight=args.vent_weight,
         operating_cost_weight=args.operating_cost_weight,
         carbon_price_eur_per_t=args.carbon_price,
+        scenario=args.scenario,
     )
     gym_env = CCSGymEnv(native_env)
     model = MaskablePPO(
@@ -128,9 +135,13 @@ def main() -> None:
     )
     print(f"[{dt.datetime.now():%H:%M:%S}] policy device = {model.policy.device}", flush=True)
 
-    print(f"[{dt.datetime.now():%H:%M:%S}] === BC pretrain (greedy, {args.bc_episodes} eps) ===", flush=True)
+    if args.teacher == "cluster":
+        teacher = make_cluster_shuttle_policy(native_env)
+    else:
+        teacher = greedy_shuttle_policy
+    print(f"[{dt.datetime.now():%H:%M:%S}] === BC pretrain (teacher={args.teacher}, {args.bc_episodes} eps) ===", flush=True)
     demo_obs, demo_acts, demo_masks, demo_weights = bc_pretrain(
-        model, gym_env, greedy_shuttle_policy,
+        model, gym_env, teacher,
         n_episodes=args.bc_episodes, epochs=args.bc_epochs,
         nonwait_weight=args.nonwait_weight,
     )
@@ -138,7 +149,7 @@ def main() -> None:
     print(f"[{dt.datetime.now():%H:%M:%S}] === eval AFTER BC (before PPO) ===", flush=True)
     report.append("## After BC (before PPO)")
     report += eval_policies(model, args.episode_hours, args.eval_seeds,
-                            include_weather_obs=args.weather_obs)
+                            include_weather_obs=args.weather_obs, scenario=args.scenario)
 
     if args.timesteps > 0:
         callback = None
@@ -153,7 +164,7 @@ def main() -> None:
         print(f"[{dt.datetime.now():%H:%M:%S}] === eval AFTER PPO fine-tune ===", flush=True)
         report.append("\n## After PPO fine-tune")
         report += eval_policies(model, args.episode_hours, args.eval_seeds,
-                            include_weather_obs=args.weather_obs)
+                            include_weather_obs=args.weather_obs, scenario=args.scenario)
 
     model_path = out / f"ppo_{tag}.zip"
     model.save(str(model_path))
