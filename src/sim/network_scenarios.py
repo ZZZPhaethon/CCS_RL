@@ -30,6 +30,7 @@ NORTHERN_LIGHTS_PHASE2_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase2.json"
 TOY_DATA_PATH = SCENARIO_ROOT / "toy.json"
 MILK_RUN_STRESS_DATA_PATH = SCENARIO_ROOT / "milk_run_stress.json"
 NORTHERN_LIGHTS_PHASE1_MILKRUN_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1_milkrun.json"
+NORTHERN_LIGHTS_PHASE1_MILKRUN_IMBALANCED_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1_milkrun_imbalanced.json"
 NORTHERN_LIGHTS_PHASE1_CAPTURE_PROFILE_PATH = CAPTURE_RATE_ROOT / "phase1plus_emitters_capture_rate_profile_hourly.csv"
 
 _FIXED_SCENARIO_PATHS = {
@@ -37,6 +38,7 @@ _FIXED_SCENARIO_PATHS = {
     "milk_run_stress": MILK_RUN_STRESS_DATA_PATH,
     "northern_lights_phase1": NORTHERN_LIGHTS_PHASE1_DATA_PATH,
     "northern_lights_phase1_milkrun": NORTHERN_LIGHTS_PHASE1_MILKRUN_DATA_PATH,
+    "northern_lights_phase1_milkrun_imbalanced": NORTHERN_LIGHTS_PHASE1_MILKRUN_IMBALANCED_DATA_PATH,
     "northern_lights_phase1_2well": NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH,
     "northern_lights_phase2": NORTHERN_LIGHTS_PHASE2_DATA_PATH,
 }
