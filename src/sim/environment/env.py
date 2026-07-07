@@ -29,6 +29,7 @@ mask exposes which destination choices are physically legal, while
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from numbers import Integral
 
 from ..actions import ActionFrame, ActionProposal
@@ -91,6 +92,12 @@ class CCSEnvConfig:
     store_reward_eur_per_t: float | None = None
     vent_penalty_weight: float = 1.0
     operating_cost_weight: float = 1.0
+    # Business dispatch constraints (full vessel before sailing to the terminal;
+    # unload before leaving it). On by default: a crisp curriculum crutch that
+    # lets BC/PPO learn a greedy-like policy. Turn OFF to let an optimizer (MILP)
+    # or an advanced policy use partial-load dispatch, e.g. to beat weather - the
+    # hard mask otherwise caps the achievable optimum at greedy-like behaviour.
+    enforce_full_load_dispatch: bool = True
     # Expose per-leg wave-height weather (current + 24 h/168 h forecast) and an
     # annual clock in the observation. Off by default so existing (no-weather)
     # models keep their observation size; turn on to let the policy route around
@@ -117,6 +124,7 @@ class CCSEnv:
         self.cost_model = cost_model or CostModel()
         self.locations = locations
         self._routes = routes or self._build_routes(locations)
+        self._leg_distance_cache: dict[tuple[str, str], float] = {}
 
         self.emitter_ids = sorted(network._entities_of_type(Emitter))
         self.vessel_ids = sorted(network._entities_of_type(Vessel))
@@ -207,15 +215,17 @@ class CCSEnv:
         for rid in self.reservoir_ids:
             names += [f"{rid}.pressure_margin"]
         if self.config.include_weather_obs:
-            names += ["hour_of_year"]
+            names += ["hour_of_year_sin", "hour_of_year_cos"]
             for vid in self.vessel_ids:
-                names += [
-                    f"{vid}.leg_speed_now",
-                    f"{vid}.leg_speed_24h_mean",
-                    f"{vid}.leg_speed_24h_min",
-                    f"{vid}.leg_speed_168h_mean",
-                    f"{vid}.leg_speed_168h_min",
-                ]
+                for label, _destination_id in self._weather_destination_slots():
+                    names += [
+                        f"{vid}.{label}.leg_speed_now",
+                        f"{vid}.{label}.leg_speed_24h_mean",
+                        f"{vid}.{label}.leg_speed_24h_min",
+                        f"{vid}.{label}.leg_speed_168h_mean",
+                        f"{vid}.{label}.leg_speed_168h_min",
+                        f"{vid}.{label}.travel_hours_now",
+                    ]
         return names
 
     # -- episode lifecycle ------------------------------------------------
@@ -368,6 +378,10 @@ class CCSEnv:
             return [True] + [False] * (self.vessel_action_count - 1)  # mid-voyage: can only WAIT
         berth = vstate["berth"]
         at_terminal = berth == route["destination"]
+        if not self.config.enforce_full_load_dispatch:
+            mask = [True, not at_terminal]
+            mask.extend(berth != emitter_id for emitter_id in self.emitter_ids)
+            return mask
         cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
         vessel = self.network.entities[vessel_id]
         # Business constraint: a loaded vessel at the terminal must finish
@@ -467,15 +481,16 @@ class CCSEnv:
             destination = self._vessel_action_destination(vessel_id, choice)
             if destination == berth:
                 destination = None
-            cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
-            route = self._routes[vessel_id]
-            vessel = self.network.entities[vessel_id]
-            # A loaded vessel at the terminal must unload before leaving.
-            if berth == route["destination"] and cargo_t > 1e-9:
-                destination = None
-            # Only a full vessel may sail to the terminal.
-            if destination == route["destination"] and cargo_t < vessel.capacity_t - 1e-9:
-                destination = None
+            if self.config.enforce_full_load_dispatch:
+                cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
+                route = self._routes[vessel_id]
+                vessel = self.network.entities[vessel_id]
+                # A loaded vessel at the terminal must unload before leaving.
+                if berth == route["destination"] and cargo_t > 1e-9:
+                    destination = None
+                # Only a full vessel may sail to the terminal.
+                if destination == route["destination"] and cargo_t < vessel.capacity_t - 1e-9:
+                    destination = None
             if destination is not None:
                 proposals.append(self._proposal(vessel_id, "sail_to", {"destination_id": destination}))
                 departing.add(vessel_id)
@@ -598,15 +613,64 @@ class CCSEnv:
             span = reservoir.max_pressure_bar - reservoir.initial_pressure_bar
             obs += [_safe_div(reservoir.pressure_margin_bar(inv), span) if span > 0 else 1.0]
         if self.config.include_weather_obs:
-            obs.append((state.time_h % 8760.0) / 8760.0)  # hour_of_year (seasonality)
+            hour_angle = 2.0 * math.pi * ((state.time_h % 8760.0) / 8760.0)
+            obs += [math.sin(hour_angle), math.cos(hour_angle)]
             for vid in self.vessel_ids:
-                route = self._routes[vid]
-                leg_id = f"{route['origin']}->{route['destination']}"
-                now = self._leg_speed_at(leg_id, 0)
-                mean24, min24 = self._leg_speed_forecast(leg_id, 24)
-                mean168, min168 = self._leg_speed_forecast(leg_id, 168)
-                obs += [now, mean24, min24, mean168, min168]
+                obs += self._weather_observation_for_vessel(vid)
         return obs
+
+    def _weather_destination_slots(self) -> list[tuple[str, str]]:
+        slots = [(f"to_{terminal_id}", terminal_id) for terminal_id in self.terminal_ids]
+        slots.extend((f"to_{emitter_id}", emitter_id) for emitter_id in self.emitter_ids)
+        return slots
+
+    def _weather_observation_for_vessel(self, vessel_id: str) -> list[float]:
+        route = self._routes[vessel_id]
+        origin_id = self._weather_reference_origin(vessel_id)
+        values: list[float] = []
+        for _label, destination_id in self._weather_destination_slots():
+            if destination_id == origin_id:
+                values += [1.0, 1.0, 1.0, 1.0, 1.0, 0.0]
+                continue
+            leg_id = f"{origin_id}->{destination_id}"
+            now = self._leg_speed_at(leg_id, 0)
+            mean24, min24 = self._leg_speed_forecast(leg_id, 24)
+            mean168, min168 = self._leg_speed_forecast(leg_id, 168)
+            travel_hours = self._normalized_travel_hours(origin_id, destination_id, route, now)
+            values += [now, mean24, min24, mean168, min168, travel_hours]
+        return values
+
+    def _weather_reference_origin(self, vessel_id: str) -> str:
+        vstate = self.simulator.vessel_states[vessel_id]
+        if vstate["mode"] == "berthed":
+            return str(vstate["berth"])
+        return str(vstate.get("origin") or self._routes[vessel_id]["origin"])
+
+    def _normalized_travel_hours(self, origin_id: str, destination_id: str, route: dict, speed_factor: float) -> float:
+        speed_knots = float(route.get("speed_knots") or self.config.default_speed_knots)
+        effective_speed_knots = speed_knots * max(0.0, speed_factor)
+        if effective_speed_knots <= 1e-9:
+            return 1.0
+        distance_km = self._leg_distance_km(origin_id, destination_id, route)
+        travel_hours = distance_km / (effective_speed_knots * 1.852) if distance_km > 0 else 0.0
+        return max(0.0, min(1.0, travel_hours / max(1.0, float(self.config.episode_hours))))
+
+    def _leg_distance_km(self, origin_id: str, destination_id: str, route: dict) -> float:
+        if origin_id == destination_id:
+            return 0.0
+        key = (origin_id, destination_id)
+        if key in self._leg_distance_cache:
+            return self._leg_distance_cache[key]
+        if {origin_id, destination_id} == {route["origin"], route["destination"]}:
+            distance_km = float(route.get("distance_km") or 0.0)
+        else:
+            if origin_id not in self.locations or destination_id not in self.locations:
+                distance_km = 0.0
+            else:
+                maritime_route = sea_route(self.locations[origin_id], self.locations[destination_id])
+                distance_km = route_distance_km(maritime_route.coordinates)
+        self._leg_distance_cache[key] = distance_km
+        return distance_km
 
     def _leg_speed_series(self, leg_id: str) -> list[float] | None:
         """Full per-leg wave speed-factor series for the episode, if present."""

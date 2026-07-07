@@ -31,6 +31,7 @@ def make_native_env(
     vent_penalty_weight: float = 1.0,
     operating_cost_weight: float = 1.0,
     carbon_price_eur_per_t: float | None = None,
+    enforce_full_load_dispatch: bool = True,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
@@ -61,6 +62,7 @@ def make_native_env(
             store_reward_eur_per_t=store_reward_eur_per_t,
             vent_penalty_weight=vent_penalty_weight,
             operating_cost_weight=operating_cost_weight,
+            enforce_full_load_dispatch=enforce_full_load_dispatch,
         ),
         scenario_config=ScenarioConfig(episode_hours=episode_hours, warm_start=warm_start),
     )
