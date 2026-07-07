@@ -60,11 +60,20 @@ def geographic_assignment(env):
 
 def llm_assignment(env, model: str, verbose: bool = True):
     """Ask the LLM to partition emitters among vessels. Returns {emitter: vessel}."""
+    n_vessels = len(env.vessel_ids)
+    total_rate = sum(env.network.entities[e].nominal_capture_tph for e in env.emitter_ids)
+    target = total_rate / max(1, n_vessels)
     lines = [
         "You are the strategic planner for a ship-based CO2 storage network.",
-        "Assign every emitter to exactly one vessel that will collect its CO2. Group",
-        "geographically close emitters under one vessel; give a far/isolated emitter its",
-        "own dedicated vessel; balance capture load so no buffer is left to overflow.",
+        "Assign every emitter to exactly one vessel that will collect and deliver its CO2.",
+        "",
+        "CRITICAL RULE - balance CAPTURE LOAD, not just geography:",
+        "Each vessel has limited shuttle throughput. If one vessel is assigned emitters whose",
+        "combined capture rate is too high, their buffers overflow and CO2 is vented (lost).",
+        f"So keep the SUM of capture rates per vessel roughly equal (~{target:.0f} t/h each).",
+        "Do NOT put two high-rate emitters on the same vessel just because they are close;",
+        "it is better to send a vessel to a more distant emitter than to overload one vessel.",
+        "Among balanced options, prefer grouping geographically close emitters.",
         "",
         "Vessels (home port and coordinates lat,lon):",
     ]
@@ -72,15 +81,16 @@ def llm_assignment(env, model: str, verbose: bool = True):
         home = env._routes[vid]["origin"]
         lat, lon = env.locations[home]
         lines.append(f"  - {vid}: home={home} ({lat:.2f},{lon:.2f})")
-    lines.append("Emitters (coordinates lat,lon and capture rate):")
+    lines.append(f"Emitters (coordinates lat,lon and CAPTURE RATE - total {total_rate:.0f} t/h):")
     for e in env.emitter_ids:
         lat, lon = env.locations[e]
         rate = env.network.entities[e].nominal_capture_tph
-        lines.append(f"  - {e}: ({lat:.2f},{lon:.2f}), {rate:.0f} t/h")
+        lines.append(f"  - {e}: ({lat:.2f},{lon:.2f}), capture {rate:.0f} t/h")
     lines += [
         "",
-        'Respond with ONLY a JSON object mapping each vessel id to its list of emitter ids, '
-        'covering every emitter exactly once. Example: {"vessel_x": ["e1","e2"], "vessel_y": ["e3"]}',
+        "First think about the per-vessel capture totals, then answer with ONLY a JSON object",
+        'mapping each vessel id to its list of emitter ids, covering every emitter exactly once.',
+        'Example: {"vessel_x": ["e1","e2"], "vessel_y": ["e3"]}',
     ]
     raw = ollama_generate(model, "\n".join(lines))
     if verbose:
