@@ -58,8 +58,12 @@ def geographic_assignment(env):
     return {e: min(env.vessel_ids, key=lambda v: d2(e, homes[v])) for e in env.emitter_ids}
 
 
-def llm_assignment(env, model: str, verbose: bool = True):
-    """Ask the LLM to partition emitters among vessels. Returns {emitter: vessel}."""
+def llm_assignment(env, model: str, verbose: bool = True, include_state: bool = False):
+    """Ask the LLM to partition emitters among vessels. Returns {emitter: vessel}.
+
+    With ``include_state`` the prompt also reports current buffer fills and vessel
+    positions/cargo, so a dynamic re-plan can react to a region that is backing up.
+    """
     n_vessels = len(env.vessel_ids)
     total_rate = sum(env.network.entities[e].nominal_capture_tph for e in env.emitter_ids)
     target = total_rate / max(1, n_vessels)
@@ -81,11 +85,23 @@ def llm_assignment(env, model: str, verbose: bool = True):
         home = env._routes[vid]["origin"]
         lat, lon = env.locations[home]
         lines.append(f"  - {vid}: home={home} ({lat:.2f},{lon:.2f})")
+    st = env.simulator.state
     lines.append(f"Emitters (coordinates lat,lon and CAPTURE RATE - total {total_rate:.0f} t/h):")
     for e in env.emitter_ids:
         lat, lon = env.locations[e]
-        rate = env.network.entities[e].nominal_capture_tph
-        lines.append(f"  - {e}: ({lat:.2f},{lon:.2f}), capture {rate:.0f} t/h")
+        em = env.network.entities[e]
+        extra = ""
+        if include_state:
+            fill = st.entity_inventory_t.get(e, 0.0) / max(1.0, em.buffer_capacity_t)
+            extra = f", buffer {fill:.0%} full NOW"
+        lines.append(f"  - {e}: ({lat:.2f},{lon:.2f}), capture {em.nominal_capture_tph:.0f} t/h{extra}")
+    if include_state:
+        lines.append("Current vessel status:")
+        for vid in env.vessel_ids:
+            v = env.network.entities[vid]
+            cargo = st.entity_inventory_t.get(vid, 0.0) / max(1.0, v.capacity_t)
+            lines.append(f"  - {vid}: at {st.vessel_berths.get(vid)}, {cargo:.0%} full")
+        lines.append("Re-balance the assignment to drain any near-full buffer and prevent venting.")
     lines += [
         "",
         "First think about the per-vessel capture totals, then answer with ONLY a JSON object",
@@ -114,35 +130,54 @@ def llm_assignment(env, model: str, verbose: bool = True):
     return assign
 
 
+def _cluster_action(env, assign):
+    """One step of the deterministic cluster executor for a given assignment."""
+    st = env.simulator.state
+    acts = []
+    for i, vid in enumerate(env.vessel_ids):
+        mask = env.vessel_action_mask()[i]
+        cargo = st.entity_inventory_t.get(vid, 0.0)
+        vessel = env.network.entities[vid]
+        berth = st.vessel_berths.get(vid)
+        mine = [e for e in env.emitter_ids if assign.get(e) == vid]
+        if berth in env.terminal_ids and cargo > _EPS:
+            acts.append(VESSEL_WAIT); continue
+        if mask[VESSEL_GO_TERMINAL] and cargo >= vessel.capacity_t - _EPS:
+            acts.append(VESSEL_GO_TERMINAL); continue
+        if berth in mine and cargo < vessel.capacity_t - _EPS and _supply(env, str(berth)) > _EPS:
+            acts.append(VESSEL_WAIT); continue
+        best = None
+        for e in mine:
+            a = env.vessel_go_emitter_action(e)
+            if not mask[a]:
+                continue
+            sc = _supply(env, e)
+            if best is None or sc > best[0]:
+                best = (sc, a)
+        if best is not None:
+            acts.append(best[1]); continue
+        acts.append(VESSEL_GO_TERMINAL if (mask[VESSEL_GO_TERMINAL] and cargo > _EPS) else VESSEL_WAIT)
+    return {"vessels": acts,
+            "wells": [env.highest_feasible_well_rate_index(w) for w in env.well_ids]}
+
+
 def make_cluster_policy(env, assign):
+    return lambda env: _cluster_action(env, assign)
+
+
+def make_dynamic_llm_policy(env, model, replan_every_h=168, verbose=True):
+    """Re-query the LLM every ``replan_every_h`` hours with the current buffer
+    state so it can shift a vessel toward a region that is backing up."""
+    ctx = {"assign": None, "next": 0.0}
+
     def policy(env):
-        st = env.simulator.state
-        acts = []
-        for i, vid in enumerate(env.vessel_ids):
-            mask = env.vessel_action_mask()[i]
-            cargo = st.entity_inventory_t.get(vid, 0.0)
-            vessel = env.network.entities[vid]
-            berth = st.vessel_berths.get(vid)
-            mine = [e for e in env.emitter_ids if assign.get(e) == vid]
-            if berth in env.terminal_ids and cargo > _EPS:
-                acts.append(VESSEL_WAIT); continue
-            if mask[VESSEL_GO_TERMINAL] and cargo >= vessel.capacity_t - _EPS:
-                acts.append(VESSEL_GO_TERMINAL); continue
-            if berth in mine and cargo < vessel.capacity_t - _EPS and _supply(env, str(berth)) > _EPS:
-                acts.append(VESSEL_WAIT); continue
-            best = None
-            for e in mine:
-                a = env.vessel_go_emitter_action(e)
-                if not mask[a]:
-                    continue
-                sc = _supply(env, e)
-                if best is None or sc > best[0]:
-                    best = (sc, a)
-            if best is not None:
-                acts.append(best[1]); continue
-            acts.append(VESSEL_GO_TERMINAL if (mask[VESSEL_GO_TERMINAL] and cargo > _EPS) else VESSEL_WAIT)
-        return {"vessels": acts,
-                "wells": [env.highest_feasible_well_rate_index(w) for w in env.well_ids]}
+        t = env.simulator.state.time_h
+        if ctx["assign"] is None or t >= ctx["next"]:
+            ctx["assign"] = llm_assignment(env, model, verbose=verbose, include_state=True)
+            ctx["next"] = t + replan_every_h
+            if verbose:
+                print(f"    [replan @ {t:.0f}h] {ctx['assign']}", flush=True)
+        return _cluster_action(env, ctx["assign"])
     return policy
 
 
@@ -152,6 +187,8 @@ def main():
     p.add_argument("--scenario", default="northern_lights_phase1_milkrun")
     p.add_argument("--episode-hours", type=int, default=720)
     p.add_argument("--seeds", type=int, nargs="+", default=[101, 102])
+    p.add_argument("--replan-every", type=int, default=0,
+                   help="hours between LLM re-plans (0 = static one-time assignment)")
     args = p.parse_args()
 
     def make_env():
@@ -180,7 +217,11 @@ def main():
     print(f"\n=== {args.scenario} {args.episode_hours}h, seeds={args.seeds} ===")
     score("greedy_shuttle", lambda env: greedy_shuttle_policy)
     score("cluster_geographic", lambda env: make_cluster_policy(env, geo))
-    score(f"llm_planner({args.model.split(':')[0]})", lambda env: make_cluster_policy(env, llm_assign))
+    mname = args.model.split(':')[0]
+    score(f"llm_static({mname})", lambda env: make_cluster_policy(env, llm_assign))
+    if args.replan_every > 0:
+        score(f"llm_dynamic({mname},{args.replan_every}h)",
+              lambda env: make_dynamic_llm_policy(env, args.model, args.replan_every, verbose=False))
 
 
 if __name__ == "__main__":
