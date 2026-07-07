@@ -103,6 +103,12 @@ class CCSEnvConfig:
     # models keep their observation size; turn on to let the policy route around
     # rough legs and exploit seasonality.
     include_weather_obs: bool = False
+    # Expose a per-vessel emitter assignment (the high-level "goal") in the
+    # observation: for each vessel, a one-hot over emitters marking which it is
+    # meant to serve. This is what makes the policy goal-conditioned, so it can
+    # execute an arbitrary assignment (from a heuristic or an LLM) and transfer
+    # zero-shot to new layouts. Off by default (keeps the observation size).
+    include_goal_obs: bool = False
 
 
 class CCSEnv:
@@ -141,6 +147,10 @@ class CCSEnv:
         )
 
         self.n_steps = max(1, int(round(self.config.episode_hours / network.time_step_hours)))
+
+        # High-level goal: which vessel serves each emitter (set by a planner /
+        # LLM / heuristic). Exposed in the observation when include_goal_obs is on.
+        self.goal_assignment: dict[str, str] = {}
 
         # Episode state, populated by reset().
         self.scenario: Scenario | None = None
@@ -226,6 +236,9 @@ class CCSEnv:
                         f"{vid}.{label}.leg_speed_168h_min",
                         f"{vid}.{label}.travel_hours_now",
                     ]
+        if self.config.include_goal_obs:
+            for vid in self.vessel_ids:
+                names += [f"{vid}.goal_{eid}" for eid in self.emitter_ids]
         return names
 
     # -- episode lifecycle ------------------------------------------------
@@ -617,7 +630,14 @@ class CCSEnv:
             obs += [math.sin(hour_angle), math.cos(hour_angle)]
             for vid in self.vessel_ids:
                 obs += self._weather_observation_for_vessel(vid)
+        if self.config.include_goal_obs:
+            for vid in self.vessel_ids:
+                obs += [1.0 if self.goal_assignment.get(eid) == vid else 0.0 for eid in self.emitter_ids]
         return obs
+
+    def set_goal_assignment(self, assignment: dict[str, str]) -> None:
+        """Set the high-level emitter->vessel goal exposed in the observation."""
+        self.goal_assignment = dict(assignment)
 
     def _weather_destination_slots(self) -> list[tuple[str, str]]:
         slots = [(f"to_{terminal_id}", terminal_id) for terminal_id in self.terminal_ids]
