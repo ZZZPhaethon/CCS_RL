@@ -42,8 +42,8 @@ python -u scripts/compare_reward_modes_bc.py \
   --scenario northern_lights_phase1_3vessels \
   --episode-hours 720 \
   --timesteps 100000 \
-  --bc-episodes 20 \
-  --bc-epochs 10 \
+  --bc-episodes 30 \
+  --bc-epochs 20 \
   --kickstart-coef 1.0 \
   --yara-buffer-capacity "$YARA_BUFFER_CAPACITY" \
   --eval-seeds 101 102 103 104 105 \

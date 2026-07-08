@@ -92,7 +92,7 @@ def make_env(args, reward_mode: str):
     return env
 
 
-def train_one(args, reward_mode: str):
+def pretrain_one(args, reward_mode: str):
     from sb3_contrib import MaskablePPO
 
     native_env = make_env(args, reward_mode)
@@ -124,6 +124,11 @@ def train_one(args, reward_mode: str):
         seed0=args.bc_seed0,
         nonwait_weight=args.nonwait_weight,
     )
+    return model, (demo_obs, demo_acts, demo_masks, demo_weights)
+
+
+def fine_tune_one(args, reward_mode: str, model, demo_data) -> None:
+    demo_obs, demo_acts, demo_masks, demo_weights = demo_data
     if args.timesteps > 0:
         callback = None
         if args.kickstart_coef > 0.0:
@@ -147,14 +152,14 @@ def train_one(args, reward_mode: str):
             progress_bar=args.progress_bar,
             callback=callback,
         )
-    return model
 
 
-def eval_model(args, reward_mode: str, model):
+def eval_model(args, reward_mode: str, model, label_suffix: str = ""):
     rows = []
+    label = f"{reward_mode}_{label_suffix}" if label_suffix else reward_mode
     entries = [
-        (f"{reward_mode}_stochastic", make_ppo_policy(model, deterministic=False)),
-        (f"{reward_mode}_deterministic", make_ppo_policy(model, deterministic=True)),
+        (f"{label}_stochastic", make_ppo_policy(model, deterministic=False)),
+        (f"{label}_deterministic", make_ppo_policy(model, deterministic=True)),
     ]
     for name, policy in entries:
         metrics = []
@@ -246,8 +251,8 @@ def parse_args():
     parser.add_argument("--scenario", default="northern_lights_phase1_3vessels")
     parser.add_argument("--episode-hours", type=int, default=720)
     parser.add_argument("--timesteps", type=int, default=100_000)
-    parser.add_argument("--bc-episodes", type=int, default=20)
-    parser.add_argument("--bc-epochs", type=int, default=10)
+    parser.add_argument("--bc-episodes", type=int, default=30)
+    parser.add_argument("--bc-epochs", type=int, default=20)
     parser.add_argument("--eval-seeds", type=int, nargs="+", default=[101, 102, 103, 104, 105])
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bc-seed0", type=int, default=0)
@@ -286,15 +291,20 @@ def main() -> None:
     kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0.0 else ""
     buffer_tag = yara_buffer_tag(args)
     for reward_mode in ("economic", "vent_first"):
-        model = train_one(args, reward_mode)
+        model, demo_data = pretrain_one(args, reward_mode)
+        print(f"[{dt.datetime.now():%H:%M:%S}] evaluating {reward_mode} after BC", flush=True)
+        rows.extend(eval_model(args, reward_mode, model, label_suffix="bc"))
+        if args.timesteps > 0:
+            fine_tune_one(args, reward_mode, model, demo_data)
         model_path = out / (
             f"ppo_{reward_mode}_{args.scenario}_{args.episode_hours}h"
             f"_ts{args.timesteps}{kick_tag}{buffer_tag}.zip"
         )
         model.save(str(model_path))
         model_paths[reward_mode] = model_path
-        print(f"[{dt.datetime.now():%H:%M:%S}] evaluating {reward_mode}", flush=True)
-        rows.extend(eval_model(args, reward_mode, model))
+        if args.timesteps > 0:
+            print(f"[{dt.datetime.now():%H:%M:%S}] evaluating {reward_mode}", flush=True)
+            rows.extend(eval_model(args, reward_mode, model))
 
     write_outputs(args, rows, model_paths)
 

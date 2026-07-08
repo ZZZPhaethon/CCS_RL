@@ -45,6 +45,13 @@ class CompareRewardModesTests(unittest.TestCase):
             "_yara7500",
         )
 
+    def test_default_bc_budget_matches_partial_dispatch_diagnostics(self):
+        with patch("sys.argv", ["compare_reward_modes_bc.py"]):
+            args = compare.parse_args()
+
+        self.assertEqual(args.bc_episodes, 30)
+        self.assertEqual(args.bc_epochs, 20)
+
 
 if __name__ == "__main__":
     unittest.main()

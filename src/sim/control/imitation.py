@@ -94,10 +94,14 @@ def behavior_clone(
         for start in range(0, n, batch_size):
             idx = perm[start : start + batch_size]
             batch_masks = mask_t[idx] if mask_t is not None else None
-            _values, log_prob, _entropy = policy.evaluate_actions(
-                obs_t[idx], act_t[idx], action_masks=batch_masks
-            )
-            nll = -log_prob
+            if w_t is not None and w_t.ndim == 2:
+                log_prob = _masked_action_log_probs(policy, obs_t[idx], act_t[idx], batch_masks)
+                nll = -log_prob
+            else:
+                _values, log_prob, _entropy = policy.evaluate_actions(
+                    obs_t[idx], act_t[idx], action_masks=batch_masks
+                )
+                nll = -log_prob
             if w_t is not None:
                 wb = w_t[idx]
                 loss = (nll * wb).sum() / wb.sum().clamp_min(1e-8)
@@ -110,6 +114,31 @@ def behavior_clone(
         if log:
             print(f"[bc] epoch {epoch + 1}/{epochs}  weighted_nll={running / n:.4f}", flush=True)
     policy.set_training_mode(False)
+
+
+def _masked_action_log_probs(policy, obs, actions, action_masks=None):
+    """Per-action-dimension log probabilities under the masked policy."""
+    import torch
+
+    features = policy.extract_features(obs)
+    if policy.share_features_extractor:
+        latent_pi, _latent_vf = policy.mlp_extractor(features)
+    else:
+        pi_features, _vf_features = features
+        latent_pi = policy.mlp_extractor.forward_actor(pi_features)
+    distribution = policy._get_action_dist_from_latent(latent_pi)
+    if action_masks is not None:
+        distribution.apply_masking(action_masks)
+    if not hasattr(distribution, "distributions"):
+        return distribution.log_prob(actions).reshape(-1, 1)
+    actions = actions.view(-1, len(distribution.action_dims))
+    return torch.stack(
+        [
+            dist.log_prob(action)
+            for dist, action in zip(distribution.distributions, torch.unbind(actions, dim=1))
+        ],
+        dim=1,
+    )
 
 
 def decision_step_weights(
@@ -127,6 +156,23 @@ def decision_step_weights(
     vessel_actions = np.asarray(actions, dtype=np.int64)[:, :vessel_count]
     is_decision = (vessel_actions != 0).any(axis=1)
     return np.where(is_decision, float(nonwait_weight), 1.0).astype(np.float32)
+
+
+def action_dimension_weights(
+    actions: np.ndarray,
+    vessel_count: int,
+    nonwait_weight: float = 10.0,
+) -> np.ndarray:
+    """Per-action weights that up-weight only non-WAIT vessel decisions."""
+    actions = np.asarray(actions, dtype=np.int64)
+    weights = np.ones(actions.shape, dtype=np.float32)
+    vessel_actions = actions[:, :vessel_count]
+    weights[:, :vessel_count] = np.where(
+        vessel_actions != 0,
+        float(nonwait_weight),
+        1.0,
+    )
+    return weights
 
 
 def bc_pretrain(
@@ -150,11 +196,11 @@ def bc_pretrain(
     if len(obs) == 0:
         raise ValueError("No demonstrations collected; check demo_policy / episode length.")
     vessel_count = len(gym_env.env.vessel_ids)
-    weights = decision_step_weights(acts, vessel_count, nonwait_weight=nonwait_weight)
-    n_decision = int((weights > 1.0).sum())
+    weights = action_dimension_weights(acts, vessel_count, nonwait_weight=nonwait_weight)
+    n_decision = int((weights[:, :vessel_count] > 1.0).sum())
     print(
         f"[bc] collected {len(obs)} pairs from {n_episodes} episodes; "
-        f"{n_decision} dispatch steps up-weighted x{nonwait_weight:g}",
+        f"{n_decision} dispatch actions up-weighted x{nonwait_weight:g}",
         flush=True,
     )
     behavior_clone(
@@ -222,8 +268,12 @@ def make_kickstart_callback(
             for _ in range(n_batches):
                 idx = torch.randint(0, n, (batch_size,), device=self._obs.device)
                 bm = self._mask[idx] if self._mask is not None else None
-                _v, log_prob, _e = policy.evaluate_actions(self._obs[idx], self._act[idx], action_masks=bm)
-                nll = -log_prob
+                if self._w is not None and self._w.ndim == 2:
+                    log_prob = _masked_action_log_probs(policy, self._obs[idx], self._act[idx], bm)
+                    nll = -log_prob
+                else:
+                    _v, log_prob, _e = policy.evaluate_actions(self._obs[idx], self._act[idx], action_masks=bm)
+                    nll = -log_prob
                 if self._w is not None:
                     wb = self._w[idx]
                     bc = (nll * wb).sum() / wb.sum().clamp_min(1e-8)
