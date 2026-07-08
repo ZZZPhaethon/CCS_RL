@@ -126,6 +126,64 @@ uv run python -m sim.scenario_generation.wave_height.prediction.train_gru
 
 对应说明见 `src/sim/scenario_generation/wave_height/prediction/README.md`。
 
+## 强化学习与 LLM 实验
+
+`scripts/` 目录是 RL + LLM 的实验栈。完整结论(RL 追平 greedy、milk-run 路由头空间、
+LLM 规划、目标条件泛化等)见 [`docs/experiments_summary.md`](docs/experiments_summary.md)。
+
+### 行为克隆 + PPO(kickstarting)
+
+从示范策略(greedy 或负载均衡 cluster)热启动 MaskablePPO,再用衰减的 BC 锚微调:
+
+```powershell
+uv run python scripts\train_ppo_bc.py --scenario northern_lights_phase1_milkrun_imbalanced `
+  --teacher cluster --carbon-price 80 --bc-episodes 30 --bc-epochs 20 `
+  --kickstart-coef 1.0 --timesteps 150000
+```
+
+关键参数:`--scenario`(任意已注册场景)、`--teacher {greedy,cluster}`、
+`--carbon-price`(对称:存储信用=放空税)、`--kickstart-coef`、`--weather-obs`、
+`--injection-reward-eur-per-t`。
+
+### 目标条件 RL(零样本泛化)
+
+在随机化的捕集不均布局上训练一个策略,以"每条船的源分配"为目标条件,再在**留出的新布局**上评估:
+
+```powershell
+uv run python scripts\train_goal_conditioned.py --bc-episodes 48 --timesteps 200000 `
+  --kickstart-coef 1.0 --outage-rate 0.5 --outage-hours 12
+```
+
+### LLM 规划(本地 Qwen / Llama,经 Ollama)
+
+```powershell
+winget install Ollama.Ollama
+ollama pull qwen2.5:7b-instruct
+ollama pull llama3.1:8b
+```
+
+- `scripts\llm_planner.py` —— LLM 产生高层"船→源"分配,由确定性 cluster 策略执行(分层规划)。
+- `scripts\llm_router.py` —— LLM 在每个发船决策点选目的地。
+- `scripts\eval_llm_goal.py` —— 对比"LLM 目标 vs 启发式目标"喂给目标条件策略。
+
+```powershell
+uv run python scripts\llm_planner.py --model qwen2.5:7b-instruct `
+  --scenario northern_lights_phase1_milkrun_imbalanced
+```
+
+### 评估与天花板
+
+```powershell
+uv run python scripts\eval_ppo_model.py output\rl_ppo\<model>.zip
+uv run python scripts\eval_milp_ceiling.py --seeds 101 102   # rolling-MILP 参考上界
+```
+
+### Milk-run 场景
+
+`northern_lights_phase1_milkrun`(2 船 3 个分散源)与
+`northern_lights_phase1_milkrun_imbalanced`(捕集不均)让 greedy 的贪心选源变得次优,
+为学习 / LLM 规划制造可利用的路由头空间。
+
 ## 测试
 
 ```powershell
@@ -216,6 +274,7 @@ src/sim/
 
 ## 相关文档
 
+- [`docs/experiments_summary.md`](docs/experiments_summary.md) —— RL + LLM 实验结果与结论
 - `docs/CCS_RL_Research_Core_Idea.md`
 - `docs/previous ideas/northern_lights_development_plan_cn.md`
 - `docs/previous ideas/northern_lights_mechanism_ladder_L0_L3plus_cn.md`

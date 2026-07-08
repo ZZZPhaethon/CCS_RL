@@ -137,6 +137,70 @@ uv run python -m sim.scenario_generation.wave_height.prediction.train_gru
 
 See `src/sim/scenario_generation/wave_height/prediction/README.md` for details.
 
+## Reinforcement Learning & LLM Experiments
+
+The `scripts/` directory holds the RL + LLM research stack. A full write-up of the
+findings (RL matching greedy, milk-run headroom, LLM planning, goal-conditioned
+generalization) is in [`docs/experiments_summary.md`](docs/experiments_summary.md).
+
+### Behaviour cloning + PPO (kickstarting)
+
+Warm-start a MaskablePPO policy from a demonstrator (greedy or a load-balanced
+cluster), then fine-tune with a decaying BC anchor:
+
+```powershell
+uv run python scripts\train_ppo_bc.py --scenario northern_lights_phase1_milkrun_imbalanced `
+  --teacher cluster --carbon-price 80 --bc-episodes 30 --bc-epochs 20 `
+  --kickstart-coef 1.0 --timesteps 150000
+```
+
+Key flags: `--scenario` (any registered scenario), `--teacher {greedy,cluster}`,
+`--carbon-price` (symmetric store credit = vent tax), `--kickstart-coef`,
+`--weather-obs`, `--injection-reward-eur-per-t`.
+
+### Goal-conditioned RL (zero-shot generalization)
+
+Train one policy across randomized capture-imbalance layouts, conditioned on a
+per-vessel emitter assignment, then evaluate on a **held-out** layout:
+
+```powershell
+uv run python scripts\train_goal_conditioned.py --bc-episodes 48 --timesteps 200000 `
+  --kickstart-coef 1.0 --outage-rate 0.5 --outage-hours 12
+```
+
+### LLM planning (local Qwen / Llama via Ollama)
+
+```powershell
+winget install Ollama.Ollama
+ollama pull qwen2.5:7b-instruct
+ollama pull llama3.1:8b
+```
+
+- `scripts\llm_planner.py` — the LLM produces a high-level vessel→emitter
+  assignment executed by a deterministic cluster policy (hierarchical planning).
+- `scripts\llm_router.py` — the LLM picks the destination at each dispatch step.
+- `scripts\eval_llm_goal.py` — LLM vs heuristic as the goal source for the
+  goal-conditioned policy.
+
+```powershell
+uv run python scripts\llm_planner.py --model qwen2.5:7b-instruct `
+  --scenario northern_lights_phase1_milkrun_imbalanced
+```
+
+### Evaluation and ceiling
+
+```powershell
+uv run python scripts\eval_ppo_model.py output\rl_ppo\<model>.zip
+uv run python scripts\eval_milp_ceiling.py --seeds 101 102   # rolling-MILP reference
+```
+
+### Milk-run scenarios
+
+`northern_lights_phase1_milkrun` (2 vessels, 3 spread emitters) and
+`northern_lights_phase1_milkrun_imbalanced` (imbalanced capture) make greedy
+source selection suboptimal, creating routing headroom for learning / LLM
+planning to exploit.
+
 ## Tests
 
 ```powershell
@@ -227,6 +291,7 @@ Some external data files are large and are not fully tracked in git. Download th
 
 ## Related Documentation
 
+- [`docs/experiments_summary.md`](docs/experiments_summary.md) — RL + LLM experiment results and conclusions
 - `docs/CCS_RL_Research_Core_Idea.md`
 - `docs/previous ideas/northern_lights_development_plan_cn.md`
 - `docs/previous ideas/northern_lights_mechanism_ladder_L0_L3plus_cn.md`
