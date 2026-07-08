@@ -49,7 +49,7 @@ class ScenarioConfig:
 
     # Injection-well maintenance windows.
     well_maintenance_rate_per_week: float = 0.3
-    well_maintenance_mean_hours: float = 12.0
+    well_maintenance_mean_hours: float = 24.0
 
     # Injectivity decline over the episode (time proxy for cumulative injection).
     injectivity_max_decline: float = 0.15

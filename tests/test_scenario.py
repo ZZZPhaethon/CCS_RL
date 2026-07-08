@@ -117,10 +117,10 @@ class ScenarioGeneratorTests(unittest.TestCase):
         self.assertEqual(config.emitter_initial_fill_range, (0.0, 0.5))
         self.assertEqual(config.terminal_initial_fill_range, (0.0, 0.5))
 
-    def test_default_outage_durations_are_twelve_hours(self):
+    def test_default_outage_and_maintenance_durations(self):
         config = ScenarioConfig()
         self.assertEqual(config.capture_outage_mean_hours, 12.0)
-        self.assertEqual(config.well_maintenance_mean_hours, 12.0)
+        self.assertEqual(config.well_maintenance_mean_hours, 24.0)
 
 
 class WarmStartTests(unittest.TestCase):
