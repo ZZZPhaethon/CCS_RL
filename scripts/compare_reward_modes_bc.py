@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -38,6 +39,25 @@ def _actual_cost_per_stored_t(metric) -> float:
     return _actual_total_cost(metric) / metric.stored_t
 
 
+def apply_yara_buffer_capacity_override(env, args) -> None:
+    capacity = getattr(args, "yara_buffer_capacity", None)
+    if capacity is None:
+        return
+    emitter_id = "yara_sluiskil"
+    try:
+        emitter = env.network.entities[emitter_id]
+    except KeyError as exc:
+        raise ValueError(f"Cannot set Yara buffer: {emitter_id!r} is not in this scenario.") from exc
+    env.network.entities[emitter_id] = replace(emitter, buffer_capacity_t=float(capacity))
+
+
+def yara_buffer_tag(args) -> str:
+    capacity = getattr(args, "yara_buffer_capacity", None)
+    if capacity is None:
+        return ""
+    return f"_yara{capacity:g}"
+
+
 def summarize(policy: str, metrics) -> dict[str, float | str]:
     return {
         "policy": policy,
@@ -53,7 +73,7 @@ def summarize(policy: str, metrics) -> dict[str, float | str]:
 
 
 def make_env(args, reward_mode: str):
-    return make_native_env(
+    env = make_native_env(
         episode_hours=args.episode_hours,
         warm_start=True,
         injection_reward_eur_per_t=args.injection_reward_eur_per_t,
@@ -68,6 +88,8 @@ def make_env(args, reward_mode: str):
         enforce_full_load_dispatch=args.enforce_full_load_dispatch,
         scenario=args.scenario,
     )
+    apply_yara_buffer_capacity_override(env, args)
+    return env
 
 
 def train_one(args, reward_mode: str):
@@ -177,9 +199,10 @@ def write_outputs(args, rows, model_paths: dict[str, Path]) -> None:
     out.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0.0 else ""
+    buffer_tag = yara_buffer_tag(args)
     stem = (
         f"reward_mode_compare_{args.scenario}_{args.episode_hours}h"
-        f"_ts{args.timesteps}{kick_tag}_{stamp}"
+        f"_ts{args.timesteps}{kick_tag}{buffer_tag}_{stamp}"
     )
     csv_path = out / f"{stem}.csv"
     md_path = out / f"{stem}.md"
@@ -195,6 +218,7 @@ def write_outputs(args, rows, model_paths: dict[str, Path]) -> None:
         f"Generated: {dt.datetime.now().isoformat(timespec='seconds')}",
         f"episode_hours={args.episode_hours}, timesteps={args.timesteps}, seeds={args.eval_seeds}",
         f"kickstart_coef={args.kickstart_coef}",
+        f"yara_buffer_capacity={args.yara_buffer_capacity}",
         f"disturbance=ScenarioConfig defaults, partial_dispatch={not args.enforce_full_load_dispatch}",
         "",
         "Actual cost = operating_cost + vent_penalty.",
@@ -247,6 +271,7 @@ def parse_args():
     parser.add_argument("--overflow-risk-eur-per-t", type=float, default=100.0)
     parser.add_argument("--overflow-risk-lookahead-h", type=float, default=24.0)
     parser.add_argument("--enforce-full-load-dispatch", action="store_true")
+    parser.add_argument("--yara-buffer-capacity", type=float, default=None)
     parser.add_argument("--out-dir", default="output/rl_ppo")
     return parser.parse_args()
 
@@ -259,11 +284,12 @@ def main() -> None:
     rows = eval_baselines(args)
     model_paths = {}
     kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0.0 else ""
+    buffer_tag = yara_buffer_tag(args)
     for reward_mode in ("economic", "vent_first"):
         model = train_one(args, reward_mode)
         model_path = out / (
             f"ppo_{reward_mode}_{args.scenario}_{args.episode_hours}h"
-            f"_ts{args.timesteps}{kick_tag}.zip"
+            f"_ts{args.timesteps}{kick_tag}{buffer_tag}.zip"
         )
         model.save(str(model_path))
         model_paths[reward_mode] = model_path

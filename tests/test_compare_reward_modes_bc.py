@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts import compare_reward_modes_bc as compare
+from sim.entities import Emitter
 
 
 class _Metric:
@@ -27,6 +28,22 @@ class CompareRewardModesTests(unittest.TestCase):
         self.assertEqual([row["policy"] for row in rows], ["idle", "greedy_teacher"])
         self.assertEqual(rows[0]["actual_total_cost"], 50.0)
         self.assertEqual(rows[0]["actual_cost_per_stored_t"], 0.5)
+
+    def test_yara_buffer_override_replaces_frozen_emitter(self):
+        emitter = Emitter("yara_sluiskil", nominal_capture_tph=100.0, buffer_capacity_t=15_000.0)
+        env = SimpleNamespace(network=SimpleNamespace(entities={"yara_sluiskil": emitter}))
+        args = SimpleNamespace(yara_buffer_capacity=7_500.0)
+
+        compare.apply_yara_buffer_capacity_override(env, args)
+
+        self.assertEqual(env.network.entities["yara_sluiskil"].buffer_capacity_t, 7_500.0)
+        self.assertEqual(emitter.buffer_capacity_t, 15_000.0)
+
+    def test_yara_buffer_tag_marks_output_artifacts(self):
+        self.assertEqual(
+            compare.yara_buffer_tag(SimpleNamespace(yara_buffer_capacity=7_500.0)),
+            "_yara7500",
+        )
 
 
 if __name__ == "__main__":
