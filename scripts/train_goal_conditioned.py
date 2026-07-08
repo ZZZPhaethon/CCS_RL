@@ -44,6 +44,10 @@ TRAIN_LAYOUTS = [(2.5, 2.5, 0.4), (0.4, 2.5, 2.5), (2.5, 0.4, 2.5), (1.6, 1.0, 1
 TEST_LAYOUT = (0.5, 2.5, 1.3)  # held out - never trained on
 EP_H = 720
 CARBON = 80.0
+# Disturbance strength (set from CLI). Strong, long capture outages make a rigid
+# static assignment idle a vessel whose emitter is offline, so a policy that can
+# reallocate should win. Set outage_rate=0 to reproduce the near-static regime.
+DISTURB = {"outage_rate": 0.5, "outage_hours": 12.0}
 
 
 def make_layout_data(factors):
@@ -66,9 +70,14 @@ def build_env(factors, include_goal=True):
     data = make_layout_data(factors)
     network, _ = _build_network_from_scenario_data(data)
     loc = _scenario_locations(data)
+    scen_cfg = ScenarioConfig(
+        episode_hours=EP_H,
+        capture_outage_rate_per_week=DISTURB["outage_rate"],
+        capture_outage_mean_hours=DISTURB["outage_hours"],
+    )
     return CCSEnv(
         network, loc,
-        scenario_generator=ScenarioGenerator(config=ScenarioConfig(episode_hours=EP_H)),
+        scenario_generator=ScenarioGenerator(config=scen_cfg),
         cost_model=CostModel(EconomicParameters(carbon_price_eur_per_t=CARBON)),
         config=CCSEnvConfig(episode_hours=EP_H, include_goal_obs=include_goal,
                             store_reward_eur_per_t=CARBON),
@@ -140,7 +149,13 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--eval-seeds", type=int, nargs="+", default=[101, 102, 103])
+    p.add_argument("--outage-rate", type=float, default=0.5,
+                   help="capture outages per week per emitter (raise for a dynamic stress test)")
+    p.add_argument("--outage-hours", type=float, default=12.0, help="mean outage duration")
     args = p.parse_args()
+    DISTURB["outage_rate"] = args.outage_rate
+    DISTURB["outage_hours"] = args.outage_hours
+    print(f"disturbance: outage_rate={args.outage_rate}/wk, mean={args.outage_hours}h", flush=True)
 
     from sb3_contrib import MaskablePPO
 
