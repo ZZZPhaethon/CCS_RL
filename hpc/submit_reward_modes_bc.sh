@@ -16,12 +16,13 @@ set -euo pipefail
 source /scratch_root/hx721/miniconda3/etc/profile.d/conda.sh
 conda activate mas-ccus
 
-cd /scratch_root/hx721/CCS_RLLLM
+PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM}"
+cd "$PROJECT_DIR"
 export PYTHONPATH=src
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-12}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-12}"
-export MPLCONFIGDIR=/scratch_root/hx721/CCS_RLLLM/.cache/matplotlib
+export MPLCONFIGDIR="$PROJECT_DIR/.cache/matplotlib"
 mkdir -p "$MPLCONFIGDIR" logs output/rl_ppo
 
 LIVE_LOG="logs/reward_modes_${SLURM_JOB_ID:-manual}.live.log"
