@@ -42,6 +42,7 @@ python -u scripts/compare_reward_modes_bc.py \
   --timesteps 100000 \
   --bc-episodes 20 \
   --bc-epochs 10 \
+  --kickstart-coef 1.0 \
   --eval-seeds 101 102 103 104 105 \
   --device cuda \
   --verbose 1 \

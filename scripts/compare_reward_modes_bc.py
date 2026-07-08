@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from sim.control.baselines import greedy_shuttle_policy
+from sim.control.baselines import greedy_shuttle_policy, idle_policy
 from sim.control.imitation import bc_pretrain, make_kickstart_callback
 from sim.environment.gym_adapter import CCSGymEnv, make_ppo_policy
 from sim.metrics import run_episode
@@ -145,6 +145,22 @@ def eval_model(args, reward_mode: str, model):
     return rows
 
 
+def eval_baselines(args):
+    rows = []
+    for name, policy in [
+        ("idle", idle_policy),
+        ("greedy_teacher", greedy_shuttle_policy),
+    ]:
+        metrics = []
+        for seed in args.eval_seeds:
+            env = make_env(args, "economic")
+            metrics.append(run_episode(env, policy, seed=seed))
+        row = summarize(name, metrics)
+        rows.append(row)
+        print_row(row)
+    return rows
+
+
 def print_row(row: dict[str, float | str]) -> None:
     print(
         f"{row['policy']:24s} "
@@ -160,7 +176,11 @@ def write_outputs(args, rows, model_paths: dict[str, Path]) -> None:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    stem = f"reward_mode_compare_{args.scenario}_{args.episode_hours}h_ts{args.timesteps}_{stamp}"
+    kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0.0 else ""
+    stem = (
+        f"reward_mode_compare_{args.scenario}_{args.episode_hours}h"
+        f"_ts{args.timesteps}{kick_tag}_{stamp}"
+    )
     csv_path = out / f"{stem}.csv"
     md_path = out / f"{stem}.md"
 
@@ -174,6 +194,7 @@ def write_outputs(args, rows, model_paths: dict[str, Path]) -> None:
         "",
         f"Generated: {dt.datetime.now().isoformat(timespec='seconds')}",
         f"episode_hours={args.episode_hours}, timesteps={args.timesteps}, seeds={args.eval_seeds}",
+        f"kickstart_coef={args.kickstart_coef}",
         f"disturbance=ScenarioConfig defaults, partial_dispatch={not args.enforce_full_load_dispatch}",
         "",
         "Actual cost = operating_cost + vent_penalty.",
@@ -235,12 +256,14 @@ def main() -> None:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    rows = []
+    rows = eval_baselines(args)
     model_paths = {}
+    kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0.0 else ""
     for reward_mode in ("economic", "vent_first"):
         model = train_one(args, reward_mode)
         model_path = out / (
-            f"ppo_{reward_mode}_{args.scenario}_{args.episode_hours}h_ts{args.timesteps}.zip"
+            f"ppo_{reward_mode}_{args.scenario}_{args.episode_hours}h"
+            f"_ts{args.timesteps}{kick_tag}.zip"
         )
         model.save(str(model_path))
         model_paths[reward_mode] = model_path
