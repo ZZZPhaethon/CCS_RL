@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .action_resolver import ActionResolver
-from .actions import ActionFrame, CommittedActionFrame
+from .actions import ActionFrame, ActionResolver, CommittedActionFrame
+from .scenario_generation.disturbance_resolver import leg_speed_factor, vessel_speed_factor
 from .entities.state import PhysicalState, StepResult
 from .network import PhysicalNetwork
-from .routes import route_distance_km
+from .routes import route_distance_km, sea_route
 
 Coordinate = tuple[float, float]
 
@@ -49,7 +49,7 @@ class PhysicalSimulator:
         self.vessel_states = self._initial_vessel_states()
         self.state.vessel_berths = self._vessel_berths_from_states()
 
-    def step(self, action_frame: ActionFrame) -> SimulationStepRecord:
+    def step(self, action_frame: ActionFrame, compute_observation: bool = True) -> SimulationStepRecord:
         committed = self.resolver.resolve(action_frame)
         self._start_vessel_voyages(committed.actions)
         self.state.vessel_berths = self._vessel_berths_from_states()
@@ -57,11 +57,16 @@ class PhysicalSimulator:
         self.state = result.state
         self._advance_vessel_voyages(self.network.time_step_hours)
         self.state.vessel_berths = self._vessel_berths_from_states()
+        # The full network snapshot recomputes the line-source bottomhole-pressure
+        # model (CoolProp + O(t^2) rate history), which is needed for dashboards but
+        # not for RL, whose observation is built separately. Skipping it in the
+        # training loop speeds each step up by ~10-50x.
+        observation = self.network.snapshot(self.state) if compute_observation else {}
         return SimulationStepRecord(
             action_frame=action_frame,
             committed_action_frame=committed,
             step_result=result,
-            observation=self.network.snapshot(self.state),
+            observation=observation,
             vessel_positions=self.vessel_positions(),
         )
 
@@ -129,15 +134,24 @@ class PhysicalSimulator:
             state = self.vessel_states[vessel_id]
             if not destination or state["mode"] != "berthed" or destination == state["berth"]:
                 continue
-            if destination not in {route["origin"], route["destination"]}:
+            if not self._known_destination(str(destination), route):
                 continue
+            origin = str(state["berth"])
+            destination = str(destination)
+            coordinates = self._route_coordinates_for_leg(route, origin, destination)
+            distance_km = (
+                float(route.get("distance_km") or 0.0)
+                if {origin, destination} == {route["origin"], route["destination"]}
+                else route_distance_km(coordinates)
+            )
             state.update(
                 {
                     "mode": "sailing",
-                    "origin": state["berth"],
+                    "origin": origin,
                     "destination": destination,
                     "berth": None,
                     "progress": 0.0,
+                    "distance_km": distance_km,
                 }
             )
 
@@ -147,11 +161,21 @@ class PhysicalSimulator:
                 continue
             route = self.routes[vessel_id]
             speed_knots = route.get("speed_knots")
-            distance_km = float(route.get("distance_km") or 0.0)
-            if not speed_knots or distance_km <= 0.0:
-                state["progress"] = 1.0
+            distance_km = float(state.get("distance_km") or route.get("distance_km") or 0.0)
+            vessel_factor = vessel_speed_factor(self.state, vessel_id)
+            speed_factor = leg_speed_factor(
+                self.state,
+                str(state["origin"]),
+                str(state["destination"]),
+                fallback=vessel_factor,
+            )
+            effective_speed_knots = float(speed_knots) * speed_factor if speed_knots else 0.0
+            if effective_speed_knots <= 0.0 or distance_km <= 0.0:
+                # No nominal speed/distance falls back to instant arrival; a
+                # weather factor of 0 instead stalls the vessel in place.
+                state["progress"] = state["progress"] if speed_knots and speed_factor <= 0.0 else 1.0
             else:
-                distance_covered_km = float(speed_knots) * 1.852 * hours
+                distance_covered_km = effective_speed_knots * 1.852 * hours
                 state["progress"] = min(1.0, state["progress"] + distance_covered_km / distance_km)
             if state["progress"] >= 1.0:
                 state.update(
@@ -160,8 +184,12 @@ class PhysicalSimulator:
                         "berth": state["destination"],
                         "origin": state["destination"],
                         "progress": 0.0,
+                        "distance_km": 0.0,
                     }
                 )
+
+    def _known_destination(self, destination: str, route: dict[str, Any]) -> bool:
+        return destination in self.locations or destination in {route["origin"], route["destination"]}
 
     def _vessel_berths_from_states(self) -> dict[str, str]:
         return {
@@ -183,7 +211,44 @@ class PhysicalSimulator:
             return route["coordinates"]
         if origin == route["destination"] and destination == route["origin"]:
             return route["return_coordinates"]
-        return [self._location_tuple(origin, route), self._location_tuple(destination, route)]
+        return self._dynamic_leg_route(route, origin, destination)["coordinates"]
+
+    def _dynamic_leg_route(self, route: dict[str, Any], origin: str, destination: str) -> dict[str, Any]:
+        leg_routes = route.setdefault("dynamic_leg_routes", {})
+        leg_id = f"{origin}->{destination}"
+        if leg_id not in leg_routes:
+            origin_coordinate = self._location_tuple(origin, route)
+            destination_coordinate = self._location_tuple(destination, route)
+            maritime_route = sea_route(origin_coordinate, destination_coordinate)
+            coordinates = self._connect_route_to_endpoints(
+                maritime_route.coordinates,
+                origin_coordinate,
+                destination_coordinate,
+            )
+            leg_routes[leg_id] = {
+                "id": leg_id,
+                "origin": origin,
+                "destination": destination,
+                "provider": maritime_route.provider,
+                "distance_km": round(route_distance_km(coordinates), 2),
+                "coordinates": coordinates,
+            }
+        return leg_routes[leg_id]
+
+    @staticmethod
+    def _connect_route_to_endpoints(
+        coordinates: list[Coordinate],
+        origin: Coordinate,
+        destination: Coordinate,
+    ) -> list[Coordinate]:
+        connected = list(coordinates)
+        if not connected:
+            return [origin, destination]
+        if connected[0] != origin:
+            connected.insert(0, origin)
+        if connected[-1] != destination:
+            connected.append(destination)
+        return connected
 
     def _location_tuple(self, location_id: str, route: dict[str, Any]) -> Coordinate:
         if location_id in self.locations:

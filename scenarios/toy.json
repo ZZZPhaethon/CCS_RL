@@ -1,0 +1,251 @@
+{
+  "scenario_id": "toy",
+  "description": "Two-emitter toy comparison scenario extracted from compare_controllers_same_scenarios.py, with one injection well.",
+  "time_step_hours": 1.0,
+  "locations": {
+    "brevik": [
+      59.05,
+      9.7
+    ],
+    "oslo": [
+      59.86,
+      10.84
+    ],
+    "oygarden": [
+      60.58,
+      4.84
+    ],
+    "manifold": [
+      60.56,
+      3.5
+    ],
+    "well_1": [
+      60.56,
+      3.5
+    ],
+    "aurora": [
+      60.56,
+      3.5
+    ]
+  },
+  "offshore_pipeline_route": [
+    [
+      60.58,
+      4.84
+    ],
+    [
+      60.573583,
+      4.892359
+    ],
+    [
+      60.600709,
+      4.879335
+    ],
+    [
+      60.625912,
+      4.875317
+    ],
+    [
+      60.654857,
+      4.860534
+    ],
+    [
+      60.677745,
+      4.828899
+    ],
+    [
+      60.699123,
+      4.775151
+    ],
+    [
+      60.724967,
+      4.721572
+    ],
+    [
+      60.75438,
+      4.668093
+    ],
+    [
+      60.783661,
+      4.623694
+    ],
+    [
+      60.778931,
+      4.568359
+    ],
+    [
+      60.727191,
+      4.373316
+    ],
+    [
+      60.67688,
+      4.188113
+    ],
+    [
+      60.627209,
+      4.003516
+    ],
+    [
+      60.59344,
+      3.81984
+    ],
+    [
+      60.580968,
+      3.637024
+    ],
+    [
+      60.56,
+      3.5
+    ]
+  ],
+  "emitters": [
+    {
+      "entity_id": "brevik",
+      "reference_name": "Toy Brevik source",
+      "coordinates": [
+        59.05,
+        9.7
+      ],
+      "annual_target_export_tpy": 700800.0,
+      "nominal_capture_tph": 80.0,
+      "max_production_tph": 80.0,
+      "buffer_capacity_t": 15000.0,
+      "min_utilization": 0.0,
+      "loading_rate_tph": 800.0
+    },
+    {
+      "entity_id": "oslo",
+      "reference_name": "Toy Oslo source",
+      "coordinates": [
+        59.86,
+        10.84
+      ],
+      "annual_target_export_tpy": 525600.0,
+      "nominal_capture_tph": 60.0,
+      "max_production_tph": 60.0,
+      "buffer_capacity_t": 15000.0,
+      "min_utilization": 0.0,
+      "loading_rate_tph": 800.0
+    }
+  ],
+  "vessels": [
+    {
+      "entity_id": "ship_1",
+      "capacity_t": 7500.0,
+      "loading_rate_tph": 800.0,
+      "unloading_rate_tph": 800.0,
+      "volume_capacity_m3": 7500.0,
+      "speed_knots": 12.0
+    },
+    {
+      "entity_id": "ship_2",
+      "capacity_t": 7500.0,
+      "loading_rate_tph": 800.0,
+      "unloading_rate_tph": 800.0,
+      "volume_capacity_m3": 7500.0,
+      "speed_knots": 12.0
+    }
+  ],
+  "terminal": {
+    "entity_id": "oygarden",
+    "storage_capacity_t": 15000.0,
+    "berth_count": 2,
+    "site_name": "Toy Oygarden receiving terminal"
+  },
+  "pipeline": {
+    "entity_id": "pipeline",
+    "annual_capacity_tpy": 3504000.0,
+    "max_flow_tph": 400.0,
+    "length_km": 98.3,
+    "route_color": "#ff0000"
+  },
+  "manifold": {
+    "entity_id": "manifold",
+    "max_flow_tph": 400.0
+  },
+  "injection_wells": [
+    {
+      "entity_id": "well_1",
+      "max_injection_tph": 400.0
+    }
+  ],
+  "reservoir": {
+    "entity_id": "aurora",
+    "storage_capacity_t": 10000000.0,
+    "reservoir_initial_pressure_bar": 100.0,
+    "reservoir_average_pressure_at_capacity_bar": 200.0,
+    "reservoir_average_pressure_limit_bar": 200.0,
+    "reservoir_pressure_model": "linear_average_reservoir_pressure_proxy",
+    "reservoir_depth_below_seabed_m": 2600.0,
+    "seawater_depth_m": 0.0,
+    "well_fracture_gradient_psi_per_ft": 0.65,
+    "well_fracture_gradient_reference_depth_m": 2600.0,
+    "well_fracture_pressure_bar": 382.3,
+    "well_bottomhole_pressure_safety_factor": 0.9,
+    "well_bottomhole_pressure_limit_bar": 344.1,
+    "line_source_observation_radii_m": [
+      100.0,
+      1000.0
+    ],
+    "line_source_well_distances_m": {}
+  },
+  "line_source_parameters": {
+    "initial_reservoir_pressure_bar": 100.0,
+    "permeability_md": 100.0,
+    "thickness_m": 100.0,
+    "porosity_fraction": 0.2,
+    "total_compressibility_1_pa": 1e-9,
+    "viscosity_pa_s": 6e-5,
+    "co2_density_kg_m3": 700.0,
+    "well_radius_m": 0.1,
+    "skin": 0.0
+  },
+  "line_source_parameter_status": {
+    "initial_reservoir_pressure_bar": "toy_assumption",
+    "permeability_md": "toy_assumption",
+    "thickness_m": "toy_assumption",
+    "porosity_fraction": "toy_assumption",
+    "total_compressibility_1_pa": "toy_assumption",
+    "viscosity_pa_s": "toy_assumption",
+    "co2_density_kg_m3": "toy_assumption",
+    "well_radius_m": "toy_assumption",
+    "skin": "toy_assumption",
+    "well_fracture_gradient_psi_per_ft": "toy_assumption",
+    "well_bottomhole_pressure_safety_factor": "toy_assumption",
+    "well_bottomhole_pressure_limit_bar": "toy_assumption"
+  },
+  "connections": [
+    [
+      "brevik",
+      "ship_1"
+    ],
+    [
+      "oslo",
+      "ship_2"
+    ],
+    [
+      "ship_1",
+      "oygarden"
+    ],
+    [
+      "ship_2",
+      "oygarden"
+    ],
+    [
+      "oygarden",
+      "pipeline"
+    ],
+    [
+      "pipeline",
+      "manifold"
+    ],
+    [
+      "manifold",
+      "well_1"
+    ],
+    [
+      "well_1",
+      "aurora"
+    ]
+  ]
+}

@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+from ..scenario_generation.disturbance_resolver import (
+    emitter_availability,
+    well_injectivity_factor,
+    well_is_available,
+    well_max_injection_tph,
+)
 from ..entities.emitter import Emitter
 from ..entities.pipeline import Pipeline
 from ..entities.state import PhysicalState
@@ -13,6 +19,13 @@ from ..line_source import (
     pressure_at_radius_bar,
     variable_rate_bottomhole_pressure_bar,
     variable_rate_pressure_at_radius_bar,
+)
+from .pressure_limits import (
+    WELL_RATE_LEVELS_MTPA,
+    bottomhole_pressure_limited_rate_tph,
+    line_source_parameters_for_state,
+    pressure_limited_rate_level_mask,
+    tph_to_mtpa,
 )
 
 HOURS_PER_YEAR = 365.25 * 24.0
@@ -44,13 +57,35 @@ def _snapshot_entity(network, entity, state: PhysicalState) -> dict[str, object]
         snapshot["capture_rate_tph"] = state.last_capture_tph.get(entity.entity_id, 0.0)
         snapshot["vent_rate_tph"] = state.last_vent_tph.get(entity.entity_id, 0.0)
         snapshot["cumulative_vent_t"] = state.cumulative_vent_t.get(entity.entity_id, 0.0)
+        snapshot["effective_availability"] = emitter_availability(state, entity)
     if isinstance(entity, Pipeline):
         snapshot["pipeline_flow_rate_tph"] = state.last_pipeline_flow_tph.get(entity.entity_id, 0.0)
     if isinstance(entity, InjectionWell):
+        snapshot["injection_rate_tph"] = state.last_injection_flow_tph.get(entity.entity_id, 0.0)
+        snapshot["effective_available"] = well_is_available(state, entity)
+        snapshot["injectivity_factor"] = well_injectivity_factor(state, entity)
+        snapshot["effective_max_injection_tph"] = well_max_injection_tph(state, entity)
         _add_line_source_well_snapshot(network, snapshot, entity, state)
     if isinstance(entity, Reservoir):
-        snapshot["pressure_bar"] = entity.pressure_bar(inventory_t)
-        snapshot["pressure_margin_bar"] = entity.pressure_margin_bar(inventory_t)
+        reservoir_pressure_bar = entity.pressure_bar(inventory_t)
+        reservoir_pressure_margin_bar = entity.pressure_margin_bar(inventory_t)
+        snapshot["pressure_bar"] = reservoir_pressure_bar
+        snapshot["pressure_margin_bar"] = reservoir_pressure_margin_bar
+        snapshot["reservoir_average_pressure_bar"] = reservoir_pressure_bar
+        snapshot["reservoir_average_pressure_margin_bar"] = reservoir_pressure_margin_bar
+        snapshot["reservoir_average_pressure_at_capacity_bar"] = entity.pressure_at_capacity_bar
+        snapshot["reservoir_average_pressure_limit_bar"] = entity.max_pressure_bar
+        snapshot["reservoir_pressure_model"] = entity.reservoir_pressure_model
+        snapshot["seawater_depth_m"] = entity.seawater_depth_m
+        snapshot["well_fracture_gradient_psi_per_ft"] = entity.well_fracture_gradient_psi_per_ft
+        snapshot["well_fracture_gradient_reference_depth_m"] = (
+            entity.well_fracture_gradient_reference_depth_m
+        )
+        snapshot["well_fracture_pressure_bar"] = entity.well_fracture_pressure_bar
+        snapshot["well_bottomhole_pressure_safety_factor"] = (
+            entity.well_bottomhole_pressure_safety_factor
+        )
+        snapshot["well_bottomhole_pressure_limit_bar"] = entity.well_bottomhole_pressure_limit_bar
         snapshot["fill_fraction"] = inventory_t / entity.storage_capacity_t
         _add_line_source_reservoir_snapshot(network, snapshot, entity, state)
     return snapshot
@@ -67,7 +102,7 @@ def _add_line_source_well_snapshot(
         return
     reservoir = network.entities[reservoir_id]
     assert isinstance(reservoir, Reservoir)
-    parameters = reservoir.line_source_parameters
+    parameters = line_source_parameters_for_state(reservoir, state)
     if parameters is None:
         return
     rate_tph = state.last_injection_flow_tph.get(well.entity_id, 0.0)
@@ -117,8 +152,44 @@ def _add_line_source_well_snapshot(
     snapshot["line_source_elapsed_days"] = elapsed_days
     snapshot["bottomhole_pressure_bar"] = pressure_bar
     snapshot["bottomhole_pressure_delta_bar"] = pressure_bar - parameters.initial_pressure_bar
+    snapshot["well_bottomhole_pressure_limit_bar"] = reservoir.well_bottomhole_pressure_limit_bar
+    if reservoir.well_bottomhole_pressure_limit_bar is not None:
+        snapshot["well_bottomhole_pressure_margin_bar"] = (
+            reservoir.well_bottomhole_pressure_limit_bar - pressure_bar
+        )
+    snapshot["well_fracture_pressure_bar"] = reservoir.well_fracture_pressure_bar
+    snapshot["well_fracture_gradient_psi_per_ft"] = reservoir.well_fracture_gradient_psi_per_ft
+    next_step_evaluation_h = state.time_h + network.time_step_hours
+    next_step_start_h = state.time_h
+    effective_max_tph = well_max_injection_tph(state, well)
+    next_step_pressure_limited_rate_tph = bottomhole_pressure_limited_rate_tph(
+        network,
+        state,
+        well.entity_id,
+        effective_max_tph,
+        evaluation_time_h=next_step_evaluation_h,
+        interval_start_h=next_step_start_h,
+    )
+    snapshot["well_rate_levels_mtpa"] = list(WELL_RATE_LEVELS_MTPA)
+    snapshot["next_step_pressure_limited_max_rate_tph"] = next_step_pressure_limited_rate_tph
+    snapshot["next_step_pressure_limited_max_rate_mtpa"] = tph_to_mtpa(
+        next_step_pressure_limited_rate_tph
+    )
+    snapshot["next_step_well_rate_action_mask"] = list(
+        pressure_limited_rate_level_mask(
+            network,
+            state,
+            well.entity_id,
+            physical_max_rate_tph=effective_max_tph,
+            evaluation_time_h=next_step_evaluation_h,
+            interval_start_h=next_step_start_h,
+        )
+    )
     snapshot["line_source_interference_delta_bar"] = interference_delta_bar
-    snapshot["line_source_rate_history_tph"] = state.injection_rate_history_tph.get(well.entity_id, [])
+    snapshot["line_source_rate_history_tph"] = state.injection_rate_history_tph.get(
+        well.entity_id,
+        [],
+    )
 
 
 def _add_line_source_reservoir_snapshot(
@@ -127,7 +198,7 @@ def _add_line_source_reservoir_snapshot(
     reservoir: Reservoir,
     state: PhysicalState,
 ) -> None:
-    parameters = reservoir.line_source_parameters
+    parameters = line_source_parameters_for_state(reservoir, state)
     if parameters is None:
         return
     elapsed_days = state.time_h / 24.0

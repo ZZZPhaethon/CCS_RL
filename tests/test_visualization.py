@@ -5,22 +5,40 @@ from pathlib import Path
 from sim.entities import Emitter, InjectionWell, PhysicalState, Pipeline, Terminal
 from sim.network import PhysicalNetwork
 from sim.routes import route_distance_km
-from sim.rule_based import RuleBasedActionGenerator
+from sim.network_scenarios import OFFSHORE_PIPELINE_ROUTE
+from sim.control.rule_based import RuleBasedActionGenerator
 from sim.visualization import (
     _connect_route_to_facilities,
     _interpolate_route,
     build_trajectory,
     build_demo_trajectory,
-    build_northern_lights_phase1_plus_yara_trajectory,
+    build_northern_lights_phase1_trajectory,
     build_northern_lights_phase2_trajectory,
     render_dashboard_html,
     write_dashboard,
-    write_northern_lights_phase1_plus_yara_dashboard,
+    write_northern_lights_phase1_dashboard,
     write_northern_lights_phase2_dashboard,
 )
+from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
 
 
 class VisualizationTests(unittest.TestCase):
+    def _toy_dashboard_locations(self):
+        locations = {
+            location_id: {"lat": lat, "lon": lon, "label": location_id}
+            for location_id, (lat, lon) in TOY_TWO_SOURCE_LOCATIONS.items()
+        }
+        locations.update(
+            {
+                "pipeline": {"lat": 60.58, "lon": 3.65, "label": "Pipeline midpoint"},
+                "manifold": {"lat": 60.56, "lon": 3.50, "label": "Manifold"},
+                "well_a": {"lat": 60.55, "lon": 3.46, "label": "Well A"},
+                "well_b": {"lat": 60.60, "lon": 3.52, "label": "Well B"},
+                "reservoir": {"lat": 60.55, "lon": 3.46, "label": "Reservoir"},
+            }
+        )
+        return locations
+
     def test_demo_trajectory_uses_one_hour_frames(self):
         payload = build_demo_trajectory(hours=8)
 
@@ -50,9 +68,9 @@ class VisualizationTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["frames"][1]["actions"], {"brevik": {"load_vessel": "northern_pioneer"}})
-        self.assertAlmostEqual(payload["frames"][1]["entities"]["northern_pioneer"]["inventory_t"], 45.662100456621)
+        self.assertAlmostEqual(payload["frames"][1]["entities"]["northern_pioneer"]["inventory_t"], 37.293383)
         self.assertEqual(payload["frames"][2]["flows_t"], {})
-        self.assertAlmostEqual(payload["frames"][2]["entities"]["northern_pioneer"]["inventory_t"], 45.662100456621)
+        self.assertAlmostEqual(payload["frames"][2]["entities"]["northern_pioneer"]["inventory_t"], 37.293383)
 
     def test_trajectory_uses_hourly_emitter_value_without_serializing_full_profile(self):
         network = PhysicalNetwork(time_step_hours=1.0)
@@ -101,7 +119,7 @@ class VisualizationTests(unittest.TestCase):
         self.assertIn("locations", payload["map"])
         self.assertIn("routes", payload["map"])
         self.assertIn("brevik", payload["map"]["locations"])
-        self.assertIn("aurora_well_a", payload["map"]["locations"])
+        self.assertIn("aurora_well_a7_ah", payload["map"]["locations"])
         self.assertIn("aurora_subsea_manifold", payload["map"]["locations"])
         self.assertIn("lat", payload["map"]["locations"]["brevik"])
         self.assertIn("lon", payload["map"]["locations"]["brevik"])
@@ -244,6 +262,25 @@ class VisualizationTests(unittest.TestCase):
         self.assertTrue(any(lat > 0.0 and lon < 1.0 for lat, lon in route))
         self.assertLess(abs(display_distance - original_distance) / original_distance, 0.03)
 
+    def test_dynamic_vessel_legs_are_cached_and_drawn(self):
+        network = make_toy_two_source_network()
+        locations = self._toy_dashboard_locations()
+
+        payload = build_trajectory(
+            network,
+            PhysicalState(),
+            locations=locations,
+            hours=1,
+            action_frames=[{"vessel_a": {"sail_to": "source_b"}}],
+        )
+        route = payload["map"]["routes"]["vessel_a"]
+
+        dynamic_leg = route["dynamic_leg_routes"]["source_a->source_b"]
+        self.assertGreater(len(dynamic_leg["coordinates"]), 2)
+        html = render_dashboard_html(payload)
+        self.assertIn("drawDynamicLegRoutes", html)
+        self.assertIn("source_a->source_b", html)
+
     def test_dashboard_html_contains_embedded_data_and_controls(self):
         payload = build_demo_trajectory(hours=2)
 
@@ -291,7 +328,7 @@ class VisualizationTests(unittest.TestCase):
         self.assertIn('return "storage"', html)
         self.assertIn("function storageTargetForEntity", html)
         self.assertIn("Storage:", html)
-        self.assertIn("\"aurora_well_a\": \"aurora_reservoir\"", html)
+        self.assertIn("\"aurora_well_a7_ah\": \"aurora_reservoir\"", html)
 
     def test_dashboard_playback_rate_is_user_configurable(self):
         payload = build_demo_trajectory(hours=2)
@@ -348,6 +385,23 @@ class VisualizationTests(unittest.TestCase):
         self.assertEqual(segment["target"], "aurora_subsea_manifold")
         self.assertEqual(segment["coordinates"][-1], (manifold["lat"], manifold["lon"]))
 
+    def test_map_draws_pipeline_main_segment_without_explicit_route_coordinates(self):
+        network = make_toy_two_source_network()
+        locations = self._toy_dashboard_locations()
+
+        payload = build_trajectory(network, PhysicalState(), locations=locations, hours=0)
+
+        segment = next(
+            segment
+            for segment in payload["map"]["pipeline_segments"]
+            if segment["source"] == "terminal" and segment["target"] == "manifold"
+        )
+        self.assertEqual(segment["component_id"], "pipeline")
+        self.assertEqual(len(segment["coordinates"]), len(OFFSHORE_PIPELINE_ROUTE))
+        self.assertEqual(segment["coordinates"][0], (locations["terminal"]["lat"], locations["terminal"]["lon"]))
+        self.assertEqual(segment["coordinates"][1], OFFSHORE_PIPELINE_ROUTE[1])
+        self.assertEqual(segment["coordinates"][-1], (locations["manifold"]["lat"], locations["manifold"]["lon"]))
+
     def test_map_separates_injection_links_from_pipeline_segments(self):
         payload = build_demo_trajectory(hours=2)
 
@@ -358,8 +412,8 @@ class VisualizationTests(unittest.TestCase):
         links = payload["map"]["injection_links"]
         self.assertEqual({link["target"] for link in links}, {"aurora_reservoir"})
         self.assertEqual({link["relation"] for link in links}, {"injection_target"})
+        self.assertEqual({link["source"] for link in links}, {"aurora_well_a7_ah"})
         for link in links:
-            self.assertIn(link["source"], {"aurora_well_a", "aurora_well_c"})
             self.assertIn("coordinates", link)
             self.assertEqual(link["style"], "geologic")
 
@@ -498,7 +552,7 @@ class VisualizationTests(unittest.TestCase):
     def test_dashboard_surfaces_pipeline_flow_rate_chart(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Terminal("terminal", storage_capacity_t=1_000.0, berth_count=1))
-        network.add_entity(Pipeline("pipeline", max_flow_tph=100.0, ramp_tph=100.0))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=100.0))
         network.add_entity(InjectionWell("well", max_injection_tph=100.0))
         network.connect("terminal", "pipeline")
         network.connect("pipeline", "well")
@@ -547,6 +601,11 @@ class VisualizationTests(unittest.TestCase):
         self.assertIn("if (entity.type === \"Reservoir\") return [\"inventory\", \"pressure\", \"pressure_margin\", \"injection_rate\"]", html)
         self.assertIn("return [\"inventory\"]", html)
         self.assertIn("syncChartMetricOptions(frame.entities[selected])", html)
+
+    def test_dashboard_injection_rate_metric_uses_well_snapshot_rate(self):
+        html = render_dashboard_html(build_demo_trajectory(hours=2))
+
+        self.assertIn("if (entity.injection_rate_tph !== undefined) return Number(entity.injection_rate_tph)", html)
 
     def test_dashboard_html_draws_capacity_limits_and_pipelines(self):
         payload = build_demo_trajectory(hours=2)
@@ -658,10 +717,10 @@ class VisualizationTests(unittest.TestCase):
 
         self.assertEqual(route_origins, emitter_ids)
 
-    def test_phase1_plus_yara_trajectory_has_three_emitters_and_four_ships(self):
-        payload = build_northern_lights_phase1_plus_yara_trajectory(hours=72)
+    def test_phase1_trajectory_has_three_emitters_and_four_ships(self):
+        payload = build_northern_lights_phase1_trajectory(hours=72)
 
-        self.assertEqual(payload["title"], "Northern Lights Phase 1 + Yara Dashboard")
+        self.assertEqual(payload["title"], "Northern Lights Phase 1 Dashboard")
         self.assertEqual(payload["frames"][-1]["time_h"], 72)
         self.assertEqual(len(payload["map"]["routes"]), 4)
         self.assertIn("yara_sluiskil", payload["map"]["locations"])
@@ -679,22 +738,22 @@ class VisualizationTests(unittest.TestCase):
                 for entity_id, entity in payload["frames"][0]["entities"].items()
                 if entity["type"] == "InjectionWell"
             },
-            {"aurora_well_a7_ah", "aurora_well_c1_h"},
+            {"aurora_well_a7_ah"},
         )
 
-    def test_write_phase1_plus_yara_dashboard(self):
+    def test_write_phase1_dashboard(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            output = write_northern_lights_phase1_plus_yara_dashboard(Path(tmpdir) / "phase1_plus_yara.html", hours=72)
+            output = write_northern_lights_phase1_dashboard(Path(tmpdir) / "phase1.html", hours=72)
 
             html = output.read_text(encoding="utf-8")
 
-        self.assertIn("Northern Lights Phase 1 + Yara Dashboard", html)
+        self.assertIn("Northern Lights Phase 1 Dashboard", html)
         self.assertIn("\"time_h\": 72.0", html)
         self.assertIn("\"yara_sluiskil\"", html)
         self.assertNotIn("\"orsted_kalundborg\"", html)
 
     def test_trajectory_accepts_rule_based_action_generator_factory(self):
-        payload = build_northern_lights_phase1_plus_yara_trajectory(
+        payload = build_northern_lights_phase1_trajectory(
             hours=2,
             action_generator_factory=lambda network, routes: RuleBasedActionGenerator(network, routes),
         )

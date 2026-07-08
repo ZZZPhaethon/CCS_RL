@@ -4,7 +4,7 @@ from ..entities.manifold import SubseaManifold
 from ..entities.pipeline import Pipeline
 from ..entities.state import PhysicalState, Violation
 from ..entities.storage import InjectionWell
-from .injection import inject_to_well, well_remaining_capacity
+from .injection import inject_to_well, well_capacity_breakdown, well_remaining_capacity
 
 
 def project_pipeline_outflow(
@@ -20,9 +20,7 @@ def project_pipeline_outflow(
         "flow_tph",
         actions.get(terminal_id, {}).get("flow_tph", 0.0),
     ) * network.time_step_hours
-    previous_tph = state.last_pipeline_flow_tph.get(pipeline.entity_id, 0.0)
-    ramp_limited_tph = min(pipeline.max_flow_tph, previous_tph + pipeline.ramp_tph)
-    pipeline_capacity_t = ramp_limited_tph * network.time_step_hours
+    pipeline_capacity_t = pipeline.max_flow_tph * network.time_step_hours
     well_capacity_t = pipeline_injection_capacity(network, pipeline.entity_id, state)
     actual_t = min(requested_t, pipeline_capacity_t, well_capacity_t, max(0.0, supply_limit_t))
     state.last_pipeline_flow_tph[pipeline.entity_id] = actual_t / network.time_step_hours
@@ -34,9 +32,20 @@ def project_pipeline_outflow(
                 requested_t,
                 actual_t,
                 requested_t - actual_t,
-                "Pipeline flow request clipped by pipeline ramp/limit or well capacity.",
+                "Pipeline flow request clipped by pipeline limit, well capacity, or available supply.",
             )
         )
+        for well_id in _bottomhole_pressure_limited_wells(network, pipeline.entity_id, state):
+            violations.append(
+                Violation(
+                    "bottomhole_pressure_clipped",
+                    well_id,
+                    requested_t,
+                    actual_t,
+                    requested_t - actual_t,
+                    "Injection request clipped by bottomhole pressure limit.",
+                )
+            )
     return actual_t
 
 
@@ -77,6 +86,21 @@ def pipeline_injection_capacity(network, pipeline_id: str, state: PhysicalState)
         for manifold_id in network._downstream_of_type(pipeline_id, SubseaManifold)
     )
     return direct_well_capacity_t + manifold_capacity_t
+
+
+def _bottomhole_pressure_limited_wells(
+    network,
+    pipeline_id: str,
+    state: PhysicalState,
+) -> list[str]:
+    well_ids = list(network._downstream_of_type(pipeline_id, InjectionWell))
+    for manifold_id in network._downstream_of_type(pipeline_id, SubseaManifold):
+        well_ids.extend(network._downstream_of_type(manifold_id, InjectionWell))
+    return [
+        well_id
+        for well_id in well_ids
+        if well_capacity_breakdown(network, well_id, state).bottomhole_pressure_limited
+    ]
 
 
 def manifold_remaining_capacity(network, manifold_id: str, state: PhysicalState) -> float:

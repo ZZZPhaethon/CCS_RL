@@ -16,7 +16,7 @@ def apply_loading(
         action = actions.get(emitter_id, {})
         if "load_tph" not in action and "load_vessel" not in action:
             continue
-        vessel_ids = network._downstream_of_type(emitter_id, Vessel)
+        vessel_ids = list(network._entities_of_type(Vessel))
         if not vessel_ids:
             continue
         requested_vessel_id = action.get("load_vessel", action.get("vessel_id"))
@@ -41,10 +41,11 @@ def apply_loading(
             requested_t = _emitter_load_requested_t(network, emitter, state, action, vessel_id)
         else:
             requested_t = actions.get(emitter_id, {}).get("load_tph", 0.0) * network.time_step_hours
+            violation_entity_id = requested_vessel_id if requested_vessel_id in vessel_ids else vessel_ids[0]
             violations.append(
                 Violation(
                     "berth_required",
-                    vessel_ids[0],
+                    violation_entity_id,
                     requested_t,
                     0.0,
                     requested_t,

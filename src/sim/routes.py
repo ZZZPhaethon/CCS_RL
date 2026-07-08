@@ -29,14 +29,13 @@ def route_distance_km(coordinates: Iterable[Coordinate]) -> float:
 
 
 def sea_route(origin: Coordinate, destination: Coordinate) -> SeaRoute:
-    """Return a maritime route, using searoute when installed and a waypoint fallback otherwise."""
+    """Return a maritime route from the ``searoute`` package."""
 
     package_route = _route_with_searoute(origin, destination)
     if package_route is not None and len(package_route) > 2:
         return SeaRoute(package_route, route_distance_km(package_route), "searoute")
 
-    fallback = _north_sea_waypoint_route(origin, destination)
-    return SeaRoute(fallback, route_distance_km(fallback), "north_sea_waypoints")
+    raise RuntimeError("Maritime route generation requires searoute to return a multi-point route.")
 
 
 def _route_with_searoute(origin: Coordinate, destination: Coordinate) -> list[Coordinate] | None:
@@ -52,15 +51,3 @@ def _route_with_searoute(origin: Coordinate, destination: Coordinate) -> list[Co
     if not coordinates:
         return None
     return [(lat, lon) for lon, lat in coordinates]
-
-
-def _north_sea_waypoint_route(origin: Coordinate, destination: Coordinate) -> list[Coordinate]:
-    # Conservative fallback for Northern Lights style North Sea routes. It keeps the
-    # ship offshore around Skagerrak/North Sea instead of drawing a land-crossing chord.
-    waypoints: list[Coordinate] = [
-        (58.95, 10.25),
-        (58.25, 8.40),
-        (58.55, 5.60),
-        (59.65, 4.65),
-    ]
-    return [origin, *waypoints, destination]

@@ -1,0 +1,19 @@
+name: ccs-rlllm-gpu
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - numpy
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - tqdm
+  - jupyterlab
+  - pip:
+      - --index-url https://download.pytorch.org/whl/cu128
+      - torch
+      - torchvision
+      - torchaudio
+      - --extra-index-url https://pypi.org/simple
+      - -e .

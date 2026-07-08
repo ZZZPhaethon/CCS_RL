@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Northern Lights CCS — 3D Operations</title>
+
+  <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet">
+  <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/deck.gl@8.9.6/dist.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter','SF Pro Display',-apple-system,'Segoe UI',sans-serif; background:#060d1a; color:#e2e8f0; overflow:hidden; }
+    #map { width:100vw; height:100vh; }
+    #map-atmosphere, #map-vignette { position:fixed; inset:0; pointer-events:none; }
+    #map-atmosphere { z-index:110; background:radial-gradient(circle at 52% 45%, rgba(78,170,255,0.08), transparent 30%); mix-blend-mode:screen; }
+    #map-vignette { z-index:115; background:radial-gradient(circle at center, transparent 50%, rgba(4,8,15,0.35) 100%); }
+
+    /* ── Header ── */
+    #header {
+      position:fixed; top:0; left:0; right:0; height:52px;
+      background:rgba(6,13,26,0.90); border-bottom:1px solid rgba(99,179,237,0.18);
+      backdrop-filter:blur(16px);
+      display:flex; align-items:center; padding:0 20px; gap:12px; z-index:300;
+    }
+    .logo-ring { width:28px; height:28px; border-radius:50%; border:2px solid rgba(99,179,237,0.55); display:flex; align-items:center; justify-content:center; }
+    .logo-dot  { width:8px; height:8px; border-radius:50%; background:#63b3ed; box-shadow:0 0 10px #63b3ed,0 0 20px rgba(99,179,237,0.5); animation:breathe 2.4s ease-in-out infinite; }
+    @keyframes breathe { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(0.7);opacity:0.5} }
+    #header h1 { font-size:14px; font-weight:700; letter-spacing:0.04em; }
+    .badge { font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#63b3ed; background:rgba(99,179,237,0.1); border:1px solid rgba(99,179,237,0.3); padding:2px 8px; border-radius:4px; }
+    #time-display { margin-left:auto; font-size:13px; color:#718096; }
+    #time-display span { color:#e2e8f0; font-weight:700; }
+
+    /* ── Left Panel ── */
+    #left-panel {
+      position:fixed; top:68px; left:16px; width:248px;
+      background:rgba(6,13,26,0.86); border:1px solid rgba(99,179,237,0.14);
+      border-radius:14px; padding:14px 16px; backdrop-filter:blur(20px); z-index:200;
+    }
+    .panel-title { font-size:9px; font-weight:800; letter-spacing:0.14em; text-transform:uppercase; color:#4a5568; margin-bottom:11px; }
+
+    .entity-row {
+      display:flex; align-items:center; gap:9px; padding:7px 8px;
+      border-radius:8px; cursor:pointer; transition:background 0.15s;
+      border:1px solid transparent; margin-bottom:2px;
+    }
+    .entity-row:hover { background:rgba(99,179,237,0.07); }
+    .entity-row.selected { background:rgba(99,179,237,0.12); border-color:rgba(99,179,237,0.28); }
+    .e-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .e-name { font-size:11px; color:#a0aec0; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .e-bar-bg { width:50px; height:3px; background:rgba(255,255,255,0.07); border-radius:2px; overflow:hidden; flex-shrink:0; }
+    .e-bar    { height:100%; border-radius:2px; transition:width 0.4s ease,background 0.4s ease; width:0%; }
+    .e-val    { font-size:10px; color:#4a5568; width:38px; text-align:right; flex-shrink:0; }
+
+    /* ── Right Panel ── */
+    #right-panel {
+      position:fixed; top:68px; right:16px; width:192px;
+      background:rgba(6,13,26,0.86); border:1px solid rgba(99,179,237,0.14);
+      border-radius:14px; padding:14px 16px; backdrop-filter:blur(20px); z-index:200;
+      transition:bottom 0.35s ease;
+    }
+    #right-panel.lifted { bottom:308px; top:auto; }
+    .stat-block { margin-bottom:14px; }
+    .stat-block:last-child { margin-bottom:0; }
+    .stat-label { font-size:9px; font-weight:800; letter-spacing:0.12em; text-transform:uppercase; color:#4a5568; margin-bottom:4px; }
+    .stat-value { font-size:21px; font-weight:800; color:#e2e8f0; line-height:1.1; }
+    .stat-unit  { font-size:11px; font-weight:400; color:#718096; margin-left:2px; }
+
+    /* ── Vessel pills ── */
+    #vessel-status { position:fixed; top:68px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:200; }
+    .v-pill { background:rgba(6,13,26,0.86); border:1px solid rgba(99,179,237,0.14); border-radius:20px; padding:6px 14px; backdrop-filter:blur(20px); font-size:11px; color:#a0aec0; display:flex; align-items:center; gap:7px; cursor:pointer; transition:all 0.15s; }
+    .v-pill:hover { border-color:rgba(99,179,237,0.35); }
+    .v-pill.selected { border-color:rgba(99,179,237,0.5); background:rgba(99,179,237,0.12); }
+    .v-pill-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+
+    /* ── Chart Panel ── */
+    #chart-panel {
+      position:fixed; bottom:64px; left:0; right:0; height:220px;
+      background:rgba(6,13,26,0.92); border-top:1px solid rgba(99,179,237,0.16);
+      backdrop-filter:blur(24px); z-index:200;
+      transform:translateY(100%); opacity:0;
+      transition:transform 0.32s cubic-bezier(0.4,0,0.2,1), opacity 0.32s ease;
+      display:flex; flex-direction:column;
+    }
+    #chart-panel.visible { transform:translateY(0); opacity:1; }
+
+    #chart-header {
+      display:flex; align-items:center; padding:10px 20px 6px;
+      gap:10px; flex-shrink:0;
+    }
+    #chart-entity-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    #chart-entity-name { font-size:13px; font-weight:700; color:#e2e8f0; }
+    #chart-metric-tabs { display:flex; gap:6px; margin-left:12px; }
+    .metric-tab {
+      font-size:10px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase;
+      padding:3px 10px; border-radius:4px; cursor:pointer; color:#4a5568;
+      background:none; border:1px solid transparent; transition:all 0.15s;
+    }
+    .metric-tab:hover { color:#a0aec0; }
+    .metric-tab.on { color:#63b3ed; background:rgba(99,179,237,0.12); border-color:rgba(99,179,237,0.3); }
+    #chart-cur-val { margin-left:auto; font-size:20px; font-weight:800; color:#e2e8f0; }
+    #chart-cur-unit { font-size:11px; color:#718096; margin-left:3px; }
+    #chart-close {
+      width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,0.06);
+      border:1px solid rgba(255,255,255,0.1); color:#718096; font-size:14px;
+      cursor:pointer; display:flex; align-items:center; justify-content:center;
+      transition:all 0.15s; margin-left:8px; flex-shrink:0;
+    }
+    #chart-close:hover { background:rgba(255,255,255,0.12); color:#e2e8f0; }
+    #chart-canvas { flex:1; display:block; width:100%; }
+
+    /* ── Legend ── */
+    #legend {
+      position:fixed; bottom:84px; right:16px;
+      background:rgba(6,13,26,0.86); border:1px solid rgba(99,179,237,0.14);
+      border-radius:12px; padding:12px 14px; backdrop-filter:blur(20px); z-index:200;
+      transition:bottom 0.35s ease;
+    }
+    #legend.lifted  { bottom:308px; }
+    .legend-gradient { width:110px; height:7px; border-radius:4px; background:linear-gradient(to right,rgb(20,40,180),rgb(0,200,200),rgb(0,200,100),rgb(255,200,0),rgb(220,50,20)); margin:6px 0 3px; }
+    .legend-labels { display:flex; justify-content:space-between; font-size:9px; color:#4a5568; width:110px; }
+    .hidden-ui { display:none !important; }
+
+    /* ── Controls ── */
+    #controls {
+      position:fixed; bottom:0; left:0; right:0; height:64px;
+      background:rgba(6,13,26,0.92); border-top:1px solid rgba(99,179,237,0.13);
+      backdrop-filter:blur(20px); z-index:300;
+      display:flex; align-items:center; padding:0 24px; gap:14px;
+    }
+    #play-btn { width:36px; height:36px; border-radius:50%; background:rgba(99,179,237,0.14); border:1px solid rgba(99,179,237,0.45); color:#63b3ed; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s; flex-shrink:0; }
+    #play-btn:hover { background:rgba(99,179,237,0.28); }
+    #timeline { flex:1; -webkit-appearance:none; appearance:none; height:3px; border-radius:2px; background:rgba(255,255,255,0.10); outline:none; cursor:pointer; }
+    #timeline::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:#63b3ed; box-shadow:0 0 8px rgba(99,179,237,0.8); cursor:pointer; }
+    .spd { font-size:11px; font-weight:700; color:#4a5568; background:none; border:none; cursor:pointer; padding:4px 7px; border-radius:6px; transition:all 0.15s; }
+    .spd:hover,.spd.on { color:#63b3ed; background:rgba(99,179,237,0.12); }
+
+    /* ── Vessel detail view ── */
+    #vessel-detail {
+      position:fixed; left:280px; right:220px; bottom:82px; height:360px;
+      background:rgba(6,13,26,0.93); border:1px solid rgba(99,179,237,0.18);
+      border-radius:18px; backdrop-filter:blur(26px); z-index:240;
+      box-shadow:0 24px 70px rgba(0,0,0,0.38);
+      transform:translateY(26px); opacity:0; pointer-events:none;
+      transition:transform 0.28s ease, opacity 0.28s ease;
+      overflow:hidden;
+    }
+    #vessel-detail.visible { transform:translateY(0); opacity:1; pointer-events:auto; }
+    .vessel-detail-bg {
+      position:absolute; inset:0; opacity:0.42; pointer-events:none;
+      background:
+        radial-gradient(circle at 22% 28%, rgba(99,179,237,0.16), transparent 28%),
+        linear-gradient(135deg, rgba(104,211,145,0.08), transparent 42%),
+        linear-gradient(180deg, rgba(255,255,255,0.05), transparent 38%);
+    }
+    .vessel-detail-inner { position:relative; height:100%; padding:16px; display:grid; grid-template-columns:260px 1fr 250px; gap:14px; }
+    .vd-card {
+      background:rgba(255,255,255,0.055); border:1px solid rgba(255,255,255,0.075);
+      border-radius:12px; padding:14px; min-width:0;
+    }
+    .vd-kicker { font-size:9px; font-weight:800; letter-spacing:0.14em; text-transform:uppercase; color:#718096; margin-bottom:8px; }
+    .vd-title { font-size:18px; font-weight:800; color:#e2e8f0; line-height:1.15; }
+    .vd-subtitle { font-size:11px; color:#a0aec0; margin-top:4px; }
+    .vd-close {
+      position:absolute; top:12px; right:12px; width:28px; height:28px; border-radius:50%;
+      background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.11);
+      color:#a0aec0; cursor:pointer; z-index:2;
+    }
+    .vd-close:hover { color:#e2e8f0; background:rgba(255,255,255,0.12); }
+    .vd-hero { display:flex; flex-direction:column; gap:12px; }
+    .vd-meter { height:8px; border-radius:999px; background:rgba(255,255,255,0.09); overflow:hidden; }
+    .vd-meter span { display:block; height:100%; width:0%; border-radius:999px; background:linear-gradient(90deg,#63b3ed,#68d391,#f6ad55); box-shadow:0 0 16px rgba(99,179,237,0.35); }
+    .vd-big { font-size:31px; font-weight:850; color:#f7fafc; font-variant-numeric:tabular-nums; }
+    .vd-unit { font-size:12px; color:#a0aec0; margin-left:3px; }
+    .vd-mini-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .vd-mini { padding:9px 10px; border-radius:10px; background:rgba(6,13,26,0.48); border:1px solid rgba(255,255,255,0.06); }
+    .vd-mini-label { font-size:8px; font-weight:800; letter-spacing:0.12em; text-transform:uppercase; color:#718096; }
+    .vd-mini-value { margin-top:4px; font-size:13px; font-weight:750; color:#dbe7f6; }
+    .vd-main { display:grid; grid-template-rows:auto 1fr auto; gap:12px; }
+    .vd-route-strip { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:12px; }
+    .vd-port { padding:10px 12px; border-radius:10px; background:rgba(6,13,26,0.45); border:1px solid rgba(255,255,255,0.06); }
+    .vd-port strong { display:block; font-size:13px; color:#e2e8f0; }
+    .vd-port span { display:block; margin-top:3px; font-size:10px; color:#718096; }
+    .vd-arrow { color:#63b3ed; font-weight:900; }
+    .vd-tanks { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; align-content:center; }
+    .vd-tank {
+      min-height:44px; border-radius:9px; background:rgba(247,250,252,0.88);
+      color:#2d3748; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,0.5), 0 6px 16px rgba(0,0,0,0.18);
+    }
+    .vd-tank.loaded { color:white; background:linear-gradient(180deg,#f6ad55,#dd6b20); box-shadow:0 0 18px rgba(246,173,85,0.34); }
+    .vd-tank.partial { color:#edf2f7; background:linear-gradient(180deg,#63b3ed,#2b6cb0); box-shadow:0 0 14px rgba(99,179,237,0.25); }
+    .vd-tank-name { font-size:12px; font-weight:800; }
+    .vd-tank-type { font-size:8px; font-weight:800; margin-top:2px; opacity:0.78; }
+    .vd-progress-row { display:grid; grid-template-columns:1fr auto; gap:12px; align-items:end; }
+    .vd-progress-label { font-size:10px; color:#a0aec0; margin-bottom:6px; }
+    .vd-side { display:grid; grid-template-rows:auto 1fr; gap:12px; }
+    .vd-status-list { display:grid; gap:9px; }
+    .vd-status { display:flex; justify-content:space-between; gap:12px; font-size:11px; color:#a0aec0; border-bottom:1px solid rgba(255,255,255,0.055); padding-bottom:7px; }
+    .vd-status strong { color:#e2e8f0; font-weight:750; text-align:right; }
+    .vd-note { font-size:10px; color:#718096; line-height:1.45; }
+    @media (max-width: 1100px) {
+      #vessel-detail { left:16px; right:16px; height:390px; }
+      .vessel-detail-inner { grid-template-columns:1fr; overflow:auto; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <div class="logo-ring"><div class="logo-dot"></div></div>
+  <h1>Northern Lights CCS</h1>
+  <span class="badge">3D · Prototype</span>
+  <div id="time-display">Day <span id="d-day">1</span> &nbsp;·&nbsp; <span id="d-hm">00:00</span></div>
+</div>
+
+<div id="map"></div>
+<div id="map-atmosphere"></div>
+<div id="map-vignette"></div>
+
+<!-- Vessel pills -->
+<div id="vessel-status">
+  <div class="v-pill" id="pill-pioneer" onclick="selectEntity('pioneer')">
+    <div class="v-pill-dot" id="dot-pioneer" style="background:#68d391"></div>
+    <span id="lbl-pioneer">N. Pioneer — Loading</span>
+  </div>
+  <div class="v-pill" id="pill-pathfinder" onclick="selectEntity('pathfinder')">
+    <div class="v-pill-dot" id="dot-pathfinder" style="background:#76e4f7"></div>
+    <span id="lbl-pathfinder">N. Pathfinder — Loading</span>
+  </div>
+</div>
+
+<!-- Left Panel -->
+<div id="left-panel">
+  <div class="panel-title">CO₂ Inventory — click to inspect</div>
+
+  <div class="entity-row" id="row-brevik"    onclick="selectEntity('brevik')">
+    <div class="e-dot" style="background:#63b3ed"></div>
+    <div class="e-name">Brevik (Emitter)</div>
+    <div class="e-bar-bg"><div class="e-bar" id="b-brevik"></div></div>
+    <div class="e-val" id="v-brevik">0 t</div>
+  </div>
+  <div class="entity-row" id="row-celsio"   onclick="selectEntity('celsio')">
+    <div class="e-dot" style="background:#b794f4"></div>
+    <div class="e-name">Celsio Oslo (Emitter)</div>
+    <div class="e-bar-bg"><div class="e-bar" id="b-celsio"></div></div>
+    <div class="e-val" id="v-celsio">0 t</div>
+  </div>
+  <div class="entity-row" id="row-terminal" onclick="selectEntity('terminal')">
+    <div class="e-dot" style="background:#f6ad55"></div>
+    <div class="e-name">Øygarden Terminal</div>
+    <div class="e-bar-bg"><div class="e-bar" id="b-terminal"></div></div>
+    <div class="e-val" id="v-terminal">0 t</div>
+  </div>
+  <div class="entity-row" id="row-pioneer"  onclick="selectEntity('pioneer')">
+    <div class="e-dot" style="background:#68d391"></div>
+    <div class="e-name">N. Pioneer (Vessel)</div>
+    <div class="e-bar-bg"><div class="e-bar" id="b-pioneer"></div></div>
+    <div class="e-val" id="v-pioneer">0 t</div>
+  </div>
+  <div class="entity-row" id="row-pathfinder" onclick="selectEntity('pathfinder')">
+    <div class="e-dot" style="background:#76e4f7"></div>
+    <div class="e-name">N. Pathfinder (Vessel)</div>
+    <div class="e-bar-bg"><div class="e-bar" id="b-pathfinder"></div></div>
+    <div class="e-val" id="v-pathfinder">0 t</div>
+  </div>
+  <div class="entity-row" id="row-manifold" onclick="selectEntity('manifold')">
+    <div class="e-dot" style="background:#68d391"></div>
+    <div class="e-name">Pipeline / Manifold</div>
+    <div class="e-bar-bg"><div class="e-bar" id="b-manifold"></div></div>
+    <div class="e-val" id="v-manifold">0 t/h</div>
+  </div>
+  <div class="entity-row" id="row-reservoir" onclick="selectEntity('reservoir')">
+    <div class="e-dot" style="background:#fc8181"></div>
+    <div class="e-name">Aurora Reservoir</div>
+    <div class="e-bar-bg"><div class="e-bar" id="b-reservoir"></div></div>
+    <div class="e-val" id="v-reservoir">0 kt</div>
+  </div>
+</div>
+
+<!-- Right Panel -->
+<div id="right-panel">
+  <div class="panel-title">System Status</div>
+  <div class="stat-block">
+    <div class="stat-label">Total Injected</div>
+    <div class="stat-value" id="s-injected">0<span class="stat-unit">kt</span></div>
+  </div>
+  <div class="stat-block">
+    <div class="stat-label">Pipeline Flow</div>
+    <div class="stat-value" id="s-flow">0<span class="stat-unit">t/h</span></div>
+  </div>
+  <div class="stat-block">
+    <div class="stat-label">Vessels at Sea</div>
+    <div class="stat-value" id="s-sea">0<span class="stat-unit"> / 2</span></div>
+  </div>
+  <div class="stat-block">
+    <div class="stat-label">Phase 1 Progress</div>
+    <div class="stat-value" id="s-prog">0<span class="stat-unit">%</span></div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <div class="panel-title">CO₂ Fill Level</div>
+  <div class="legend-gradient"></div>
+  <div class="legend-labels"><span>Empty</span><span>50%</span><span>Full</span></div>
+</div>
+
+<!-- Chart Panel -->
+<div id="chart-panel">
+  <div id="chart-header">
+    <div id="chart-entity-dot"></div>
+    <div id="chart-entity-name">—</div>
+    <div id="chart-metric-tabs"></div>
+    <div style="margin-left:auto;display:flex;align-items:baseline;gap:3px;">
+      <span id="chart-cur-val">—</span>
+      <span id="chart-cur-unit" class="stat-unit"></span>
+    </div>
+    <button id="chart-close" onclick="closeChart()">✕</button>
+  </div>
+  <canvas id="chart-canvas"></canvas>
+</div>
+
+<!-- Vessel Detail View -->
+<div id="vessel-detail" aria-live="polite">
+  <div class="vessel-detail-bg"></div>
+  <button class="vd-close" onclick="closeVesselDetail(true)">✕</button>
+  <div class="vessel-detail-inner" id="vessel-detail-body"></div>
+</div>
+
+<!-- Controls -->
+<div id="controls">
+  <button id="play-btn" onclick="togglePlay()">▶</button>
+  <input id="timeline" type="range" min="0" max="167" step="1" value="0" oninput="onScrub(+this.value)">
+  <button class="spd on"  onclick="setSpd(1,this)">1×</button>
+  <button class="spd"     onclick="setSpd(4,this)">4×</button>
+  <button class="spd"     onclick="setSpd(12,this)">12×</button>
+  <button class="spd"     onclick="setSpd(48,this)">48×</button>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  STATIC GEO  (deck.gl: [lon, lat])
+// ══════════════════════════════════════════════════════
+
+const PIPELINE = [
+  [4.882342,60.553892],[4.892359,60.573583],[4.879335,60.600709],
+  [4.875317,60.625912],[4.860534,60.654857],[4.828899,60.677745],
+  [4.775151,60.699123],[4.721572,60.724967],[4.668093,60.754380],
+  [4.623694,60.783661],[4.568359,60.778931],[4.373316,60.727191],
+  [4.188113,60.676880],[4.003516,60.627209],[3.819840,60.593440],
+  [3.637024,60.580968],[3.441678,60.575913],
+];
+const WELL_C_BRANCH = [[3.441678,60.575913],[3.468346,60.512961]];
+
+const FACILITIES = [
+  { id:'brevik',    name:'Brevik',            type:'Emitter',   pos:[9.700, 59.050], cap:8000,    r:16000, color:[99,179,237]  },
+  { id:'celsio',   name:'Celsio Oslo',        type:'Emitter',   pos:[10.84,59.860],  cap:6000,    r:16000, color:[183,148,244] },
+  { id:'terminal', name:'Øygarden Terminal',  type:'Terminal',  pos:[4.882,60.554],  cap:8000,    r:14000, color:[246,173,85]  },
+  { id:'manifold', name:'EOS Subsea Manifold',type:'Manifold',  pos:[3.442,60.576],  cap:400,     r:9000,  color:[104,211,145] },
+  { id:'well_c',   name:'Well C',             type:'Well',      pos:[3.468,60.513],  cap:200,     r:7000,  color:[104,211,145] },
+  { id:'reservoir',name:'Aurora Reservoir',   type:'Reservoir', pos:[3.460,60.550],  cap:1500000, r:42000, color:[252,129,129] },
+];
+
+const ROUTE_PIONEER = [
+  [9.700,59.050],[9.763,58.978],[9.797,58.693],[9.600,58.600],
+  [8.236,58.028],[7.000,57.975],[5.950,58.000],[4.800,58.800],
+  [4.583,59.305],[4.200,60.093],[4.165,60.650],[4.704,60.854],
+  [4.882,60.554],
+];
+const ROUTE_PATHFINDER = [
+  [10.84,59.860],[10.20,59.500],[9.600,59.200],[8.800,58.800],
+  [7.500,58.100],[6.200,58.000],[5.200,58.350],[4.900,59.100],
+  [4.700,59.800],[4.500,60.250],[4.250,60.580],[4.600,60.820],
+  [4.882,60.554],
+];
+
+// ══════════════════════════════════════════════════════
+//  SIMULATION
+// ══════════════════════════════════════════════════════
+
+const STEPS=168, LOAD_H=10, SAIL_H=26, UNLOAD_H=10, RETURN_H=26;
+const CYCLE_H=LOAD_H+SAIL_H+UNLOAD_H+RETURN_H; // 72h
+const CAP_VESSEL=7500;
+const PROJECT_VESSEL_CAPACITY_T = CAP_VESSEL;
+const PROJECT_VESSEL_VOLUME_M3 = 7500;
+const PROJECT_LOADING_RATE_TPH = 800;
+const PROJECT_UNLOADING_RATE_TPH = 800;
+const PROJECT_SPEED_KNOTS = 14;
+const PROJECT_TERMINAL_STORAGE_T = 8000;
+const PROJECT_PIPELINE_LENGTH_KM = 100.4;
+const PROJECT_PIPELINE_DESIGN_TPY = 5000000;
+const VESSEL_PROJECT = {
+  pioneer: {
+    idx:0,
+    entityId:'northern_pioneer',
+    name:'Northern Pioneer',
+    shortName:'N. Pioneer',
+    origin:'Brevik',
+    originDetail:'Heidelberg Materials / Norcem Brevik CCS',
+    originType:'cement capture',
+    route:ROUTE_PIONEER,
+    color:'#68d391',
+  },
+  pathfinder: {
+    idx:1,
+    entityId:'northern_pathfinder',
+    name:'Northern Pathfinder',
+    shortName:'N. Pathfinder',
+    origin:'Celsio Oslo',
+    originDetail:'Hafslund Celsio Klemetsrud WtE capture',
+    originType:'waste-to-energy capture',
+    route:ROUTE_PATHFINDER,
+    color:'#76e4f7',
+  },
+};
+
+function lerp(a,b,t){return a+(b-a)*t;}
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+
+function geoSegLen(a,b){
+  const midLat=(a[1]+b[1])*0.5*Math.PI/180;
+  const dx=(b[0]-a[0])*Math.cos(midLat);
+  const dy=b[1]-a[1];
+  return Math.hypot(dx,dy);
+}
+function pathMeta(path){
+  const cumulative=[0];
+  let total=0;
+  for(let i=1;i<path.length;i++){
+    total+=geoSegLen(path[i-1],path[i]);
+    cumulative.push(total);
+  }
+  return {path,cumulative,total};
+}
+function pathPoint(meta,frac){
+  const f=clamp(frac,0,1);
+  const dist=f*meta.total;
+  for(let i=1;i<meta.cumulative.length;i++){
+    if(dist<=meta.cumulative[i]){
+      const segStart=meta.cumulative[i-1];
+      const segSpan=Math.max(1e-9,meta.cumulative[i]-segStart);
+      const t=(dist-segStart)/segSpan;
+      const a=meta.path[i-1], b=meta.path[i];
+      return [lerp(a[0],b[0],t),lerp(a[1],b[1],t)];
+    }
+  }
+  return meta.path.at(-1);
+}
+function pathBearing(meta,frac){
+  const f=clamp(frac,0,1);
+  const dist=f*meta.total;
+  for(let i=1;i<meta.cumulative.length;i++){
+    if(dist<=meta.cumulative[i]){
+      const a=meta.path[i-1], b=meta.path[i];
+      const midLat=(a[1]+b[1])*0.5*Math.PI/180;
+      const dx=(b[0]-a[0])*Math.cos(midLat);
+      const dy=b[1]-a[1];
+      return Math.atan2(dx,dy)*180/Math.PI;
+    }
+  }
+  const a=meta.path.at(-2), b=meta.path.at(-1);
+  const midLat=(a[1]+b[1])*0.5*Math.PI/180;
+  return Math.atan2((b[0]-a[0])*Math.cos(midLat), b[1]-a[1])*180/Math.PI;
+}
+
+const PIPELINE_META = pathMeta(PIPELINE);
+const WELL_C_BRANCH_META = pathMeta(WELL_C_BRANCH);
+const ROUTE_PIONEER_META = pathMeta(ROUTE_PIONEER);
+const ROUTE_PIONEER_BACK_META = pathMeta([...ROUTE_PIONEER].reverse());
+const ROUTE_PATHFINDER_META = pathMeta(ROUTE_PATHFINDER);
+const ROUTE_PATHFINDER_BACK_META = pathMeta([...ROUTE_PATHFINDER].reverse());
+
+function vesselState(hour,offset,origin,dest,fwdMeta,backMeta){
+  const t=((hour+offset)%CYCLE_H+CYCLE_H)%CYCLE_H;
+  if(t<LOAD_H)               return {phase:'loading',   pos:origin, cargo:(t/LOAD_H)*CAP_VESSEL,         atSea:false, heading:pathBearing(fwdMeta,0.03)};
+  if(t<LOAD_H+SAIL_H){
+    const frac=(t-LOAD_H)/SAIL_H;
+    return {phase:'sailing', pos:pathPoint(fwdMeta,frac), cargo:CAP_VESSEL, atSea:true, heading:pathBearing(fwdMeta,frac)};
+  }
+  if(t<LOAD_H+SAIL_H+UNLOAD_H) return {phase:'unloading',pos:dest,   cargo:(1-(t-LOAD_H-SAIL_H)/UNLOAD_H)*CAP_VESSEL, atSea:false, heading:pathBearing(fwdMeta,0.97)};
+  const frac=(t-LOAD_H-SAIL_H-UNLOAD_H)/RETURN_H;
+  return {phase:'returning', pos:pathPoint(backMeta,frac), cargo:0, atSea:true, heading:pathBearing(backMeta,frac)};
+}
+
+const SIM=[];
+let bInv=0,cInv=0,tInv=0,rInv=0;
+
+for(let h=0;h<STEPS;h++){
+  const vs=[
+    vesselState(h,0,  ROUTE_PIONEER[0],    ROUTE_PIONEER.at(-1),    ROUTE_PIONEER_META,    ROUTE_PIONEER_BACK_META),
+    vesselState(h,36, ROUTE_PATHFINDER[0], ROUTE_PATHFINDER.at(-1), ROUTE_PATHFINDER_META, ROUTE_PATHFINDER_BACK_META),
+  ];
+  bInv=clamp(bInv+45.66,0,8000);
+  cInv=clamp(cInv+45.66,0,6000);
+  if(vs[0].phase==='loading')   bInv=clamp(bInv-Math.min(800,bInv),0,8000);
+  if(vs[0].phase==='unloading') tInv=clamp(tInv+Math.min(800,8000-tInv),0,8000);
+  if(vs[1].phase==='loading')   cInv=clamp(cInv-Math.min(800,cInv),0,6000);
+  if(vs[1].phase==='unloading') tInv=clamp(tInv+Math.min(800,8000-tInv),0,8000);
+  const flow=tInv>100?Math.min(400,tInv):0;
+  tInv=clamp(tInv-flow,0,8000);
+  rInv=clamp(rInv+flow,0,1500000);
+  SIM.push({h,vs,bInv,cInv,tInv,rInv,flow,atSea:vs.filter(v=>v.atSea).length});
+}
+
+// ══════════════════════════════════════════════════════
+//  COLOR UTILS
+// ══════════════════════════════════════════════════════
+
+const COLOR_STOPS=[[0,[20,40,180]],[0.25,[0,200,200]],[0.5,[0,200,100]],[0.75,[255,200,0]],[1,[220,50,20]]];
+
+function fillRGB(frac,alpha=220){
+  const f=clamp(frac,0,1);
+  for(let i=1;i<COLOR_STOPS.length;i++){
+    if(f<=COLOR_STOPS[i][0]){
+      const t=(f-COLOR_STOPS[i-1][0])/(COLOR_STOPS[i][0]-COLOR_STOPS[i-1][0]);
+      const [a,b]=[COLOR_STOPS[i-1][1],COLOR_STOPS[i][1]];
+      return [Math.round(lerp(a[0],b[0],t)),Math.round(lerp(a[1],b[1],t)),Math.round(lerp(a[2],b[2],t)),alpha];
+    }
+  }
+  return [220,50,20,alpha];
+}
+function fillCSS(frac){const [r,g,b]=fillRGB(frac);return `rgb(${r},${g},${b})`;}
+
+function vesselRGB(phase){
+  return {loading:[99,179,237,235],sailing:[104,211,145,235],unloading:[246,173,85,235],returning:[113,128,150,200]}[phase]||[113,128,150,200];
+}
+
+// ══════════════════════════════════════════════════════
+//  EMBEDDED GLTF ASSETS  (portable ScenegraphLayer URLs)
+// ══════════════════════════════════════════════════════
+
+const CUBE_GLTF_BUFFER_URI = 'data:application/octet-stream;base64,AAAAvwAAAL8AAAA/AAAAPwAAAL8AAAA/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPwAAAL8AAAC/AAAAvwAAAL8AAAC/AAAAvwAAAD8AAAC/AAAAPwAAAD8AAAC/AAAAvwAAAL8AAAC/AAAAvwAAAL8AAAA/AAAAvwAAAD8AAAA/AAAAvwAAAD8AAAC/AAAAPwAAAL8AAAA/AAAAPwAAAL8AAAC/AAAAPwAAAD8AAAC/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPwAAAD8AAAA/AAAAPwAAAD8AAAC/AAAAvwAAAD8AAAC/AAAAvwAAAL8AAAC/AAAAPwAAAL8AAAC/AAAAPwAAAL8AAAA/AAAAvwAAAL8AAAA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAABAAIAAAACAAMABAAFAAYABAAGAAcACAAJAAoACAAKAAsADAANAA4ADAAOAA8AEAARABIAEAASABMAFAAVABYAFAAWABcA';
+const GLTF_ROOT_ROTATION = [-0.7071068,0,0,0.7071068];
+
+function cubePrimitive(material){
+  return {attributes:{POSITION:0,NORMAL:1}, indices:2, material};
+}
+function pbrMaterial(baseColorFactor, extras={}){
+  return {
+    pbrMetallicRoughness:{
+      baseColorFactor,
+      metallicFactor:extras.metallicFactor ?? 0.12,
+      roughnessFactor:extras.roughnessFactor ?? 0.78,
+    },
+    emissiveFactor:extras.emissiveFactor ?? [0,0,0],
+  };
+}
+function buildGltfDataUrl({materials, meshes, nodes}){
+  const gltf = {
+    asset:{version:'2.0', generator:'Codex CCS deck.gl Scenegraph prototype'},
+    scene:0,
+    scenes:[{nodes:[0]}],
+    nodes:[
+      {name:'root', rotation:GLTF_ROOT_ROTATION, children:nodes.map((_,i)=>i+1)},
+      ...nodes
+    ],
+    meshes,
+    materials,
+    buffers:[{byteLength:648, uri:CUBE_GLTF_BUFFER_URI}],
+    bufferViews:[
+      {buffer:0, byteOffset:0,   byteLength:288, target:34962},
+      {buffer:0, byteOffset:288, byteLength:288, target:34962},
+      {buffer:0, byteOffset:576, byteLength:72,  target:34963},
+    ],
+    accessors:[
+      {bufferView:0, componentType:5126, count:24, type:'VEC3', min:[-0.5,-0.5,-0.5], max:[0.5,0.5,0.5]},
+      {bufferView:1, componentType:5126, count:24, type:'VEC3'},
+      {bufferView:2, componentType:5123, count:36, type:'SCALAR', min:[0], max:[23]},
+    ],
+  };
+  return `data:model/gltf+json;charset=utf-8,${encodeURIComponent(JSON.stringify(gltf))}`;
+}
+function makeShipModelUrl(){
+  return buildGltfDataUrl({
+    materials:[
+      pbrMaterial([0.10,0.18,0.29,1], {metallicFactor:0.18, roughnessFactor:0.64}),
+      pbrMaterial([0.18,0.58,0.64,1], {emissiveFactor:[0.02,0.06,0.07]}),
+      pbrMaterial([0.86,0.92,0.96,1], {metallicFactor:0.05, roughnessFactor:0.92}),
+      pbrMaterial([0.64,0.83,0.88,1], {metallicFactor:0.08, roughnessFactor:0.88}),
+      pbrMaterial([0.96,0.69,0.29,1], {emissiveFactor:[0.12,0.06,0.01]}),
+    ],
+    meshes:[
+      {name:'hull',   primitives:[cubePrimitive(0)]},
+      {name:'deck',   primitives:[cubePrimitive(1)]},
+      {name:'bridge', primitives:[cubePrimitive(2)]},
+      {name:'tanks',  primitives:[cubePrimitive(3)]},
+      {name:'accent', primitives:[cubePrimitive(4)]},
+    ],
+    nodes:[
+      {name:'hull',   mesh:0, translation:[0,0.22,0.00],  scale:[0.80,0.22,2.65]},
+      {name:'deck',   mesh:1, translation:[0,0.42,0.08],  scale:[0.62,0.08,1.95]},
+      {name:'bridge', mesh:2, translation:[0,0.68,-0.78], scale:[0.34,0.28,0.50]},
+      {name:'tank-a', mesh:3, translation:[0,0.63,-0.05], scale:[0.38,0.22,0.42]},
+      {name:'tank-b', mesh:3, translation:[0,0.63,0.52],  scale:[0.38,0.22,0.52]},
+      {name:'mast',   mesh:4, translation:[0,1.12,-1.02], scale:[0.05,0.62,0.05]},
+      {name:'funnel', mesh:4, translation:[0.18,0.94,-0.54], scale:[0.12,0.34,0.12]},
+    ],
+  });
+}
+function makeTerminalModelUrl(){
+  return buildGltfDataUrl({
+    materials:[
+      pbrMaterial([0.18,0.22,0.28,1], {metallicFactor:0.18, roughnessFactor:0.88}),
+      pbrMaterial([0.84,0.89,0.94,1], {metallicFactor:0.05, roughnessFactor:0.95}),
+      pbrMaterial([0.24,0.67,0.73,1], {emissiveFactor:[0.04,0.10,0.11], metallicFactor:0.10, roughnessFactor:0.82}),
+      pbrMaterial([0.95,0.71,0.36,1], {emissiveFactor:[0.08,0.04,0.01], metallicFactor:0.08, roughnessFactor:0.86}),
+    ],
+    meshes:[
+      {name:'slab',  primitives:[cubePrimitive(0)]},
+      {name:'tank',  primitives:[cubePrimitive(1)]},
+      {name:'plant', primitives:[cubePrimitive(2)]},
+      {name:'jetty', primitives:[cubePrimitive(3)]},
+    ],
+    nodes:[
+      {name:'base',    mesh:0, translation:[0,0.04,0.00],   scale:[1.78,0.08,1.32]},
+      {name:'tank-1',  mesh:1, translation:[-0.58,0.44,0.14], scale:[0.34,0.76,0.34]},
+      {name:'tank-2',  mesh:1, translation:[0.08,0.54,0.20],  scale:[0.42,0.96,0.42]},
+      {name:'tank-3',  mesh:1, translation:[0.64,0.38,-0.04], scale:[0.28,0.66,0.28]},
+      {name:'process', mesh:2, translation:[0.05,0.26,-0.56], scale:[0.62,0.42,0.26]},
+      {name:'tower',   mesh:2, translation:[0.94,0.90,-0.46], scale:[0.08,1.44,0.08]},
+      {name:'flare',   mesh:3, translation:[0.94,1.74,-0.46], scale:[0.12,0.12,0.12]},
+      {name:'jetty',   mesh:3, translation:[-0.06,0.05,0.98], scale:[0.12,0.05,0.78]},
+      {name:'link',    mesh:3, translation:[0.50,0.46,-0.34], scale:[0.50,0.05,0.05]},
+    ],
+  });
+}
+function makeEmitterModelUrl(){
+  return buildGltfDataUrl({
+    materials:[
+      pbrMaterial([0.16,0.20,0.26,1], {metallicFactor:0.18, roughnessFactor:0.88}),
+      pbrMaterial([0.39,0.45,0.53,1], {metallicFactor:0.16, roughnessFactor:0.82}),
+      pbrMaterial([0.87,0.91,0.95,1], {metallicFactor:0.04, roughnessFactor:0.94}),
+      pbrMaterial([0.21,0.66,0.72,1], {emissiveFactor:[0.03,0.10,0.10], metallicFactor:0.10, roughnessFactor:0.82}),
+    ],
+    meshes:[
+      {name:'slab',     primitives:[cubePrimitive(0)]},
+      {name:'building', primitives:[cubePrimitive(1)]},
+      {name:'stack',    primitives:[cubePrimitive(2)]},
+      {name:'capture',  primitives:[cubePrimitive(3)]},
+    ],
+    nodes:[
+      {name:'base',      mesh:0, translation:[0,0.05,0.00],    scale:[1.40,0.10,1.12]},
+      {name:'main',      mesh:1, translation:[-0.12,0.40,0.06], scale:[0.58,0.60,0.54]},
+      {name:'aux',       mesh:1, translation:[-0.62,0.28,-0.20], scale:[0.28,0.38,0.34]},
+      {name:'stack-1',   mesh:2, translation:[0.62,1.00,0.08],  scale:[0.10,1.62,0.10]},
+      {name:'stack-2',   mesh:2, translation:[0.88,0.80,-0.28], scale:[0.08,1.08,0.08]},
+      {name:'pipe',      mesh:3, translation:[0.18,0.60,0.34],  scale:[0.86,0.06,0.06]},
+      {name:'capture',   mesh:3, translation:[-0.28,0.76,-0.44], scale:[0.22,0.42,0.22]},
+      {name:'vent',      mesh:2, translation:[-0.42,0.92,0.52],  scale:[0.05,0.90,0.05]},
+    ],
+  });
+}
+
+const MODEL_URLS = {
+  ship:makeShipModelUrl(),
+  terminal:makeTerminalModelUrl(),
+  emitter:makeEmitterModelUrl(),
+};
+
+// ══════════════════════════════════════════════════════
+//  ENTITY METADATA  (for chart / selection)
+// ══════════════════════════════════════════════════════
+
+const ENTITY_META = {
+  brevik:    { name:'Brevik (Emitter)',          dot:'#63b3ed', metrics:[{key:'inventory',label:'Buffer Inventory',unit:'t'}] },
+  celsio:    { name:'Celsio Oslo (Emitter)',     dot:'#b794f4', metrics:[{key:'inventory',label:'Buffer Inventory',unit:'t'}] },
+  terminal:  { name:'Øygarden Terminal',         dot:'#f6ad55', metrics:[{key:'inventory',label:'Tank Inventory',  unit:'t'}] },
+  pioneer:   { name:'Northern Pioneer (Vessel)', dot:'#68d391', metrics:[{key:'cargo',    label:'CO₂ Cargo',       unit:'t'},{key:'phase',label:'Phase',unit:''}] },
+  pathfinder:{ name:'Northern Pathfinder',       dot:'#76e4f7', metrics:[{key:'cargo',    label:'CO₂ Cargo',       unit:'t'},{key:'phase',label:'Phase',unit:''}] },
+  manifold:  { name:'Pipeline / EOS Manifold',   dot:'#68d391', metrics:[{key:'flow',     label:'Flow Rate',       unit:'t/h'}] },
+  reservoir: { name:'Aurora Reservoir',          dot:'#fc8181', metrics:[{key:'injected',label:'Cumul. Injected',  unit:'kt'},{key:'fill',label:'Fill',unit:'%'}] },
+};
+
+function getSeriesData(entityId, metricKey){
+  return SIM.map(s=>{
+    if(entityId==='brevik')     return metricKey==='inventory' ? s.bInv : 0;
+    if(entityId==='celsio')     return metricKey==='inventory' ? s.cInv : 0;
+    if(entityId==='terminal')   return metricKey==='inventory' ? s.tInv : 0;
+    if(entityId==='pioneer'){
+      if(metricKey==='cargo') return s.vs[0].cargo;
+      if(metricKey==='phase') return ['loading','sailing','unloading','returning'].indexOf(s.vs[0].phase)/3;
+      return s.vs[0].cargo;
+    }
+    if(entityId==='pathfinder'){
+      if(metricKey==='cargo') return s.vs[1].cargo;
+      if(metricKey==='phase') return ['loading','sailing','unloading','returning'].indexOf(s.vs[1].phase)/3;
+      return s.vs[1].cargo;
+    }
+    if(entityId==='manifold')   return metricKey==='flow' ? s.flow : 0;
+    if(entityId==='reservoir'){
+      if(metricKey==='injected') return s.rInv/1000;
+      if(metricKey==='fill')     return s.rInv/15000; // %
+      return s.rInv/1000;
+    }
+    return 0;
+  });
+}
+
+// ══════════════════════════════════════════════════════
+//  DECK.GL LAYER BUILDER
+// ══════════════════════════════════════════════════════
+
+let selectedId = null;
+
+function facilityFill(fid, s){
+  if(fid==='brevik')    return s.bInv/8000;
+  if(fid==='celsio')    return s.cInv/6000;
+  if(fid==='terminal')  return s.tInv/8000;
+  if(fid==='reservoir') return s.rInv/1500000;
+  if(fid==='manifold')  return s.flow/400;
+  if(fid==='well_c')    return s.flow/400*0.7;
+  return 0;
+}
+
+function colHeight(type,fill){
+  if(type==='Reservoir') return 1200+fill*5200;
+  if(type==='Terminal')  return 7000+fill*22000;
+  if(type==='Emitter')   return 6200+fill*20000;
+  return 4200+fill*12000;
+}
+
+function buildFlowParticleData(meta, count, motion, altitude, tintBase){
+  const data=[];
+  for(let i=0;i<count;i++){
+    const frac=(motion + i/count) % 1;
+    const pos=pathPoint(meta, frac);
+    const pulse=0.55+0.45*Math.sin((motion*count + i)*Math.PI*2);
+    data.push({
+      pos:[pos[0],pos[1],altitude],
+      tint:tintBase + 0.10*Math.sin((frac+i)*Math.PI*2),
+      pulse,
+    });
+  }
+  return data;
+}
+
+function buildLayers(step, fxTime=0){
+  const s = SIM[step];
+  const facData = FACILITIES.map(f=>({...f, fill:facilityFill(f.id,s)}));
+  const pipeFlow = s.flow/400;
+  const particleMotion = ((fxTime || 0) * (0.00002 + pipeFlow*0.00008)) % 1;
+  const particleData = pipeFlow > 0.04 ? [
+    ...buildFlowParticleData(PIPELINE_META, 18 + Math.round(pipeFlow*16), particleMotion, 230, 0.20 + pipeFlow*0.45),
+    ...buildFlowParticleData(WELL_C_BRANCH_META, 8 + Math.round(pipeFlow*8), (particleMotion*1.18 + 0.17) % 1, 210, 0.26 + pipeFlow*0.38),
+  ] : [];
+
+  const emitterModelData = [
+    {id:'brevik', pos:[9.700,59.050,70], rotation:-20},
+    {id:'celsio', pos:[10.84,59.860,70], rotation:12},
+  ];
+  const terminalModelData = [
+    {id:'terminal', pos:[4.882,60.554,80], rotation:18},
+  ];
+
+  // ── Pipeline ──
+  const L_pipeGlow = new deck.PathLayer({
+    id:'pipe-glow', data:[PIPELINE], getPath:d=>d,
+    getColor:fillRGB(pipeFlow*0.7+0.15,34), getWidth:18000, widthUnits:'meters',
+    jointRounded:true, capRounded:true, pickable:false,
+  });
+  const L_pipeCore = new deck.PathLayer({
+    id:'pipe-core', data:[PIPELINE], getPath:d=>d,
+    getColor:fillRGB(pipeFlow*0.7+0.15,198), getWidth:4200, widthUnits:'meters',
+    jointRounded:true, capRounded:true,
+    pickable:true, onClick:()=>selectEntity('manifold'),
+  });
+  const L_wellBranch = new deck.PathLayer({
+    id:'well-branch', data:[WELL_C_BRANCH], getPath:d=>d,
+    getColor:[104,211,145,136], getWidth:2600, widthUnits:'meters',
+    jointRounded:true, pickable:false,
+  });
+  const L_pipeParticlesGlow = new deck.ScatterplotLayer({
+    id:'pipe-particles-glow', data:particleData,
+    getPosition:d=>d.pos, getRadius:d=>4800 + d.pulse*2200,
+    getFillColor:d=>{const c=fillRGB(d.tint, 44 + Math.round(d.pulse*46));return [c[0],c[1],c[2],c[3]];},
+    radiusUnits:'meters', pickable:false,
+  });
+  const L_pipeParticlesCore = new deck.ScatterplotLayer({
+    id:'pipe-particles-core', data:particleData,
+    getPosition:d=>d.pos, getRadius:d=>1350 + d.pulse*650,
+    getFillColor:d=>{const c=fillRGB(d.tint + 0.08, 180 + Math.round(d.pulse*50));return [c[0],c[1],c[2],c[3]];},
+    radiusUnits:'meters', pickable:false,
+  });
+
+  // ── Facilities ──
+  const L_halo = new deck.ColumnLayer({
+    id:'fac-halo', data:facData,
+    getPosition:d=>d.pos,
+    getElevation:d=>colHeight(d.type,d.fill)*1.22,
+    getRadius:d=>d.r*(selectedId===d.id?1.5:1.18),
+    getFillColor:d=>{const c=fillRGB(d.fill);return[c[0],c[1],c[2],selectedId===d.id?40:18];},
+    diskResolution:36, extruded:true, pickable:false,
+  });
+  const L_core = new deck.ColumnLayer({
+    id:'fac-core', data:facData,
+    getPosition:d=>d.pos,
+    getElevation:d=>colHeight(d.type,d.fill),
+    getRadius:d=>d.r*(selectedId===d.id?0.68:0.54),
+    getFillColor:d=>{
+      const alpha = d.type==='Terminal' || d.type==='Emitter'
+        ? (selectedId===d.id?120:86)
+        : (selectedId===d.id?212:176);
+      return fillRGB(d.fill,alpha);
+    },
+    getLineColor:d=>selectedId===d.id?[99,179,237,255]:[255,255,255,0],
+    lineWidthMinPixels:selectedId?2:0,
+    diskResolution:36, extruded:true,
+    pickable:true,
+    onClick:info=>{if(info.object) selectEntity(info.object.id);},
+    material:{ambient:0.35,diffuse:0.65,shininess:60},
+  });
+  const L_emitterModels = new deck.ScenegraphLayer({
+    id:'emitter-models',
+    data:emitterModelData,
+    scenegraph:MODEL_URLS.emitter,
+    getPosition:d=>d.pos,
+    getOrientation:d=>[0,0,d.rotation],
+    sizeScale:1380,
+    sizeMinPixels:18,
+    _lighting:'pbr',
+    pickable:true,
+    onClick:info=>{if(info.object) selectEntity(info.object.id);},
+  });
+  const L_terminalModels = new deck.ScenegraphLayer({
+    id:'terminal-models',
+    data:terminalModelData,
+    scenegraph:MODEL_URLS.terminal,
+    getPosition:d=>d.pos,
+    getOrientation:d=>[0,0,d.rotation],
+    sizeScale:1640,
+    sizeMinPixels:20,
+    _lighting:'pbr',
+    pickable:true,
+    onClick:info=>{if(info.object) selectEntity(info.object.id);},
+  });
+
+  // ── Sea route trails ──
+  const L_trail = new deck.PathLayer({
+    id:'trails', data:[ROUTE_PIONEER,ROUTE_PATHFINDER],
+    getPath:d=>d, getColor:[99,179,237,20],
+    getWidth:2, widthMinPixels:1.2, pickable:false,
+  });
+
+  // ── Vessels ──
+  const vData = s.vs.map((v,i)=>({
+    ...v, idx:i,
+    id:  i===0?'pioneer':'pathfinder',
+    name:i===0?'N. Pioneer':'N. Pathfinder',
+    pos:[v.pos[0],v.pos[1],140],
+  }));
+  const L_vGlow = new deck.ScatterplotLayer({
+    id:'v-glow', data:vData,
+    getPosition:d=>d.pos, getRadius:d=>selectedId===d.id?28000:22000,
+    getFillColor:d=>{const c=vesselRGB(d.phase);return[c[0],c[1],c[2],selectedId===d.id?46:22];},
+    radiusUnits:'meters', pickable:false,
+  });
+  const L_vCargo = new deck.ScatterplotLayer({
+    id:'v-cargo', data:vData,
+    getPosition:d=>d.pos,
+    getRadius:d=>Math.max(760,6800*(d.cargo/CAP_VESSEL)),
+    getFillColor:d=>fillRGB(d.cargo/CAP_VESSEL,144),
+    radiusUnits:'meters', pickable:false,
+  });
+  const L_shipModels = new deck.ScenegraphLayer({
+    id:'ship-models',
+    data:vData,
+    scenegraph:MODEL_URLS.ship,
+    getPosition:d=>d.pos,
+    getOrientation:d=>[0,0,d.heading],
+    sizeScale:2140,
+    sizeMinPixels:24,
+    _lighting:'pbr',
+    pickable:true,
+    onClick:info=>{if(info.object) selectEntity(info.object.id);},
+  });
+  const L_vSelect = new deck.ScatterplotLayer({
+    id:'v-select',
+    data:vData.filter(d=>d.id===selectedId),
+    getPosition:d=>d.pos,
+    getRadius:19000,
+    stroked:true,
+    filled:false,
+    lineWidthMinPixels:2.4,
+    getLineColor:[99,179,237,255],
+    radiusUnits:'meters',
+    pickable:false,
+  });
+
+  // ── Labels ──
+  const labelData=[
+    {pos:[9.730, 59.075,28000],text:'Brevik Plant'},
+    {pos:[10.880,59.900,28000],text:'Celsio Capture'},
+    {pos:[4.930, 60.590,32000],text:'Øygarden Terminal'},
+    {pos:[3.360, 60.604,22000],text:'EOS Manifold'},
+    {pos:[3.365, 60.525,16000],text:'Aurora Store'},
+  ];
+  const L_labels = new deck.TextLayer({
+    id:'labels', data:labelData,
+    getPosition:d=>d.pos, getText:d=>d.text,
+    getSize:11.5, getColor:[232,239,249,202],
+    getOutlineColor:[7,15,27,220],
+    getOutlineWidth:2,
+    fontFamily:"'Inter','Segoe UI',Arial,sans-serif",
+    fontWeight:700,
+    billboard:true,
+    pickable:false,
+  });
+
+  return [L_trail,L_pipeGlow,L_pipeCore,L_wellBranch,
+          L_pipeParticlesGlow,L_pipeParticlesCore,
+          L_halo,L_core,L_terminalModels,L_emitterModels,
+          L_vGlow,L_vCargo,L_shipModels,L_vSelect,
+          L_labels];
+}
+
+// ══════════════════════════════════════════════════════
+//  CHART DRAWING
+// ══════════════════════════════════════════════════════
+
+let chartEntityId  = null;
+let chartMetricKey = null;
+let chartData      = [];
+
+function getEntityUnit(id, metricKey){
+  const m = ENTITY_META[id]?.metrics.find(x=>x.key===metricKey);
+  return m ? m.unit : '';
+}
+function getEntityLabel(id, metricKey){
+  const m = ENTITY_META[id]?.metrics.find(x=>x.key===metricKey);
+  return m ? m.label : '';
+}
+
+function drawChart(currentStep){
+  const canvas = document.getElementById('chart-canvas');
+  if(!canvas || !chartData.length) return;
+
+  // Resize to actual pixel dimensions
+  const rect = canvas.getBoundingClientRect();
+  const DPR  = window.devicePixelRatio || 1;
+  if(canvas.width !== Math.round(rect.width*DPR)){
+    canvas.width  = Math.round(rect.width*DPR);
+    canvas.height = Math.round(rect.height*DPR);
+  }
+
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+
+  const W = rect.width, H = rect.height;
+  const PAD = {top:12, right:20, bottom:34, left:58};
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top  - PAD.bottom;
+
+  ctx.clearRect(0,0,W,H);
+
+  const maxVal = Math.max(...chartData)*1.08 || 1;
+  const minVal = 0;
+
+  const px = i   => PAD.left + (i/(STEPS-1))*plotW;
+  const py = val => PAD.top  + (1-(val-minVal)/(maxVal-minVal))*plotH;
+
+  // Grid
+  const gridCount = 4;
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth   = 1;
+  for(let k=0;k<=gridCount;k++){
+    const y = PAD.top + (k/gridCount)*plotH;
+    ctx.beginPath(); ctx.moveTo(PAD.left,y); ctx.lineTo(W-PAD.right,y); ctx.stroke();
+  }
+  // Day ticks (every 24 steps)
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  for(let d=0;d<7;d++){
+    const x = px(d*24);
+    ctx.beginPath(); ctx.moveTo(x,PAD.top); ctx.lineTo(x,H-PAD.bottom); ctx.stroke();
+  }
+
+  // Y-axis labels
+  ctx.fillStyle  = '#4a5568';
+  ctx.font       = '10px Inter,Segoe UI,Arial,sans-serif';
+  ctx.textAlign  = 'right';
+  ctx.textBaseline = 'middle';
+  for(let k=0;k<=gridCount;k++){
+    const val = minVal + (1-k/gridCount)*(maxVal-minVal);
+    const y   = PAD.top + (k/gridCount)*plotH;
+    const label = maxVal >= 1000 ? (val/1000).toFixed(1)+'k' : val.toFixed(0);
+    ctx.fillText(label, PAD.left-6, y);
+  }
+
+  // X-axis day labels
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for(let d=0;d<=7;d++){
+    const x = px(d*24);
+    ctx.fillText('D'+(d+1), x, H-PAD.bottom+6);
+  }
+
+  // Area gradient
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, H-PAD.bottom);
+  const meta = ENTITY_META[chartEntityId];
+  const hex  = meta ? meta.dot : '#63b3ed';
+  grad.addColorStop(0,   hexAlpha(hex,0.28));
+  grad.addColorStop(0.7, hexAlpha(hex,0.06));
+  grad.addColorStop(1,   hexAlpha(hex,0.00));
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(chartData[0]));
+  for(let i=1;i<STEPS;i++) ctx.lineTo(px(i), py(chartData[i]));
+  ctx.lineTo(px(STEPS-1), H-PAD.bottom);
+  ctx.lineTo(PAD.left, H-PAD.bottom);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(chartData[0]));
+  for(let i=1;i<STEPS;i++) ctx.lineTo(px(i), py(chartData[i]));
+  ctx.strokeStyle = hexAlpha(hex, 0.9);
+  ctx.lineWidth   = 2;
+  ctx.setLineDash([]);
+  ctx.stroke();
+
+  // Current time indicator
+  const cx = px(currentStep);
+  ctx.setLineDash([3,3]);
+  ctx.strokeStyle = 'rgba(99,179,237,0.75)';
+  ctx.lineWidth   = 1.5;
+  ctx.beginPath(); ctx.moveTo(cx,PAD.top); ctx.lineTo(cx,H-PAD.bottom); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Dot at current position
+  const cy = py(chartData[currentStep]);
+  ctx.shadowColor = hex; ctx.shadowBlur = 10;
+  ctx.fillStyle   = '#63b3ed';
+  ctx.beginPath(); ctx.arc(cx, cy, 4.5, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur  = 0;
+
+  // Current value label next to dot
+  const unit  = getEntityUnit(chartEntityId, chartMetricKey);
+  const rawVal = chartData[currentStep];
+  const dispVal = rawVal >= 1000 ? (rawVal/1000).toFixed(2)+'k' : rawVal.toFixed(1);
+  ctx.fillStyle  = '#e2e8f0';
+  ctx.font       = 'bold 11px Inter,Segoe UI,Arial,sans-serif';
+  ctx.textAlign  = cx > W-100 ? 'right' : 'left';
+  ctx.textBaseline = cy < PAD.top+18 ? 'top' : 'bottom';
+  ctx.fillText(dispVal + (unit?' '+unit:''), cx + (cx>W-100?-8:8), cy + (cy<PAD.top+18?6:-4));
+}
+
+function hexAlpha(hex,a){
+  const h=hex.replace('#','');
+  const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// ══════════════════════════════════════════════════════
+//  VESSEL DETAIL VIEW
+// ══════════════════════════════════════════════════════
+
+let vesselDetailId = null;
+
+function fmtT(v){ return v>=1000 ? (v/1000).toFixed(1)+' kt' : Math.round(v)+' t'; }
+function fmtPct(v){ return Math.round(clamp(v,0,1)*100)+'%'; }
+function fmtHours(h){
+  if(h<=0) return 'Now';
+  if(h<24) return Math.ceil(h)+' h';
+  return Math.floor(h/24)+' d '+Math.ceil(h%24)+' h';
+}
+function routeDistanceKm(path){
+  const R=6371;
+  let total=0;
+  for(let i=1;i<path.length;i++){
+    const a=path[i-1], b=path[i];
+    const lat1=a[1]*Math.PI/180, lat2=b[1]*Math.PI/180;
+    const dLat=(b[1]-a[1])*Math.PI/180;
+    const dLon=(b[0]-a[0])*Math.PI/180;
+    const x=Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+    total += 2*R*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+  }
+  return total;
+}
+function vesselCycleInfo(id, s){
+  const meta = VESSEL_PROJECT[id];
+  const offset = id==='pioneer' ? 0 : 36;
+  const t = ((s + offset) % CYCLE_H + CYCLE_H) % CYCLE_H;
+  let phase='loading', phaseStart=0, phaseEnd=LOAD_H, legProgress=0, routeLabel='At emitter berth';
+  if(t<LOAD_H){
+    phase='loading'; phaseStart=0; phaseEnd=LOAD_H; legProgress=t/LOAD_H; routeLabel='Loading at '+meta.origin;
+  } else if(t<LOAD_H+SAIL_H){
+    phase='sailing'; phaseStart=LOAD_H; phaseEnd=LOAD_H+SAIL_H; legProgress=(t-LOAD_H)/SAIL_H; routeLabel='Outbound to Øygarden';
+  } else if(t<LOAD_H+SAIL_H+UNLOAD_H){
+    phase='unloading'; phaseStart=LOAD_H+SAIL_H; phaseEnd=LOAD_H+SAIL_H+UNLOAD_H; legProgress=(t-phaseStart)/UNLOAD_H; routeLabel='Unloading at Øygarden';
+  } else {
+    phase='returning'; phaseStart=LOAD_H+SAIL_H+UNLOAD_H; phaseEnd=CYCLE_H; legProgress=(t-phaseStart)/RETURN_H; routeLabel='Returning to '+meta.origin;
+  }
+  const cycleProgress=t/CYCLE_H;
+  const hoursToPhaseEnd=phaseEnd-t;
+  const hoursToTerminal = phase==='loading' ? (LOAD_H-t)+SAIL_H
+    : phase==='sailing' ? (LOAD_H+SAIL_H-t)
+    : phase==='unloading' ? 0
+    : CYCLE_H-t+LOAD_H+SAIL_H;
+  return {meta,t,phase,phaseStart,phaseEnd,legProgress,cycleProgress,hoursToPhaseEnd,hoursToTerminal,routeLabel};
+}
+function tankCells(cargoFrac){
+  return Array.from({length:12},(_,i)=>{
+    const start=i/12, end=(i+1)/12;
+    const cls = cargoFrac>=end ? 'loaded' : cargoFrac>start ? 'partial' : '';
+    const label = String.fromCharCode(65+Math.floor(i/3))+'-'+String(i%3+1).padStart(2,'0');
+    return `<div class="vd-tank ${cls}"><div class="vd-tank-name">${label}</div><div class="vd-tank-type">CO₂</div></div>`;
+  }).join('');
+}
+function openVesselDetail(id){
+  vesselDetailId = VESSEL_PROJECT[id] ? id : null;
+  if(!vesselDetailId) return;
+  document.getElementById('vessel-detail').classList.add('visible');
+  updateVesselDetail();
+}
+function closeVesselDetail(clearSelection=false){
+  vesselDetailId = null;
+  document.getElementById('vessel-detail').classList.remove('visible');
+  if(clearSelection){
+    selectedId = null;
+    document.querySelectorAll('.entity-row').forEach(el=>el.classList.remove('selected'));
+    document.querySelectorAll('.v-pill').forEach(el=>el.classList.remove('selected'));
+    document.getElementById('legend').classList.remove('hidden-ui');
+    syncLayers();
+  }
+}
+function updateVesselDetail(){
+  if(!vesselDetailId) return;
+  const d = SIM[step];
+  const info = vesselCycleInfo(vesselDetailId, step);
+  const meta = info.meta;
+  const vessel = d.vs[meta.idx];
+  const cargoFrac = clamp(vessel.cargo/CAP_VESSEL,0,1);
+  const projectCargoFrac = clamp(vessel.cargo/PROJECT_VESSEL_CAPACITY_T,0,1);
+  const routeKm = routeDistanceKm(meta.route);
+  const travelledKm = info.phase==='sailing' ? routeKm*info.legProgress
+    : info.phase==='returning' ? routeKm*info.legProgress
+    : (info.phase==='unloading' ? routeKm : 0);
+  const terminalFill = d.tInv/PROJECT_TERMINAL_STORAGE_T;
+  const etaLabel = info.phase==='returning' ? 'ETA to emitter' : 'ETA to Øygarden';
+  const etaValue = info.phase==='returning' ? fmtHours(info.hoursToPhaseEnd) : fmtHours(info.hoursToTerminal);
+  const phaseText = PHASE_LABEL[info.phase] || info.phase;
+  const flowUtil = d.flow ? d.flow/400 : 0;
+
+  document.getElementById('vessel-detail-body').innerHTML = `
+    <section class="vd-card vd-hero">
+      <div>
+        <div class="vd-kicker">Selected CO₂ Carrier</div>
+        <div class="vd-title">${meta.name}</div>
+        <div class="vd-subtitle">${meta.entityId} · ${meta.originType}</div>
+      </div>
+      <div>
+        <div class="vd-kicker">Current Cargo</div>
+        <span class="vd-big">${fmtT(vessel.cargo)}</span><span class="vd-unit">/ ${PROJECT_VESSEL_CAPACITY_T.toLocaleString()} t project cap.</span>
+        <div class="vd-meter" style="margin-top:9px;"><span style="width:${fmtPct(projectCargoFrac)}"></span></div>
+      </div>
+      <div class="vd-mini-grid">
+        <div class="vd-mini"><div class="vd-mini-label">Phase</div><div class="vd-mini-value">${phaseText}</div></div>
+        <div class="vd-mini"><div class="vd-mini-label">${etaLabel}</div><div class="vd-mini-value">${etaValue}</div></div>
+        <div class="vd-mini"><div class="vd-mini-label">Loading</div><div class="vd-mini-value">${PROJECT_LOADING_RATE_TPH} t/h</div></div>
+        <div class="vd-mini"><div class="vd-mini-label">Service Speed</div><div class="vd-mini-value">${PROJECT_SPEED_KNOTS} kn</div></div>
+      </div>
+      <div class="vd-note">Capacity, loading rate and speed are taken from the local Northern Lights Phase 1 scenario data.</div>
+    </section>
+
+    <section class="vd-main">
+      <div class="vd-route-strip">
+        <div class="vd-port"><strong>${meta.origin}</strong><span>${meta.originDetail}</span></div>
+        <div class="vd-arrow">→</div>
+        <div class="vd-port"><strong>Øygarden Terminal</strong><span>Naturgassparken receiving terminal · 1 berth</span></div>
+      </div>
+      <div class="vd-card">
+        <div class="vd-kicker">CO₂ Cargo Modules</div>
+        <div class="vd-tanks">${tankCells(cargoFrac)}</div>
+      </div>
+      <div class="vd-card">
+        <div class="vd-progress-row">
+          <div>
+            <div class="vd-progress-label">${info.routeLabel} · ${travelledKm.toFixed(0)} / ${routeKm.toFixed(0)} km route visualized</div>
+            <div class="vd-meter"><span style="width:${fmtPct(info.phase==='loading'||info.phase==='unloading'?info.legProgress:info.legProgress)}"></span></div>
+          </div>
+          <div class="vd-mini-value">${fmtPct(info.legProgress)}</div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="vd-side">
+      <div class="vd-card">
+        <div class="vd-kicker">Operations Snapshot</div>
+        <div class="vd-status-list">
+          <div class="vd-status"><span>Volume capacity</span><strong>${PROJECT_VESSEL_VOLUME_M3.toLocaleString()} m³</strong></div>
+          <div class="vd-status"><span>Unload rate</span><strong>${PROJECT_UNLOADING_RATE_TPH} t/h</strong></div>
+          <div class="vd-status"><span>Terminal inventory</span><strong>${fmtT(d.tInv)} / ${PROJECT_TERMINAL_STORAGE_T.toLocaleString()} t</strong></div>
+          <div class="vd-status"><span>Pipeline flow</span><strong>${Math.round(d.flow)} t/h</strong></div>
+          <div class="vd-status"><span>Pipeline length</span><strong>${PROJECT_PIPELINE_LENGTH_KM} km</strong></div>
+          <div class="vd-status"><span>Design pipe capacity</span><strong>${(PROJECT_PIPELINE_DESIGN_TPY/1000000).toFixed(1)} Mt/y</strong></div>
+        </div>
+      </div>
+      <div class="vd-card">
+        <div class="vd-kicker">System Coupling</div>
+        <div class="vd-mini-grid">
+          <div class="vd-mini"><div class="vd-mini-label">Terminal Fill</div><div class="vd-mini-value">${fmtPct(terminalFill)}</div></div>
+          <div class="vd-mini"><div class="vd-mini-label">Flow Util.</div><div class="vd-mini-value">${fmtPct(flowUtil)}</div></div>
+        </div>
+        <div class="vd-note" style="margin-top:10px;">The carrier feeds Øygarden storage; pipeline flow then transfers liquid CO₂ toward the Aurora subsea manifold and reservoir.</div>
+      </div>
+    </aside>
+  `;
+}
+
+// ══════════════════════════════════════════════════════
+//  SELECTION
+// ══════════════════════════════════════════════════════
+
+function selectEntity(id){
+  selectedId = (selectedId===id) ? null : id;
+
+  // Update left-panel rows
+  document.querySelectorAll('.entity-row').forEach(el=>el.classList.remove('selected'));
+  if(selectedId){
+    const row = document.getElementById('row-'+selectedId);
+    if(row) row.classList.add('selected');
+  }
+  // Update vessel pills
+  document.querySelectorAll('.v-pill').forEach(el=>el.classList.remove('selected'));
+  if(selectedId==='pioneer')    document.getElementById('pill-pioneer')?.classList.add('selected');
+  if(selectedId==='pathfinder') document.getElementById('pill-pathfinder')?.classList.add('selected');
+
+  // Open the vessel dashboard for ships; keep the original chart behavior for other entities.
+  if(selectedId && VESSEL_PROJECT[selectedId]){
+    document.getElementById('chart-panel').classList.remove('visible');
+    document.getElementById('legend').classList.add('hidden-ui');
+    document.getElementById('legend').classList.remove('lifted');
+    document.getElementById('right-panel').classList.remove('lifted');
+    chartEntityId = null;
+    openVesselDetail(selectedId);
+  } else if(selectedId){
+    closeVesselDetail();
+    const meta = ENTITY_META[selectedId];
+    chartEntityId  = selectedId;
+    chartMetricKey = meta.metrics[0].key;
+    chartData      = getSeriesData(selectedId, chartMetricKey);
+
+    // Header
+    document.getElementById('chart-entity-dot').style.background  = meta.dot;
+    document.getElementById('chart-entity-name').textContent       = meta.name;
+
+    // Metric tabs
+    const tabsEl = document.getElementById('chart-metric-tabs');
+    tabsEl.innerHTML = '';
+    meta.metrics.forEach(m=>{
+      const btn = document.createElement('button');
+      btn.className = 'metric-tab'+(m.key===chartMetricKey?' on':'');
+      btn.textContent = m.label;
+      btn.onclick = ()=>{
+        chartMetricKey = m.key;
+        chartData      = getSeriesData(selectedId, m.key);
+        tabsEl.querySelectorAll('.metric-tab').forEach(b=>b.classList.remove('on'));
+        btn.classList.add('on');
+        updateChartHeader();
+        drawChart(step);
+      };
+      tabsEl.appendChild(btn);
+    });
+
+    document.getElementById('chart-panel').classList.add('visible');
+    document.getElementById('legend').classList.remove('hidden-ui');
+    document.getElementById('legend').classList.add('lifted');
+    document.getElementById('right-panel').classList.add('lifted');
+    updateChartHeader();
+    drawChart(step);
+  } else {
+    closeVesselDetail();
+    document.getElementById('chart-panel').classList.remove('visible');
+    document.getElementById('legend').classList.remove('hidden-ui');
+    document.getElementById('legend').classList.remove('lifted');
+    document.getElementById('right-panel').classList.remove('lifted');
+  }
+
+  // Redraw 3D layers to show selection highlight
+  syncLayers();
+}
+
+function updateChartHeader(){
+  if(!chartEntityId) return;
+  const raw  = chartData[step];
+  const unit = getEntityUnit(chartEntityId, chartMetricKey);
+  const disp = raw>=1000 ? (raw/1000).toFixed(2)+' k'+unit : raw.toFixed(1)+' '+unit;
+  document.getElementById('chart-cur-val').textContent  = raw>=1000?(raw/1000).toFixed(2):(raw.toFixed(1));
+  document.getElementById('chart-cur-unit').textContent = raw>=1000?'k'+unit:unit;
+}
+
+function closeChart(){
+  selectedId = null;
+  closeVesselDetail();
+  document.querySelectorAll('.entity-row').forEach(el=>el.classList.remove('selected'));
+  document.querySelectorAll('.v-pill').forEach(el=>el.classList.remove('selected'));
+  document.getElementById('chart-panel').classList.remove('visible');
+  document.getElementById('legend').classList.remove('hidden-ui');
+  document.getElementById('legend').classList.remove('lifted');
+  document.getElementById('right-panel').classList.remove('lifted');
+  syncLayers();
+}
+
+// ══════════════════════════════════════════════════════
+//  MAP INIT
+// ══════════════════════════════════════════════════════
+
+const map = new maplibregl.Map({
+  container:'map',
+  style:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  center:[6.15,59.95], zoom:5.45, pitch:55, bearing:10, antialias:true,
+});
+
+let overlay;
+map.on('load',()=>{
+  overlay = new deck.MapboxOverlay({layers:buildLayers(0,0)});
+  map.addControl(overlay);
+  render(0);
+  if(!raf) raf=requestAnimationFrame(animate);
+});
+
+// ══════════════════════════════════════════════════════
+//  PLAYBACK
+// ══════════════════════════════════════════════════════
+
+let step=0, playing=false, speed=1, raf=null, lastTs=null, acc=0, fxTime=0;
+const MS_PER_H=1000;
+
+function syncLayers(){
+  if(overlay) overlay.setProps({layers:buildLayers(step,fxTime)});
+}
+function render(s){
+  step=clamp(s,0,STEPS-1);
+  document.getElementById('timeline').value=step;
+  syncLayers();
+  updateUI(step);
+  if(chartEntityId){ updateChartHeader(); drawChart(step); }
+  if(vesselDetailId) updateVesselDetail();
+}
+
+const PHASE_LABEL={loading:'Loading',sailing:'At Sea →',unloading:'Unloading',returning:'Returning ←'};
+const PHASE_COLOR={loading:'#63b3ed',sailing:'#68d391',unloading:'#f6ad55',returning:'#718096'};
+
+function updateUI(s){
+  const d=SIM[s];
+  document.getElementById('d-day').textContent=Math.floor(s/24)+1;
+  document.getElementById('d-hm').textContent=String(s%24).padStart(2,'0')+':00';
+
+  function bar(id,inv,cap,isFlow){
+    const pct=clamp(inv/cap*100,0,100);
+    const bEl=document.getElementById('b-'+id), vEl=document.getElementById('v-'+id);
+    if(!bEl) return;
+    bEl.style.width=pct+'%';
+    bEl.style.background=fillCSS(pct/100);
+    if(vEl) vEl.textContent=isFlow?Math.round(inv)+'t/h':inv>=1000?(inv/1000).toFixed(1)+'kt':Math.round(inv)+'t';
+  }
+  bar('brevik',   d.bInv,  8000);
+  bar('celsio',   d.cInv,  6000);
+  bar('terminal', d.tInv,  8000);
+  bar('pioneer',  d.vs[0].cargo, CAP_VESSEL);
+  bar('pathfinder',d.vs[1].cargo,CAP_VESSEL);
+  bar('manifold', d.flow,  400, true);
+  bar('reservoir',d.rInv/1000,1500);
+
+  document.getElementById('s-injected').innerHTML=(d.rInv/1000).toFixed(1)+'<span class="stat-unit">kt</span>';
+  document.getElementById('s-flow').innerHTML=d.flow.toFixed(0)+'<span class="stat-unit">t/h</span>';
+  document.getElementById('s-sea').innerHTML=d.atSea+'<span class="stat-unit"> / 2</span>';
+  document.getElementById('s-prog').innerHTML=(d.rInv/1500000*100).toFixed(1)+'<span class="stat-unit">%</span>';
+
+  [[0,'pioneer'],[1,'pathfinder']].forEach(([idx,id])=>{
+    const ph=d.vs[idx].phase;
+    const name=idx===0?'N. Pioneer':'N. Pathfinder';
+    document.getElementById('lbl-'+id).textContent=name+' — '+(PHASE_LABEL[ph]||ph);
+    document.getElementById('dot-'+id).style.background=PHASE_COLOR[ph]||'#718096';
+  });
+}
+
+function togglePlay(){
+  playing=!playing;
+  document.getElementById('play-btn').textContent=playing?'⏸':'▶';
+}
+
+function animate(ts){
+  if(lastTs===null) lastTs=ts;
+  const delta=ts-lastTs;
+  lastTs=ts;
+  fxTime=ts;
+  if(playing){
+    acc+=delta*speed;
+    const adv=Math.floor(acc/MS_PER_H);
+    if(adv>0){
+      acc-=adv*MS_PER_H;
+      step=(step+adv)%STEPS;
+      document.getElementById('timeline').value=step;
+      updateUI(step);
+      if(chartEntityId){ updateChartHeader(); drawChart(step); }
+      if(vesselDetailId) updateVesselDetail();
+    }
+  }
+  syncLayers();
+  raf=requestAnimationFrame(animate);
+}
+
+function onScrub(v){render(v);}
+
+function setSpd(s,btn){
+  speed=s;
+  document.querySelectorAll('.spd').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+}
+
+// Resize chart on window resize
+window.addEventListener('resize',()=>{ if(chartEntityId) drawChart(step); });
+
+render(0);
+</script>
+</body>
+</html>

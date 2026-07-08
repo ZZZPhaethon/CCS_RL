@@ -1,0 +1,5 @@
+policy,storage_rate,loss_rate
+idle,0.0297,0.5579
+greedy_shuttle,0.8081,0.0112
+ppo_stochastic,0.5835,0.2215
+ppo_deterministic,0.0297,0.5579

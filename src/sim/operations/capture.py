@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..scenario_generation.disturbance_resolver import emitter_availability
 from ..entities.emitter import Emitter
 from ..entities.state import PhysicalState, Violation
 
@@ -18,7 +19,7 @@ def apply_capture(
         requested_t = (
             emitter.capture_rate_tph_at(interval_start_h)
             * utilization
-            * emitter.availability
+            * emitter_availability(state, emitter)
             * network.time_step_hours
         )
         current_t = state.entity_inventory_t.get(emitter_id, 0.0)

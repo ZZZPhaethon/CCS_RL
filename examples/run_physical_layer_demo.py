@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from sim.routes import sea_route
-from sim.scenarios import build_northern_lights_phase1_demo
+from sim.network_scenarios import build_northern_lights_phase1_demo
 
 
 def main() -> None:

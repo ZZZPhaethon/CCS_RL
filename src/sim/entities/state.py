@@ -17,6 +17,19 @@ class PhysicalState:
     injection_rate_history_tph: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     vessel_berths: dict[str, str] = field(default_factory=dict)
 
+    # Time-varying disturbance overrides (the "ξ_t" channel).
+    # Each maps entity_id -> a runtime override that takes precedence over the
+    # entity's static (frozen) nominal parameter. Absence means "use nominal".
+    # A ScenarioGenerator or RL/eval harness writes these per timestep so the
+    # physics can react to weather, outages, maintenance and injectivity decline
+    # without mutating the frozen entity definitions.
+    emitter_availability: dict[str, float] = field(default_factory=dict)
+    well_available: dict[str, bool] = field(default_factory=dict)
+    injectivity_factor: dict[str, float] = field(default_factory=dict)
+    vessel_speed_factor: dict[str, float] = field(default_factory=dict)
+    leg_speed_factor: dict[str, float] = field(default_factory=dict)
+    berth_count_override: dict[str, int] = field(default_factory=dict)
+
     def copy(self) -> "PhysicalState":
         return PhysicalState(
             time_h=self.time_h,
@@ -31,6 +44,12 @@ class PhysicalState:
                 for well_id, history in self.injection_rate_history_tph.items()
             },
             vessel_berths=dict(self.vessel_berths),
+            emitter_availability=dict(self.emitter_availability),
+            well_available=dict(self.well_available),
+            injectivity_factor=dict(self.injectivity_factor),
+            vessel_speed_factor=dict(self.vessel_speed_factor),
+            leg_speed_factor=dict(self.leg_speed_factor),
+            berth_count_override=dict(self.berth_count_override),
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -47,6 +66,12 @@ class PhysicalState:
                 for well_id, history in self.injection_rate_history_tph.items()
             },
             "vessel_berths": dict(self.vessel_berths),
+            "emitter_availability": dict(self.emitter_availability),
+            "well_available": dict(self.well_available),
+            "injectivity_factor": dict(self.injectivity_factor),
+            "vessel_speed_factor": dict(self.vessel_speed_factor),
+            "leg_speed_factor": dict(self.leg_speed_factor),
+            "berth_count_override": dict(self.berth_count_override),
         }
 
 

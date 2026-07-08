@@ -1,13 +1,16 @@
 import unittest
 
-from sim.action_resolver import ActionResolver
-from sim.actions import ActionFrame, ActionProposal
-from sim.scenarios import build_northern_lights_phase1_demo
+from sim.actions import ActionFrame, ActionProposal, ActionResolver
+from sim.network_scenarios import build_fixed_scenario_demo
 
 
 class ActionInterfaceTests(unittest.TestCase):
+    def _network(self):
+        network, _ = build_fixed_scenario_demo("northern_lights_phase1_2well")
+        return network
+
     def test_resolver_commits_heterogeneous_entity_actions_to_network_format(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -34,7 +37,7 @@ class ActionInterfaceTests(unittest.TestCase):
                     agent_id="manifold_agent",
                     entity_id="aurora_subsea_manifold",
                     verb="set_well_split",
-                    params={"well_splits": {"aurora_well_a": 0.6, "aurora_well_c": 0.4}},
+                    params={"well_splits": {"aurora_well_a7_ah": 0.6, "aurora_well_c1_h": 0.4}},
                 ),
             ],
         )
@@ -48,13 +51,13 @@ class ActionInterfaceTests(unittest.TestCase):
                 "brevik": {"load_vessel": "northern_pioneer"},
                 "northern_pioneer": {"sail_to": "oygarden_terminal"},
                 "oygarden_pipeline": {"flow_tph": 200.0},
-                "aurora_subsea_manifold": {"well_splits": {"aurora_well_a": 0.6, "aurora_well_c": 0.4}},
+                "aurora_subsea_manifold": {"well_splits": {"aurora_well_a7_ah": 0.6, "aurora_well_c1_h": 0.4}},
             },
         )
         self.assertTrue(all(decision.accepted for decision in committed.decisions))
 
     def test_resolver_rejects_actions_not_supported_by_entity_type(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -76,7 +79,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("does not support", committed.decisions[0].reason)
 
     def test_resolver_rejects_invalid_numeric_action_parameters(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -104,14 +107,14 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("non-negative", committed.decisions[1].reason)
 
     def test_resolver_rejects_invalid_boolean_action_parameters(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
             proposals=[
                 ActionProposal(
                     agent_id="well_agent",
-                    entity_id="aurora_well_a",
+                    entity_id="aurora_well_a7_ah",
                     verb="set_available",
                     params={"available": "false"},
                 )
@@ -125,7 +128,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("must be boolean", committed.decisions[0].reason)
 
     def test_resolver_rejects_invalid_manifold_split_parameters(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -134,7 +137,7 @@ class ActionInterfaceTests(unittest.TestCase):
                     agent_id="manifold_agent",
                     entity_id="aurora_subsea_manifold",
                     verb="set_well_split",
-                    params={"well_splits": {"aurora_well_a": 0.7, "aurora_well_c": 0.7}},
+                    params={"well_splits": {"aurora_well_a7_ah": 0.7, "aurora_well_c1_h": 0.7}},
                 )
             ],
         )
@@ -146,7 +149,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("sum to 1", committed.decisions[0].reason)
 
     def test_resolver_merges_compatible_actions_for_same_entity(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -172,7 +175,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertTrue(all(decision.accepted for decision in committed.decisions))
 
     def test_resolver_rejects_conflicting_actions_for_same_entity(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
         frame = ActionFrame(
             time_h=0.0,
@@ -200,7 +203,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertIn("conflicts", committed.decisions[1].reason)
 
     def test_supported_actions_are_reported_by_entity_type(self):
-        network, _ = build_northern_lights_phase1_demo()
+        network = self._network()
         resolver = ActionResolver(network)
 
         supported = resolver.supported_actions_by_entity()
@@ -210,7 +213,7 @@ class ActionInterfaceTests(unittest.TestCase):
         self.assertEqual(supported["oygarden_terminal"], ["unload_vessel", "hold"])
         self.assertEqual(supported["oygarden_pipeline"], ["set_flow", "hold"])
         self.assertEqual(supported["aurora_subsea_manifold"], ["set_well_split", "hold"])
-        self.assertEqual(supported["aurora_well_a"], ["set_available", "set_injection_limit", "hold"])
+        self.assertEqual(supported["aurora_well_a7_ah"], ["set_available", "set_injection_limit", "hold"])
         self.assertEqual(supported["aurora_reservoir"], ["hold"])
 
 

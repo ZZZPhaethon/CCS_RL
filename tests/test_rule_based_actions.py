@@ -1,14 +1,14 @@
 import unittest
 
 from sim.entities import Emitter, InjectionWell, Pipeline, Terminal, Vessel
-from sim.action_resolver import ActionResolver
-from sim.rule_based import RuleBasedActionGenerator
-from sim.scenarios import build_northern_lights_phase1_plus_yara_demo
+from sim.actions import ActionResolver
+from sim.control.rule_based import RuleBasedActionGenerator
+from sim.network_scenarios import build_northern_lights_phase1_demo
 
 
 class RuleBasedActionGeneratorTests(unittest.TestCase):
     def setUp(self):
-        self.network, self.state = build_northern_lights_phase1_plus_yara_demo()
+        self.network, self.state = build_northern_lights_phase1_demo()
         self.routes = {
             "northern_pioneer": {"origin": "brevik", "destination": "oygarden_terminal"},
             "northern_pathfinder": {"origin": "celsio", "destination": "oygarden_terminal"},
@@ -62,13 +62,15 @@ class RuleBasedActionGeneratorTests(unittest.TestCase):
         self.assertEqual(actions["northern_pioneer"]["sail_to"], {"destination_id": "oygarden_terminal"})
         self.assertNotIn("load_vessel", actions.get("brevik", {}))
 
-    def test_empty_vessel_at_terminal_returns_to_home_emitter(self):
+    def test_empty_vessel_at_terminal_sails_to_best_buffered_emitter(self):
         self.state.vessel_berths["northern_pioneer"] = "oygarden_terminal"
         self.state.entity_inventory_t["northern_pioneer"] = 0.0
+        self.state.entity_inventory_t["brevik"] = 0.0
+        self.state.entity_inventory_t["celsio"] = 5_000.0
 
         actions = self._actions_by_entity()
 
-        self.assertEqual(actions["northern_pioneer"]["sail_to"], {"destination_id": "brevik"})
+        self.assertEqual(actions["northern_pioneer"]["sail_to"], {"destination_id": "celsio"})
 
     def test_loaded_vessel_at_terminal_unloads_and_pipeline_uses_one_well(self):
         self.state.vessel_berths["northern_pioneer"] = "oygarden_terminal"
@@ -80,7 +82,7 @@ class RuleBasedActionGeneratorTests(unittest.TestCase):
         self.assertIn("set_flow", actions["oygarden_pipeline"])
         self.assertEqual(
             actions["aurora_subsea_manifold"]["set_well_split"],
-            {"well_splits": {"aurora_well_a7_ah": 1.0, "aurora_well_c1_h": 0.0}},
+            {"well_splits": {"aurora_well_a7_ah": 1.0}},
         )
         well_actions = {
             entity_id: entity_actions
