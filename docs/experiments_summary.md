@@ -124,26 +124,81 @@ the LLM, on varied layouts (outage 0.5/wk).
 
 ---
 
+## Phase 7 — Load-shift disturbance, full-load constraint, and cost view
+
+Built a standalone `LoadShiftScenarioGenerator` (rotating capture hot spot: one
+or more emitters run near full while the rest are throttled, cycling each phase),
+to test whether a dynamic policy beats a rigid static assignment when the load's
+*location* moves. Also tested the earlier hypothesis that the full-load dispatch
+constraint was what capped dynamic value, and finally compared on **cost**, not
+just storage.
+
+| policy (milk-run, load-shift, hot_count=2) | storage | vent | cost/t |
+|---|---|---|---|
+| greedy (full-load) | 81.1 % | 5.2 % | 18.8 |
+| **cluster static** | **85.6 %** | 1.8 % | **14.8** |
+| flexible dynamic (partial delivery, constraint off) | 83.6 % | 5.2 % | 18.6 |
+
+**Findings**
+- Rotating hot spots do **not** break the static assignment on 2 vessels / 3
+  emitters — a vessel can milk-run its region's hot emitters, so static stays
+  near-optimal.
+- Removing the full-load constraint and allowing partial delivery helps a dynamic
+  policy (81 → 83.6 %) but does **not** flip the ranking; the partial-delivery
+  overhead (more trips) raises cost.
+- **On cost too, the static cluster dominates** (14.8 €/t vs 18.6–18.8): it stores
+  more, vents least, and is cheapest. The full-load constraint was not the blocker.
+
+## Phase 8 — Residual (gated-override) RL over the heuristic base
+
+`train_residual_rl.py`: instead of learning from scratch, the cluster base
+proposes an action each step and the RL policy learns a *correction* — per vessel
+it FOLLOWs the base or OVERRIDEs it (`a_final = FOLLOW ? a_base : a_override`).
+FOLLOW is always legal and reproduces the base, so the policy starts at base
+performance and only learns profitable overrides.
+
+| policy (imbalanced milk-run + load-shift) | storage | vent | cost/t |
+|---|---|---|---|
+| greedy | 73.7 % | 21.5 % | 35.3 |
+| cluster_base | 71.2 % | 23.0 % | 39.1 |
+| residual_rl | 70.3 % | 19.4 % | 35.4 |
+
+**Findings**
+- **Stability delivered:** residual RL stayed ≈ base (70.3 vs 71.2 %) and did **not**
+  drift/collapse — unlike plain BC+PPO fine-tune, which crashed to ~58 %. It even
+  vented the least. This is residual RL's core promise (a >= base floor).
+- **But no clear win:** the policy gradient stayed ~1e-8 — PPO learned essentially
+  pure FOLLOW, because the near-optimal base leaves no profitable override.
+- **Base choice matters:** under load-shift the *dynamic* greedy (73.7 %) beat the
+  *rigid* cluster (71.2 %), so cluster was not the best base here; residual over a
+  suboptimal base can't exceed a better one.
+
+---
+
 ## Overall conclusions
 
 - On **formalized, stationary** CCS dispatch problems, a good **heuristic / static
-  assignment is near-optimal**; MILP is the ceiling. RL and LLM can **match** it
-  but not beat it on raw storage %.
-- **RL's real value** is a *robust, goal-conditioned executor* that (a) generalizes
-  zero-shot to new layouts and (b) tolerates imperfect goals better than rigid
-  execution.
-- **LLM's real value** is a *stable high-level planner* — but only when it beats the
-  heuristic, which the 7B model does **not** on these formalized layouts. It would
-  need a stronger model or a problem with factors the heuristic ignores
-  (un-formalizable constraints, natural-language rules, novel topologies).
-- To make learning/LLM **clearly beat** the heuristics, the problem must become
-  genuinely **dynamic** (load-shifting disturbances, more emitters than vessels)
-  where static plans break — not yet demonstrated.
+  assignment is near-optimal on both storage AND cost-per-tonne**; MILP is the
+  ceiling. RL and LLM **match** it but do not beat it.
+- **RL's real value** is a *robust executor*: goal-conditioned RL generalizes
+  zero-shot to new layouts and tolerates imperfect goals better than rigid
+  execution; **residual RL** guarantees a ≥ base stability floor (no fine-tune
+  drift). Neither raises the ceiling on heuristic-friendly problems.
+- **LLM's real value** is a *stable high-level planner* — but the 7B model does **not**
+  beat the balanced-capture heuristic on these layouts (it is a worse goal
+  provider). It would need a stronger model or a problem with factors the
+  heuristic ignores (un-formalizable constraints, natural-language rules).
+- Across **three learning methods** (from-scratch RL, goal-conditioned RL,
+  residual RL) and **three disturbances** (outages, load-shift, full-load
+  toggle), the result is consistent: this small-fleet / milk-run problem class is
+  **heuristic-friendly** — learning matches near-optimal and adds *stability +
+  generalization*, not raw performance.
 
 ## Open next steps
 
-1. A load-shifting / downstream-capacity disturbance where dynamic > static.
-2. A stronger LLM (e.g. qwen2.5:14b) as goal-provider vs the heuristic.
-3. A layout class where the balanced-capture heuristic is provably suboptimal, to
-   expose real LLM planning value.
+1. A structural mismatch large enough that dynamic > static (e.g. 5–6 emitters,
+   2 vessels, no milk-run), or a downstream-capacity disturbance that backs up
+   buffers while capture continues.
+2. Residual RL over the **greedy** base (dynamic) rather than cluster.
+3. A stronger LLM (e.g. qwen2.5:14b) as goal-provider vs the heuristic.
 4. Fix / time-budget the rolling MILP to quantify the true ceiling.
