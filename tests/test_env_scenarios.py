@@ -141,12 +141,14 @@ class Phase1EnvTests(unittest.TestCase):
 
             env = build_phase1_env(
                 scenario="northern_lights_phase1_3vessels",
-                config=CCSEnvConfig(episode_hours=3),
+                config=CCSEnvConfig(episode_hours=3, include_weather_obs=True),
                 weather_mode="leg_wave_climatology",
                 leg_wave_csv=path,
             )
 
         self.assertIsInstance(env.scenario_generator, LegWaveClimatologyScenarioGenerator)
+        self.assertEqual(env.config.weather_observation_layout, "leg")
+        self.assertEqual(env.observation_size, 110)
 
     def test_phase1_window_weather_mode_uses_probability_window_generator(self):
         env = build_phase1_env(
@@ -173,6 +175,7 @@ class Phase1EnvTests(unittest.TestCase):
 
     def test_weather_observation_uses_window_vessel_speed_when_leg_weather_is_absent(self):
         env = build_phase1_env(
+            scenario="northern_lights_phase1_3vessels",
             config=CCSEnvConfig(episode_hours=3, include_weather_obs=True),
             scenario_config=ScenarioConfig(
                 episode_hours=3,
@@ -190,12 +193,13 @@ class Phase1EnvTests(unittest.TestCase):
         )
 
         obs = env.reset(seed=1)
-        weather_values = env._weather_observation_for_vessel("northern_pathfinder")
-        current_speed_values = weather_values[0::6]
+        names = env.feature_names
 
         self.assertEqual(len(obs), env.observation_size)
         self.assertEqual(len(obs), len(env.feature_names))
-        self.assertIn(0.6, current_speed_values)
+        self.assertEqual(env.config.weather_observation_layout, "global")
+        self.assertEqual(env.observation_size, 55)
+        self.assertAlmostEqual(obs[names.index("weather.speed_now")], 0.6)
 
     def test_phase1_wave_height_mode_uses_netcdf_generator(self):
         env = build_phase1_env(

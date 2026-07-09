@@ -29,7 +29,6 @@ mask exposes which destination choices are physically legal, while
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from numbers import Integral
 
 from ..actions import ActionFrame, ActionProposal
@@ -105,11 +104,12 @@ class CCSEnvConfig:
     # dispatch when avoiding venting is worth an extra trip. Turn on only for the
     # old curriculum-style behaviour.
     enforce_full_load_dispatch: bool = False
-    # Expose weather speed factors (current + 24 h/168 h forecast) and an annual
-    # clock. Leg-level wave data is preferred; probability-window weather falls
-    # back to vessel-level factors. Off by default so existing no-weather models
-    # keep their observation size.
+    # Expose weather speed factors (current + 24 h/168 h forecast). Global
+    # probability-window weather uses one shared forecast plus per-route travel
+    # times; leg weather keeps per-route forecasts. Off by default so existing
+    # no-weather models keep their observation size.
     include_weather_obs: bool = False
+    weather_observation_layout: str = "leg"
     # Expose a per-vessel emitter assignment (the high-level "goal") in the
     # observation: for each vessel, a one-hot over emitters marking which it is
     # meant to serve. This is what makes the policy goal-conditioned, so it can
@@ -133,6 +133,11 @@ class CCSEnv:
     ) -> None:
         self.network = network
         self.config = config or CCSEnvConfig()
+        if self.config.weather_observation_layout not in {"global", "leg"}:
+            raise ValueError(
+                "weather_observation_layout must be 'global' or 'leg', "
+                f"got {self.config.weather_observation_layout!r}."
+            )
         self.scenario_generator = scenario_generator or ScenarioGenerator()
         self.cost_model = cost_model or CostModel()
         self.locations = locations
@@ -232,17 +237,30 @@ class CCSEnv:
         for rid in self.reservoir_ids:
             names += [f"{rid}.pressure_margin"]
         if self.config.include_weather_obs:
-            names += ["hour_of_year_sin", "hour_of_year_cos"]
-            for vid in self.vessel_ids:
-                for label, _destination_id in self._weather_destination_slots():
+            if self.config.weather_observation_layout == "global":
+                names += [
+                    "weather.speed_now",
+                    "weather.speed_24h_mean",
+                    "weather.speed_24h_min",
+                    "weather.speed_168h_mean",
+                    "weather.speed_168h_min",
+                ]
+                for vid in self.vessel_ids:
                     names += [
-                        f"{vid}.{label}.leg_speed_now",
-                        f"{vid}.{label}.leg_speed_24h_mean",
-                        f"{vid}.{label}.leg_speed_24h_min",
-                        f"{vid}.{label}.leg_speed_168h_mean",
-                        f"{vid}.{label}.leg_speed_168h_min",
-                        f"{vid}.{label}.travel_hours_now",
+                        f"{vid}.{label}.travel_hours_now"
+                        for label, _destination_id in self._weather_destination_slots()
                     ]
+            else:
+                for vid in self.vessel_ids:
+                    for label, _destination_id in self._weather_destination_slots():
+                        names += [
+                            f"{vid}.{label}.leg_speed_now",
+                            f"{vid}.{label}.leg_speed_24h_mean",
+                            f"{vid}.{label}.leg_speed_24h_min",
+                            f"{vid}.{label}.leg_speed_168h_mean",
+                            f"{vid}.{label}.leg_speed_168h_min",
+                            f"{vid}.{label}.travel_hours_now",
+                        ]
         if self.config.include_goal_obs:
             for vid in self.vessel_ids:
                 names += [f"{vid}.goal_{eid}" for eid in self.emitter_ids]
@@ -660,10 +678,11 @@ class CCSEnv:
             span = reservoir.max_pressure_bar - reservoir.initial_pressure_bar
             obs += [_safe_div(reservoir.pressure_margin_bar(inv), span) if span > 0 else 1.0]
         if self.config.include_weather_obs:
-            hour_angle = 2.0 * math.pi * ((state.time_h % 8760.0) / 8760.0)
-            obs += [math.sin(hour_angle), math.cos(hour_angle)]
-            for vid in self.vessel_ids:
-                obs += self._weather_observation_for_vessel(vid)
+            if self.config.weather_observation_layout == "global":
+                obs += self._global_weather_observation()
+            else:
+                for vid in self.vessel_ids:
+                    obs += self._weather_observation_for_vessel(vid)
         if self.config.include_goal_obs:
             for vid in self.vessel_ids:
                 obs += [1.0 if self.goal_assignment.get(eid) == vid else 0.0 for eid in self.emitter_ids]
@@ -677,6 +696,21 @@ class CCSEnv:
         slots = [(f"to_{terminal_id}", terminal_id) for terminal_id in self.terminal_ids]
         slots.extend((f"to_{emitter_id}", emitter_id) for emitter_id in self.emitter_ids)
         return slots
+
+    def _global_weather_observation(self) -> list[float]:
+        vessel_id = self.vessel_ids[0]
+        now = self._weather_speed_at("", vessel_id, 0)
+        mean24, min24 = self._weather_speed_forecast("", vessel_id, 24)
+        mean168, min168 = self._weather_speed_forecast("", vessel_id, 168)
+        values = [now, mean24, min24, mean168, min168]
+        for vid in self.vessel_ids:
+            route = self._routes[vid]
+            origin_id = self._weather_reference_origin(vid)
+            for _label, destination_id in self._weather_destination_slots():
+                values.append(
+                    self._normalized_travel_hours(origin_id, destination_id, route, now)
+                )
+        return values
 
     def _weather_observation_for_vessel(self, vessel_id: str) -> list[float]:
         route = self._routes[vessel_id]

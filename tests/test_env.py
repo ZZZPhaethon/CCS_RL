@@ -51,14 +51,31 @@ class EnvSpaceTests(unittest.TestCase):
         self.assertTrue(all(isinstance(x, float) for x in obs))
         self.assertTrue(all(-1e6 < x < 1e6 for x in obs))
 
-    def test_weather_observation_exposes_candidate_leg_forecasts(self):
-        env = _env(include_weather_obs=True)
+    def test_global_weather_observation_is_compact(self):
+        base = _env()
+        env = _env(include_weather_obs=True, weather_observation_layout="global")
+        obs = env.reset(seed=0)
+        names = env.feature_names
+        destination_count = len(env.terminal_ids) + len(env.emitter_ids)
+
+        self.assertEqual(
+            len(obs),
+            base.observation_size + 5 + len(env.vessel_ids) * destination_count,
+        )
+        self.assertEqual(len(obs), env.observation_size)
+        self.assertNotIn("hour_of_year_sin", names)
+        self.assertNotIn("hour_of_year_cos", names)
+        self.assertEqual(names.count("weather.speed_24h_mean"), 1)
+        self.assertIn("vessel_a.to_source_b.travel_hours_now", names)
+
+    def test_leg_weather_observation_exposes_candidate_leg_forecasts(self):
+        env = _env(include_weather_obs=True, weather_observation_layout="leg")
         obs = env.reset(seed=0)
         names = env.feature_names
 
         self.assertEqual(len(obs), env.observation_size)
-        self.assertIn("hour_of_year_sin", names)
-        self.assertIn("hour_of_year_cos", names)
+        self.assertNotIn("hour_of_year_sin", names)
+        self.assertNotIn("hour_of_year_cos", names)
         self.assertIn("vessel_a.to_terminal.leg_speed_168h_min", names)
         self.assertIn("vessel_a.to_source_b.leg_speed_24h_mean", names)
         self.assertIn("vessel_a.to_source_b.travel_hours_now", names)
@@ -70,13 +87,15 @@ class EnvSpaceTests(unittest.TestCase):
         }
         obs = env._observation()
 
-        self.assertAlmostEqual(obs[names.index("hour_of_year_sin")], 0.0)
-        self.assertAlmostEqual(obs[names.index("hour_of_year_cos")], 1.0)
         self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_now")], 0.5)
         self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_24h_mean")], 0.5)
         self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_168h_min")], 0.25)
         self.assertAlmostEqual(obs[names.index("vessel_a.to_source_a.travel_hours_now")], 0.0)
         self.assertGreater(obs[names.index("vessel_a.to_source_b.travel_hours_now")], 0.0)
+
+    def test_unknown_weather_observation_layout_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "weather_observation_layout"):
+            _env(include_weather_obs=True, weather_observation_layout="unknown")
 
     def test_vessel_action_mask_shape_matches_vessel_action_dims(self):
         env = _env()

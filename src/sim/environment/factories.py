@@ -8,6 +8,7 @@ profiles) instead of a toy network, so metrics are research-meaningful.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
@@ -59,7 +60,11 @@ def build_phase1_env(
     else:
         network, _state = build_fixed_scenario_demo(scenario)
         locations = _scenario_locations(_load_fixed_scenario_data(scenario))
-    env_config = config or CCSEnvConfig()
+    weather_observation_layout = "global" if weather_mode == "window" else "leg"
+    env_config = replace(
+        config or CCSEnvConfig(),
+        weather_observation_layout=weather_observation_layout,
+    )
     routes = None
     if scenario_generator is None and weather_mode in {"wave_height_netcdf", "lstm_forecast"}:
         routes = _phase1_routes(network, locations, env_config, scenario_config)
