@@ -101,7 +101,7 @@ def plot_phase1_wave_height_snapshot(
     """Plot one wave-height snapshot with the Phase 1 vessel routes overlaid."""
     from ...environment import build_phase1_env
 
-    env = build_phase1_env(use_leg_wave_weather=False)
+    env = build_phase1_env(weather_mode="window")
     return plot_wave_height_snapshot(
         nc_path,
         record_index=record_index,

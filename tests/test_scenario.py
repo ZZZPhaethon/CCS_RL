@@ -1,4 +1,5 @@
 import unittest
+import sim.scenario_generation as scenario_generation
 
 from sim.entities import (
     Emitter,
@@ -9,7 +10,12 @@ from sim.entities import (
     Vessel,
 )
 from sim.network import PhysicalNetwork
-from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
+from sim.scenario_generation import (
+    Scenario,
+    ScenarioConfig,
+    ScenarioGenerator,
+)
+from sim.scenario_generation.generator import _capture_availability_series
 
 
 def _network(with_reservoir: bool = False) -> PhysicalNetwork:
@@ -32,7 +38,7 @@ def _quiet_config(**overrides) -> ScenarioConfig:
     base = dict(
         capture_noise_std=0.0,
         capture_outage_rate_per_week=0.0,
-        enable_weather=False,
+        weather_window_rate_per_week=0.0,
         well_maintenance_rate_per_week=0.0,
         injectivity_max_decline=0.0,
         injectivity_noise_std=0.0,
@@ -43,6 +49,12 @@ def _quiet_config(**overrides) -> ScenarioConfig:
 
 
 class ScenarioGeneratorTests(unittest.TestCase):
+    def test_top_level_scenario_generation_exports_only_core_scenario_types(self):
+        self.assertEqual(
+            set(scenario_generation.__all__),
+            {"Scenario", "ScenarioConfig", "ScenarioGenerator"},
+        )
+
     def test_sample_is_reproducible_for_a_seed(self):
         network = _network()
         gen = ScenarioGenerator(seed=7)
@@ -57,7 +69,7 @@ class ScenarioGeneratorTests(unittest.TestCase):
         network = _network()
         a = ScenarioGenerator(seed=1).sample(network)
         b = ScenarioGenerator(seed=2).sample(network)
-        self.assertNotEqual(a.injectivity_factor, b.injectivity_factor)
+        self.assertNotEqual(a.emitter_availability, b.emitter_availability)
 
     def test_series_cover_every_entity_and_span_the_horizon(self):
         network = _network()
@@ -78,28 +90,90 @@ class ScenarioGeneratorTests(unittest.TestCase):
         self.assertTrue(all(av for s in scenario.well_available.values() for av in s))
         self.assertEqual(scenario.initial_inventory_t, {})
 
+    def test_default_weather_is_nominal_without_probability_windows(self):
+        network = _network()
+        config = _quiet_config(episode_hours=24)
+        scenario = ScenarioGenerator(config=config, seed=0).sample(network)
+
+        speeds = [
+            value
+            for series in scenario.vessel_speed_factor.values()
+            for value in series
+        ]
+        self.assertEqual(set(speeds), {1.0})
+
     def test_disturbance_values_stay_in_physical_bounds(self):
         network = _network()
         scenario = ScenarioGenerator(seed=11).sample(network)
         for series in scenario.emitter_availability.values():
-            self.assertTrue(all(0.0 <= v <= 1.1 for v in series))
+            self.assertTrue(all(v >= 0.0 for v in series))
         for series in scenario.injectivity_factor.values():
             self.assertTrue(all(0.3 <= v <= 1.0 for v in series))
         for series in scenario.vessel_speed_factor.values():
             self.assertTrue(all(0.0 < v <= 1.0 for v in series))
 
-    def test_capture_noise_fluctuates_around_profile_by_default(self):
+    def test_capture_noise_uses_gaussian_multiplier(self):
+        class FakeRng:
+            def __init__(self):
+                self.gauss_args = None
+
+            def gauss(self, mu, sigma):
+                self.gauss_args = (mu, sigma)
+                return 0.42
+
+        rng = FakeRng()
+        config = ScenarioConfig(capture_noise_std=0.30, capture_outage_rate_per_week=0.0)
+        series = _capture_availability_series(rng, n_steps=1, dt=1.0, config=config)
+        self.assertEqual(series, [0.42])
+        self.assertEqual(rng.gauss_args, (1.0, 0.30))
+
+    def test_capture_noise_default_std_is_thirty_percent(self):
         network = _network()
-        config = _quiet_config(capture_noise_std=0.1)
+        config = _quiet_config(capture_noise_std=0.30)
         scenario = ScenarioGenerator(config=config, seed=11).sample(network)
         values = [
             value
             for series in scenario.emitter_availability.values()
             for value in series
         ]
-        self.assertTrue(all(0.9 <= value <= 1.1 for value in values))
         self.assertTrue(any(value > 1.0 for value in values))
         self.assertTrue(any(value < 1.0 for value in values))
+
+    def test_high_output_window_raises_capture_availability(self):
+        network = _network()
+        config = _quiet_config(
+            episode_hours=24,
+            capture_high_output_rate_per_week=168.0,
+            capture_high_output_mean_hours=1_000.0,
+            capture_high_output_multiplier_range=(1.5, 1.5),
+        )
+        scenario = ScenarioGenerator(config=config, seed=12).sample(network)
+
+        values = [
+            value
+            for series in scenario.emitter_availability.values()
+            for value in series
+        ]
+        self.assertTrue(any(value > 1.0 for value in values))
+        self.assertTrue(all(value <= 1.5 for value in values))
+
+    def test_weather_window_slows_vessels_as_probability_window_weather(self):
+        network = _network()
+        config = _quiet_config(
+            episode_hours=24,
+            weather_window_rate_per_week=168.0,
+            weather_window_mean_hours=1_000.0,
+            weather_window_speed_factor_range=(0.6, 0.6),
+        )
+        scenario = ScenarioGenerator(config=config, seed=13).sample(network)
+
+        speeds = [
+            value
+            for series in scenario.vessel_speed_factor.values()
+            for value in series
+        ]
+        self.assertEqual(min(speeds), 0.6)
+        self.assertTrue(all(0.6 <= value <= 1.0 for value in speeds))
 
     def test_randomized_initial_inventory_respects_capacity_fractions(self):
         network = _network()
@@ -117,10 +191,22 @@ class ScenarioGeneratorTests(unittest.TestCase):
         self.assertEqual(config.emitter_initial_fill_range, (0.0, 0.5))
         self.assertEqual(config.terminal_initial_fill_range, (0.0, 0.5))
 
-    def test_default_outage_durations_are_twelve_hours(self):
+    def test_default_outage_and_maintenance_durations(self):
         config = ScenarioConfig()
+        self.assertEqual(config.capture_noise_std, 0.30)
         self.assertEqual(config.capture_outage_mean_hours, 12.0)
-        self.assertEqual(config.well_maintenance_mean_hours, 12.0)
+        self.assertEqual(config.weather_window_rate_per_week, 0.3)
+        self.assertEqual(config.well_maintenance_mean_hours, 24.0)
+
+    def test_injectivity_disturbance_defaults_to_nominal(self):
+        config = ScenarioConfig()
+        self.assertEqual(config.injectivity_max_decline, 0.0)
+        self.assertEqual(config.injectivity_noise_std, 0.0)
+        self.assertEqual(config.injectivity_warmstart_min, 1.0)
+        scenario = ScenarioGenerator(config=ScenarioConfig(warm_start=True), seed=1).sample(
+            _network(with_reservoir=True)
+        )
+        self.assertTrue(all(value == 1.0 for value in scenario.injectivity_factor["well_1"]))
 
 
 class WarmStartTests(unittest.TestCase):
@@ -141,7 +227,7 @@ class WarmStartTests(unittest.TestCase):
         # A pre-filled reservoir means pressure no longer starts at full margin.
         self.assertLess(reservoir.pressure_margin_bar(fill), reservoir.pressure_margin_bar(0.0))
 
-    def test_warm_start_varies_initial_injectivity_below_one(self):
+    def test_explicit_warm_start_can_vary_initial_injectivity_below_one(self):
         config = ScenarioConfig(warm_start=True, injectivity_warmstart_min=0.5)
         starts = {
             ScenarioGenerator(config=config, seed=s).sample(_network(with_reservoir=True))

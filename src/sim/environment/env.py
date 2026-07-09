@@ -92,16 +92,23 @@ class CCSEnvConfig:
     store_reward_eur_per_t: float | None = None
     vent_penalty_weight: float = 1.0
     operating_cost_weight: float = 1.0
+    # Reward objective. "economic" preserves the existing weighted economic
+    # reward. "vent_first" removes the stored-tonne credit and directly
+    # prioritises avoided venting, with overflow risk as dense early warning and
+    # operating cost as the secondary objective.
+    reward_mode: str = "economic"
+    vent_first_vent_eur_per_t: float = 10_000.0
+    overflow_risk_eur_per_t: float = 100.0
+    overflow_risk_lookahead_h: float = 24.0
     # Business dispatch constraints (full vessel before sailing to the terminal;
-    # unload before leaving it). On by default: a crisp curriculum crutch that
-    # lets BC/PPO learn a greedy-like policy. Turn OFF to let an optimizer (MILP)
-    # or an advanced policy use partial-load dispatch, e.g. to beat weather - the
-    # hard mask otherwise caps the achievable optimum at greedy-like behaviour.
-    enforce_full_load_dispatch: bool = True
-    # Expose per-leg wave-height weather (current + 24 h/168 h forecast) and an
-    # annual clock in the observation. Off by default so existing (no-weather)
-    # models keep their observation size; turn on to let the policy route around
-    # rough legs and exploit seasonality.
+    # unload before leaving it). Off by default so RL can learn partial-load
+    # dispatch when avoiding venting is worth an extra trip. Turn on only for the
+    # old curriculum-style behaviour.
+    enforce_full_load_dispatch: bool = False
+    # Expose weather speed factors (current + 24 h/168 h forecast) and an annual
+    # clock. Leg-level wave data is preferred; probability-window weather falls
+    # back to vessel-level factors. Off by default so existing no-weather models
+    # keep their observation size.
     include_weather_obs: bool = False
     # Expose a per-vessel emitter assignment (the high-level "goal") in the
     # observation: for each vessel, a one-hot over emitters marking which it is
@@ -294,18 +301,28 @@ class CCSEnv:
 
         in_transit_now = self._in_transit_inventory()
         in_transit_growth = in_transit_now - self.initial_in_transit_t
-        # Tunable economic reward: credit stored CO2, charge venting and operating
-        # cost with adjustable weights. Defaults reproduce the legacy reward
-        # (net + injection_reward * stored_t) exactly.
+        # Tunable reward. "economic" preserves the legacy weighted economic
+        # reward. "vent_first" makes venting the primary signal and uses
+        # overflow risk as a dense warning before real venting occurs.
         store_reward = self.config.store_reward_eur_per_t
         if store_reward is None:
             store_reward = self.config.injection_reward_eur_per_t
         storage_shaping_reward = store_reward * economics.stored_t
-        reward = (
-            storage_shaping_reward
-            - self.config.vent_penalty_weight * economics.vent_penalty
-            - self.config.operating_cost_weight * economics.operating_cost
-        ) * self.config.reward_scale
+        overflow_risk_t = self._overflow_risk_t()
+        if self.config.reward_mode == "economic":
+            reward = (
+                storage_shaping_reward
+                - self.config.vent_penalty_weight * economics.vent_penalty
+                - self.config.operating_cost_weight * economics.operating_cost
+            ) * self.config.reward_scale
+        elif self.config.reward_mode == "vent_first":
+            reward = -(
+                self.config.vent_first_vent_eur_per_t * economics.vented_t
+                + self.config.overflow_risk_eur_per_t * overflow_risk_t
+                + self.config.operating_cost_weight * economics.operating_cost
+            ) * self.config.reward_scale
+        else:
+            raise ValueError(f"Unknown reward_mode: {self.config.reward_mode}")
 
         self.t += 1
         # The operational task is fixed-horizon: there is no early terminal
@@ -323,6 +340,8 @@ class CCSEnv:
             "shortfall_penalty": shortfall_penalty,
             "shortfall_delta_penalty": shortfall_delta_penalty,
             "storage_shaping_reward": storage_shaping_reward,
+            "overflow_risk_t": overflow_risk_t,
+            "reward_mode": self.config.reward_mode,
             "storage_rate": self.storage_rate(),
             "loss_rate": self.loss_rate(),
             "violations": [v.violation_type for v in step_result.violations],
@@ -344,6 +363,21 @@ class CCSEnv:
         if self.cumulative_captured_t <= 0.0:
             return 0.0
         return self.ledger.vented_t / self.cumulative_captured_t
+
+    def _overflow_risk_t(self) -> float:
+        """Estimated emitter overflow if logistics do not clear buffers soon."""
+        state = self.simulator.state
+        lookahead_h = max(0.0, float(self.config.overflow_risk_lookahead_h))
+        risk_t = 0.0
+        for emitter_id in self.emitter_ids:
+            emitter = self.network.entities[emitter_id]
+            assert isinstance(emitter, Emitter)
+            inventory_t = state.entity_inventory_t.get(emitter_id, 0.0)
+            headroom_t = max(0.0, emitter.buffer_capacity_t - inventory_t)
+            availability = state.emitter_availability.get(emitter_id, emitter.availability)
+            capture_tph = emitter.nominal_capture_tph * max(0.0, availability)
+            risk_t += max(0.0, capture_tph * lookahead_h - headroom_t)
+        return risk_t
 
     def _in_transit_inventory(self) -> float:
         """In-transit CO2: captured but not yet stored (everything but reservoirs)."""
@@ -653,9 +687,9 @@ class CCSEnv:
                 values += [1.0, 1.0, 1.0, 1.0, 1.0, 0.0]
                 continue
             leg_id = f"{origin_id}->{destination_id}"
-            now = self._leg_speed_at(leg_id, 0)
-            mean24, min24 = self._leg_speed_forecast(leg_id, 24)
-            mean168, min168 = self._leg_speed_forecast(leg_id, 168)
+            now = self._weather_speed_at(leg_id, vessel_id, 0)
+            mean24, min24 = self._weather_speed_forecast(leg_id, vessel_id, 24)
+            mean168, min168 = self._weather_speed_forecast(leg_id, vessel_id, 168)
             travel_hours = self._normalized_travel_hours(origin_id, destination_id, route, now)
             values += [now, mean24, min24, mean168, min168, travel_hours]
         return values
@@ -692,24 +726,27 @@ class CCSEnv:
         self._leg_distance_cache[key] = distance_km
         return distance_km
 
-    def _leg_speed_series(self, leg_id: str) -> list[float] | None:
-        """Full per-leg wave speed-factor series for the episode, if present."""
+    def _weather_speed_series(self, leg_id: str, vessel_id: str) -> list[float] | None:
+        """Full weather speed-factor series, preferring leg-level data when present."""
         if self.scenario is None:
             return None
         series = self.scenario.leg_speed_factor.get(leg_id)
+        if series:
+            return series
+        series = self.scenario.vessel_speed_factor.get(vessel_id)
         return series if series else None
 
-    def _leg_speed_at(self, leg_id: str, offset_h: int) -> float:
-        series = self._leg_speed_series(leg_id)
+    def _weather_speed_at(self, leg_id: str, vessel_id: str, offset_h: int) -> float:
+        series = self._weather_speed_series(leg_id, vessel_id)
         if not series:
             return 1.0
         idx = int(round(self.simulator.state.time_h / self.network.time_step_hours)) + offset_h
         idx = max(0, min(idx, len(series) - 1))
         return float(series[idx])
 
-    def _leg_speed_forecast(self, leg_id: str, window_h: int) -> tuple[float, float]:
-        """(mean, min) leg speed factor over the next ``window_h`` hours."""
-        series = self._leg_speed_series(leg_id)
+    def _weather_speed_forecast(self, leg_id: str, vessel_id: str, window_h: int) -> tuple[float, float]:
+        """(mean, min) weather speed factor over the next ``window_h`` hours."""
+        series = self._weather_speed_series(leg_id, vessel_id)
         if not series:
             return 1.0, 1.0
         start = int(round(self.simulator.state.time_h / self.network.time_step_hours))

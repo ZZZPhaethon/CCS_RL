@@ -528,7 +528,6 @@ def _quiet_config(cap_hours: int, random_initial_inventory: bool) -> ScenarioCon
         randomize_initial_inventory=random_initial_inventory,
         capture_noise_std=0.0,
         capture_outage_rate_per_week=0.0,
-        enable_weather=False,
         well_maintenance_rate_per_week=0.0,
         injectivity_max_decline=0.0,
         injectivity_noise_std=0.0,
