@@ -33,14 +33,14 @@ class ScenarioConfig:
     capture_noise_std: float = 0.30
     capture_outage_rate_per_week: float = 0.5
     capture_outage_mean_hours: float = 12.0
-    capture_high_output_rate_per_week: float = 0.0
+    capture_high_output_rate_per_week: float = 0.5
     capture_high_output_mean_hours: float = 48.0
     capture_high_output_multiplier_range: tuple[float, float] = (1.25, 1.75)
 
     # Probability-window weather -> vessel speed.
     weather_window_rate_per_week: float = 0.3
     weather_window_mean_hours: float = 48.0
-    weather_window_speed_factor_range: tuple[float, float] = (0.45, 0.75)
+    weather_window_speed_factor_range: tuple[float, float] = (0.6, 0.8)
 
     # Data-driven leg-wave slowdown stress. A multiplier of 1.0 leaves the CSV
     # speed factors unchanged; values above 1.0 amplify rough-weather slowdown.
