@@ -1,16 +1,45 @@
 <h1 align="center">CCS_RLLLM</h1>
 
-<h3 align="center">A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains</h3>
-
-<p align="center">Languages: English | <a href="README_CN.md">简体中文</a></p>
+<h3 align="center">
+A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains
+</h3>
 
 <p align="center">
-  <a href="https://github.com/ZZZPhaethon/CCS_RLLLM"><img src="https://img.shields.io/badge/project-page-brightgreen" alt="Project Page"></a>
+  Languages: English | <a href="README_CN.md">简体中文</a>
 </p>
 
 <p align="center">
-  <strong><span style="font-size: 1.5em;">🎉 First version of CCUS operations optimization 🎉</span></strong>
+  <a href="https://github.com/ZZZPhaethon/CCS_RLLLM">
+    <img src="https://img.shields.io/badge/Project-Page-brightgreen?style=flat-square&logo=github" alt="Project Page">
+  </a>
+  <a href="https://github.com/ZZZPhaethon/CCS_RLLLM">
+    <img src="https://img.shields.io/badge/Code-GitHub-black?style=flat-square&logo=github" alt="Code">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/Paper-Coming%20Soon-red?style=flat-square&logo=arxiv" alt="Paper">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/Demo-Coming%20Soon-blue?style=flat-square" alt="Demo">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/Task-CCUS%20Operations-0E76A8?style=flat-square" alt="Task">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/Method-RL%20%2B%20MILP%20%2B%20MPC-purple?style=flat-square" alt="Method">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/Simulator-Physical%20Layer-success?style=flat-square" alt="Simulator">
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/Scenario-Northern%20Lights-orange?style=flat-square" alt="Scenario">
+  </a>
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="License">
+  </a>
 </p>
+
+<h3 align="center">🎉 First version of CCUS operations optimization 🎉</h3>
+
 <p align="center">
   <img src="assets/CCUSRL_overview.png" alt="CCUS teaser" width="95%">
 </p>
