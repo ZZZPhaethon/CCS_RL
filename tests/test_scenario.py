@@ -9,7 +9,12 @@ from sim.entities import (
     Vessel,
 )
 from sim.network import PhysicalNetwork
-from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
+from sim.scenario_generation import (
+    Scenario,
+    ScenarioConfig,
+    ScenarioGenerator,
+)
+from sim.scenario_generation.generator import _capture_availability_series
 
 
 def _network(with_reservoir: bool = False) -> PhysicalNetwork:
@@ -57,7 +62,7 @@ class ScenarioGeneratorTests(unittest.TestCase):
         network = _network()
         a = ScenarioGenerator(seed=1).sample(network)
         b = ScenarioGenerator(seed=2).sample(network)
-        self.assertNotEqual(a.injectivity_factor, b.injectivity_factor)
+        self.assertNotEqual(a.emitter_availability, b.emitter_availability)
 
     def test_series_cover_every_entity_and_span_the_horizon(self):
         network = _network()
@@ -82,22 +87,36 @@ class ScenarioGeneratorTests(unittest.TestCase):
         network = _network()
         scenario = ScenarioGenerator(seed=11).sample(network)
         for series in scenario.emitter_availability.values():
-            self.assertTrue(all(0.0 <= v <= 1.1 for v in series))
+            self.assertTrue(all(v >= 0.0 for v in series))
         for series in scenario.injectivity_factor.values():
             self.assertTrue(all(0.3 <= v <= 1.0 for v in series))
         for series in scenario.vessel_speed_factor.values():
             self.assertTrue(all(0.0 < v <= 1.0 for v in series))
 
-    def test_capture_noise_fluctuates_around_profile_by_default(self):
+    def test_capture_noise_uses_gaussian_multiplier(self):
+        class FakeRng:
+            def __init__(self):
+                self.gauss_args = None
+
+            def gauss(self, mu, sigma):
+                self.gauss_args = (mu, sigma)
+                return 0.42
+
+        rng = FakeRng()
+        config = ScenarioConfig(capture_noise_std=0.30, capture_outage_rate_per_week=0.0)
+        series = _capture_availability_series(rng, n_steps=1, dt=1.0, config=config)
+        self.assertEqual(series, [0.42])
+        self.assertEqual(rng.gauss_args, (1.0, 0.30))
+
+    def test_capture_noise_default_std_is_thirty_percent(self):
         network = _network()
-        config = _quiet_config(capture_noise_std=0.1)
+        config = _quiet_config(capture_noise_std=0.30)
         scenario = ScenarioGenerator(config=config, seed=11).sample(network)
         values = [
             value
             for series in scenario.emitter_availability.values()
             for value in series
         ]
-        self.assertTrue(all(0.9 <= value <= 1.1 for value in values))
         self.assertTrue(any(value > 1.0 for value in values))
         self.assertTrue(any(value < 1.0 for value in values))
 
@@ -117,10 +136,21 @@ class ScenarioGeneratorTests(unittest.TestCase):
         self.assertEqual(config.emitter_initial_fill_range, (0.0, 0.5))
         self.assertEqual(config.terminal_initial_fill_range, (0.0, 0.5))
 
-    def test_default_outage_durations_are_twelve_hours(self):
+    def test_default_outage_and_maintenance_durations(self):
         config = ScenarioConfig()
+        self.assertEqual(config.capture_noise_std, 0.30)
         self.assertEqual(config.capture_outage_mean_hours, 12.0)
-        self.assertEqual(config.well_maintenance_mean_hours, 12.0)
+        self.assertEqual(config.well_maintenance_mean_hours, 24.0)
+
+    def test_injectivity_disturbance_defaults_to_nominal(self):
+        config = ScenarioConfig()
+        self.assertEqual(config.injectivity_max_decline, 0.0)
+        self.assertEqual(config.injectivity_noise_std, 0.0)
+        self.assertEqual(config.injectivity_warmstart_min, 1.0)
+        scenario = ScenarioGenerator(config=ScenarioConfig(warm_start=True), seed=1).sample(
+            _network(with_reservoir=True)
+        )
+        self.assertTrue(all(value == 1.0 for value in scenario.injectivity_factor["well_1"]))
 
 
 class WarmStartTests(unittest.TestCase):
@@ -141,7 +171,7 @@ class WarmStartTests(unittest.TestCase):
         # A pre-filled reservoir means pressure no longer starts at full margin.
         self.assertLess(reservoir.pressure_margin_bar(fill), reservoir.pressure_margin_bar(0.0))
 
-    def test_warm_start_varies_initial_injectivity_below_one(self):
+    def test_explicit_warm_start_can_vary_initial_injectivity_below_one(self):
         config = ScenarioConfig(warm_start=True, injectivity_warmstart_min=0.5)
         starts = {
             ScenarioGenerator(config=config, seed=s).sample(_network(with_reservoir=True))

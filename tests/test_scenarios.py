@@ -179,6 +179,25 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(network.downstream_of("aurora_subsea_manifold"), ["aurora_well_a7_ah"])
         self.assertEqual(state.entity_inventory_t["yara_sluiskil"], 0.0)
 
+    def test_phase1_3vessels_demo_preserves_single_well_case(self):
+        network, state = build_fixed_scenario_demo("northern_lights_phase1_3vessels")
+        with scenarios.NORTHERN_LIGHTS_PHASE1_3VESSELS_DATA_PATH.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+
+        emitters = [entity for entity in network.entities.values() if isinstance(entity, Emitter)]
+        vessels = [entity for entity in network.entities.values() if isinstance(entity, Vessel)]
+        wells = [entity for entity in network.entities.values() if isinstance(entity, InjectionWell)]
+
+        self.assertEqual(payload["scenario_id"], "northern_lights_phase1_3vessels")
+        self.assertEqual(len(emitters), 3)
+        self.assertEqual(len(vessels), 3)
+        self.assertEqual(len(wells), 1)
+        self.assertIn("yara_sluiskil", network.entities)
+        self.assertIn("northern_phoenix", network.entities)
+        self.assertNotIn("phase1_vessel_04", network.entities)
+        self.assertEqual(network.downstream_of("aurora_subsea_manifold"), ["aurora_well_a7_ah"])
+        self.assertEqual(state.entity_inventory_t["yara_sluiskil"], 0.0)
+
     def test_phase1_2well_demo_preserves_current_two_well_case(self):
         network, state = build_fixed_scenario_demo("northern_lights_phase1_2well")
         with NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH.open(encoding="utf-8") as handle:
@@ -249,6 +268,7 @@ class ScenarioTests(unittest.TestCase):
     def test_fixed_scenario_selector_loads_scenarios_folder_cases(self):
         self.assertIn("toy", available_fixed_scenario_choices())
         self.assertIn("northern_lights_phase1", available_fixed_scenario_choices())
+        self.assertIn("northern_lights_phase1_3vessels", available_fixed_scenario_choices())
         self.assertIn("northern_lights_phase1_2well", available_fixed_scenario_choices())
         self.assertIn("northern_lights_phase2", available_fixed_scenario_choices())
         self.assertNotIn("northern_lights_phase2_scenario", available_fixed_scenario_choices())

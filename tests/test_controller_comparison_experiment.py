@@ -57,6 +57,35 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         self.assertIn("yara_sluiskil", env.emitter_ids)
         self.assertIn("oygarden_terminal", env.terminal_ids)
 
+    def test_greedy_cplex_phase1_comparison_can_build_three_vessel_scenario(self):
+        from experiments import compare_greedy_cplex_phase1 as compare
+
+        env = compare._make_env(2, compare.EconomicParameters(), "northern_lights_phase1_3vessels")
+
+        self.assertEqual(len(env.vessel_ids), 3)
+        self.assertIn("yara_sluiskil", env.emitter_ids)
+
+    def test_greedy_trip_milp_phase1_defaults_to_12h_three_vessel_random_case(self):
+        from experiments import compare_greedy_trip_milp_phase1 as compare
+
+        with patch.object(sys, "argv", ["compare_greedy_trip_milp_phase1.py"]):
+            args = compare.parse_args()
+        env = compare._make_env(
+            2,
+            compare.EconomicParameters(),
+            "northern_lights_phase1_3vessels",
+            storage_reward_eur_per_t=1_000.0,
+        )
+
+        self.assertEqual(args.hours, 720)
+        self.assertEqual(args.cplex_time_limit_s, 43_200.0)
+        self.assertEqual(args.fixed_scenario, "northern_lights_phase1_3vessels")
+        self.assertEqual(args.storage_reward_eur_per_t, 1_000.0)
+        self.assertEqual(len(env.vessel_ids), 3)
+        self.assertTrue(env.scenario_generator.config.randomize_initial_inventory)
+        self.assertTrue(env.scenario_generator.config.enable_weather)
+        self.assertGreater(env.scenario_generator.config.capture_noise_std, 0.0)
+
     def test_rule_based_controller_factory_translates_to_hybrid_env_action(self):
         from experiments import compare_controllers_same_scenarios as compare
         from sim.environment import VESSEL_WAIT, WELL_RATE_LEVELS_MTPA

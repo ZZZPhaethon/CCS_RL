@@ -59,8 +59,44 @@ class EnvSpaceTests(unittest.TestCase):
 
 
 class EnvDynamicsTests(unittest.TestCase):
-    def test_vessels_start_at_emitters_and_need_full_cargo_before_terminal(self):
+    def test_partially_loaded_vessel_can_sail_to_terminal_by_default(self):
         env = _env()
+        env.reset(seed=0)
+        env.simulator.state.entity_inventory_t["vessel_a"] = 1.0
+
+        vessel_a_mask = env.vessel_action_mask()[env.vessel_ids.index("vessel_a")]
+
+        self.assertTrue(vessel_a_mask[VESSEL_GO_TERMINAL])
+
+    def test_full_load_dispatch_constraint_can_still_be_enabled(self):
+        env = _env(enforce_full_load_dispatch=True)
+        env.reset(seed=0)
+        env.simulator.state.entity_inventory_t["vessel_a"] = 1.0
+
+        vessel_a_mask = env.vessel_action_mask()[env.vessel_ids.index("vessel_a")]
+
+        self.assertFalse(vessel_a_mask[VESSEL_GO_TERMINAL])
+
+    def test_loaded_vessel_at_terminal_can_leave(self):
+        env = _env(enforce_full_load_dispatch=False)
+        env.reset(seed=0)
+        vessel_id = "vessel_a"
+        env.simulator.state.entity_inventory_t[vessel_id] = 1.0
+        env.simulator.state.vessel_berths[vessel_id] = env.terminal_ids[0]
+        env.simulator.vessel_states[vessel_id] = {
+            "mode": "berthed",
+            "berth": env.terminal_ids[0],
+            "origin": env.terminal_ids[0],
+            "destination": env.terminal_ids[0],
+            "progress": 0.0,
+        }
+
+        vessel_a_mask = env.vessel_action_mask()[env.vessel_ids.index(vessel_id)]
+
+        self.assertTrue(vessel_a_mask[env.vessel_go_emitter_action("source_a")])
+
+    def test_vessels_start_at_emitters_and_can_sail_partially_loaded(self):
+        env = _env(enforce_full_load_dispatch=False)
         env.reset(seed=0)
         source_a_action = env.vessel_go_emitter_action("source_a")
         source_b_action = env.vessel_go_emitter_action("source_b")
@@ -68,16 +104,16 @@ class EnvDynamicsTests(unittest.TestCase):
         vessel_a_mask = env.vessel_action_mask()[env.vessel_ids.index("vessel_a")]
         vessel_b_mask = env.vessel_action_mask()[env.vessel_ids.index("vessel_b")]
 
-        # Not full at reset -> GO_TERMINAL is masked; other emitters remain legal.
+        # Vessels may sail to the terminal before they are full; other emitters remain legal.
         self.assertTrue(vessel_a_mask[VESSEL_WAIT])
-        self.assertFalse(vessel_a_mask[VESSEL_GO_TERMINAL])
+        self.assertTrue(vessel_a_mask[VESSEL_GO_TERMINAL])
         self.assertFalse(vessel_a_mask[source_a_action])
         self.assertTrue(vessel_a_mask[source_b_action])
-        self.assertFalse(vessel_b_mask[VESSEL_GO_TERMINAL])
+        self.assertTrue(vessel_b_mask[VESSEL_GO_TERMINAL])
         self.assertTrue(vessel_b_mask[source_a_action])
         self.assertFalse(vessel_b_mask[source_b_action])
 
-        # Once full, sailing to the terminal becomes legal.
+        # Full vessels can still sail to the terminal.
         env.simulator.state.entity_inventory_t["vessel_a"] = env.network.entities["vessel_a"].capacity_t
         vessel_a_mask = env.vessel_action_mask()[env.vessel_ids.index("vessel_a")]
         self.assertTrue(vessel_a_mask[VESSEL_GO_TERMINAL])
@@ -287,6 +323,30 @@ class EnvDynamicsTests(unittest.TestCase):
             reward,
             info["economics"]["net"] * env.config.reward_scale,
         )
+
+    def test_vent_first_reward_ignores_store_reward(self):
+        env = _env(
+            reward_mode="vent_first",
+            store_reward_eur_per_t=10_000.0,
+            vent_first_vent_eur_per_t=1_000.0,
+            overflow_risk_eur_per_t=0.0,
+        )
+        env.reset(seed=0)
+        env.simulator.state.entity_inventory_t[env.terminal_ids[0]] = 1_000.0
+
+        _obs, reward, _terminated, _truncated, info = env.step(
+            _action(wells=[MAX_WELL_RATE_INDEX, MAX_WELL_RATE_INDEX])
+        )
+
+        economics = info["economics"]
+        expected = -(
+            1_000.0 * economics["vented_t"]
+            + economics["operating_cost"]
+        ) * env.config.reward_scale
+        self.assertGreater(economics["stored_t"], 0.0)
+        self.assertAlmostEqual(reward, expected)
+        self.assertEqual(info["reward_mode"], "vent_first")
+        self.assertIn("overflow_risk_t", info)
 
     def test_horizon_end_is_truncation_not_termination(self):
         env = _env()

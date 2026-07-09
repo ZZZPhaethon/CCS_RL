@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCENARIO_ROOT = ROOT / "scenarios"
 CAPTURE_RATE_ROOT = ROOT / "data" / "capture_rates"
 NORTHERN_LIGHTS_PHASE1_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1.json"
+NORTHERN_LIGHTS_PHASE1_3VESSELS_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1_3vessels.json"
 NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase1_2well.json"
 NORTHERN_LIGHTS_PHASE2_DATA_PATH = SCENARIO_ROOT / "northern_lights_phase2.json"
 TOY_DATA_PATH = SCENARIO_ROOT / "toy.json"
@@ -37,6 +38,7 @@ _FIXED_SCENARIO_PATHS = {
     "toy": TOY_DATA_PATH,
     "milk_run_stress": MILK_RUN_STRESS_DATA_PATH,
     "northern_lights_phase1": NORTHERN_LIGHTS_PHASE1_DATA_PATH,
+    "northern_lights_phase1_3vessels": NORTHERN_LIGHTS_PHASE1_3VESSELS_DATA_PATH,
     "northern_lights_phase1_milkrun": NORTHERN_LIGHTS_PHASE1_MILKRUN_DATA_PATH,
     "northern_lights_phase1_milkrun_imbalanced": NORTHERN_LIGHTS_PHASE1_MILKRUN_IMBALANCED_DATA_PATH,
     "northern_lights_phase1_2well": NORTHERN_LIGHTS_PHASE1_2WELL_DATA_PATH,
@@ -161,7 +163,11 @@ def build_fixed_scenario_demo(identifier: str) -> tuple[PhysicalNetwork, Physica
     """Load any fixed-network scenario from the project ``scenarios`` folder."""
     scenario_id = resolve_fixed_scenario_id(identifier)
     hourly_profiles = {}
-    if scenario_id in {"northern_lights_phase1", "northern_lights_phase1_2well"}:
+    if scenario_id in {
+        "northern_lights_phase1",
+        "northern_lights_phase1_3vessels",
+        "northern_lights_phase1_2well",
+    }:
         hourly_profiles = _load_hourly_capture_profiles(NORTHERN_LIGHTS_PHASE1_CAPTURE_PROFILE_PATH)
     return _build_network_from_scenario_data(
         _load_fixed_scenario_data(scenario_id),

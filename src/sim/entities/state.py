@@ -21,7 +21,7 @@ class PhysicalState:
     # Each maps entity_id -> a runtime override that takes precedence over the
     # entity's static (frozen) nominal parameter. Absence means "use nominal".
     # A ScenarioGenerator or RL/eval harness writes these per timestep so the
-    # physics can react to weather, outages, maintenance and injectivity decline
+    # physics can react to weather, outages, maintenance and injectivity factors
     # without mutating the frozen entity definitions.
     emitter_availability: dict[str, float] = field(default_factory=dict)
     well_available: dict[str, bool] = field(default_factory=dict)
