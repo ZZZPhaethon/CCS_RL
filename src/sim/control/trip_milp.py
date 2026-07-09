@@ -13,6 +13,7 @@ Two levels are exposed:
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import math
 
@@ -28,7 +29,7 @@ from ..entities.pipeline import Pipeline
 from ..entities.storage import InjectionWell
 from ..entities.terminal import Terminal
 from ..entities.vessel import Vessel
-from ..environment import VESSEL_GO_TERMINAL, VESSEL_WAIT, WELL_RATE_LEVELS_MTPA
+from ..environment import VESSEL_GO_EMITTER_BASE, VESSEL_GO_TERMINAL, VESSEL_WAIT, WELL_RATE_LEVELS_MTPA
 from ..operations.pressure_limits import mtpa_to_tph
 from ..scenario_generation import Scenario
 from .cplex_milp import (
@@ -275,6 +276,7 @@ def solve_executable_trip_milp_with_cplex(
     horizon_h: int | None = None,
     economics: EconomicParameters | None = None,
     storage_reward_eur_per_t: float | None = None,
+    warm_start_native_actions_by_hour: list[dict[str, list[int]]] | None = None,
     cplex_path: str | None = None,
     time_limit_s: float | None = None,
     mip_gap_rel: float | None = None,
@@ -296,6 +298,15 @@ def solve_executable_trip_milp_with_cplex(
     hours = range(H)
     terminal_capacity_t = _terminal_capacity_t(env)
     options = _executable_trip_options(env, scenario, start_step, H)
+    if warm_start_native_actions_by_hour is not None:
+        options = _options_with_native_warm_start(
+            env,
+            scenario,
+            start_step=start_step,
+            horizon_h=H,
+            options=options,
+            native_actions_by_hour=warm_start_native_actions_by_hour,
+        )
     well_rate_options = _well_rate_options_by_hour(env, scenario, H)
 
     prob = pulp.LpProblem("executable_trip_cplex_milp", pulp.LpMinimize)
@@ -359,7 +370,21 @@ def solve_executable_trip_milp_with_cplex(
         - stored_expr * reward_per_t
     )
 
-    _solve(prob, cplex_path, time_limit_s, mip_gap_rel, mip_gap_abs, threads, msg)
+    use_warm_start = warm_start_native_actions_by_hour is not None
+    if warm_start_native_actions_by_hour is not None:
+        _apply_executable_trip_mip_start(
+            env,
+            scenario,
+            start_step=start_step,
+            horizon_h=H,
+            options=options,
+            choose=choose,
+            well_rate_options=well_rate_options,
+            well_choice=well_choice,
+            native_actions_by_hour=warm_start_native_actions_by_hour,
+        )
+
+    _solve(prob, cplex_path, time_limit_s, mip_gap_rel, mip_gap_abs, threads, msg, warm_start=use_warm_start)
     status = _solution_status_label(prob.status, getattr(prob, "sol_status", None))
     selected = [
         _record_from_option(option, option.amount_t)
@@ -419,7 +444,7 @@ def solve_executable_trip_milp_with_cplex(
             if round(_value(choose[i])) == 1
         ),
     )
-    return _result(
+    result = _result(
         level="executable_trip",
         status=status,
         horizon_h=H,
@@ -443,10 +468,223 @@ def solve_executable_trip_milp_with_cplex(
         variable_count=len(prob.variables()),
         constraint_count=len(prob.constraints),
     )
+    if warm_start_native_actions_by_hour is not None:
+        result = _replay_native_solver_trace(
+            env,
+            result,
+            horizon_h=H,
+            economics=params,
+            storage_reward_eur_per_t=reward_per_t,
+        )
+    return result
 
 
 def replay_trip_milp_plan(env, result: TripMilpResult, *, stored_tol_t: float = 1e-6) -> CplexMilpReplayResult:
     return replay_full_scenario_cplex_plan(env, result, stored_tol_t=stored_tol_t)
+
+
+def materialize_native_action_trace(
+    env,
+    native_actions_by_hour: list[dict[str, list[int]]],
+    *,
+    scenario: Scenario | None = None,
+    horizon_h: int | None = None,
+    economics: EconomicParameters | None = None,
+    storage_reward_eur_per_t: float | None = None,
+    level: str = "native_action_trace",
+    status: str = "Native Trace",
+    binary_count: int = 0,
+    variable_count: int = 0,
+    constraint_count: int = 0,
+) -> TripMilpResult:
+    """Convert hourly native actions into a result whose metrics come from replay."""
+
+    _require_ready(env, scenario)
+    scenario = scenario or env.scenario
+    H = _horizon(env, scenario, horizon_h or len(native_actions_by_hour))
+    start_step = scenario.step_index(_current_start_hour(env))
+    params = economics or EconomicParameters()
+    reward_per_t = _storage_reward_eur_per_t(env, storage_reward_eur_per_t)
+    native_actions = _normalise_native_actions(env, native_actions_by_hour, H)
+    vessel_actions_by_hour = {
+        vessel_id: [native_actions[t]["vessels"][vessel_index] for t in range(H)]
+        for vessel_index, vessel_id in enumerate(env.vessel_ids)
+    }
+    well_rate_indices_by_hour = {
+        well_id: [native_actions[t]["wells"][well_index] for t in range(H)]
+        for well_index, well_id in enumerate(env.well_ids)
+    }
+
+    replay_env = copy.deepcopy(env)
+    start_stored_t = float(replay_env.cumulative_stored_t)
+    start_vented_t = float(replay_env.ledger.vented_t)
+    start_captured_t = float(replay_env.cumulative_captured_t)
+    start_ledger = copy.deepcopy(replay_env.ledger)
+    initial_in_transit_t = _initial_in_transit_t(replay_env)
+    injection_tph: list[float] = []
+    violations: list[str] = []
+    for action in native_actions:
+        before_stored_t = float(replay_env.cumulative_stored_t)
+        _obs, _reward, terminated, truncated, info = replay_env.step(action)
+        injection_tph.append(float(replay_env.cumulative_stored_t) - before_stored_t)
+        violations.extend(str(violation) for violation in info.get("violations", []))
+        if terminated or truncated:
+            break
+    if len(injection_tph) < H:
+        injection_tph.extend([0.0] * (H - len(injection_tph)))
+
+    stored_t = float(replay_env.cumulative_stored_t) - start_stored_t
+    vented_t = float(replay_env.ledger.vented_t) - start_vented_t
+    captured_from_operations_t = float(replay_env.cumulative_captured_t) - start_captured_t
+    in_transit_t = _initial_in_transit_t(replay_env)
+    shortfall_t = _storage_shortfall_t(env, captured_from_operations_t, stored_t)
+    cost = {
+        "vessel_fuel": float(replay_env.ledger.vessel_fuel) - float(start_ledger.vessel_fuel),
+        "conditioning": float(replay_env.ledger.conditioning) - float(start_ledger.conditioning),
+        "reconditioning": float(replay_env.ledger.reconditioning) - float(start_ledger.reconditioning),
+        "loading": float(replay_env.ledger.loading) - float(start_ledger.loading),
+        "unloading": float(replay_env.ledger.unloading) - float(start_ledger.unloading),
+    }
+    cost["operating_cost"] = (
+        cost["vessel_fuel"]
+        + cost["conditioning"]
+        + cost["reconditioning"]
+        + cost["loading"]
+        + cost["unloading"]
+    )
+    total_cost = cost["operating_cost"] + vented_t * params.carbon_price_eur_per_t
+    net_reward = reward_per_t * stored_t - total_cost
+    executable_violations = {"berth_required", "bottomhole_pressure_clipped"}
+    is_valid = not (set(violations) & executable_violations)
+    validation = _Validation(
+        is_valid,
+        "" if is_valid else ";".join(dict.fromkeys(violations)),
+        0.0,
+    )
+    selected = _native_action_trip_options_from_replay(
+        env,
+        scenario,
+        start_step,
+        H,
+        native_actions,
+    )
+    return _result(
+        level=level,
+        status=status,
+        horizon_h=H,
+        stored_t=stored_t,
+        vented_t=vented_t,
+        in_transit_t=in_transit_t,
+        initial_in_transit_t=initial_in_transit_t,
+        captured_from_operations_t=captured_from_operations_t,
+        shortfall_t=shortfall_t,
+        trips=[_record_from_option(option, option.amount_t) for option in selected],
+        injection_tph=injection_tph,
+        vessel_actions_by_hour=vessel_actions_by_hour,
+        well_rate_indices_by_hour=well_rate_indices_by_hour,
+        native_actions_by_hour=native_actions,
+        cost=cost,
+        total_cost=total_cost,
+        storage_reward_eur_per_t=reward_per_t,
+        net_reward=net_reward,
+        validation=validation,
+        binary_count=binary_count,
+        variable_count=variable_count,
+        constraint_count=constraint_count,
+    )
+
+
+def _replay_native_solver_trace(
+    env,
+    solver_result: TripMilpResult,
+    *,
+    horizon_h: int,
+    economics: EconomicParameters,
+    storage_reward_eur_per_t: float,
+) -> TripMilpResult:
+    return materialize_native_action_trace(
+        env,
+        solver_result.native_actions_by_hour,
+        horizon_h=horizon_h,
+        economics=economics,
+        storage_reward_eur_per_t=storage_reward_eur_per_t,
+        level="executable_trip_replayed",
+        status=solver_result.status,
+        binary_count=solver_result.binary_count,
+        variable_count=solver_result.variable_count,
+        constraint_count=solver_result.constraint_count,
+    )
+
+
+def _normalise_native_actions(
+    env,
+    native_actions_by_hour: list[dict[str, list[int]]],
+    horizon_h: int,
+) -> list[dict[str, list[int]]]:
+    actions: list[dict[str, list[int]]] = []
+    for t in range(horizon_h):
+        raw = native_actions_by_hour[t] if t < len(native_actions_by_hour) else {}
+        vessels = [int(action) for action in raw.get("vessels", [])[: len(env.vessel_ids)]]
+        wells = [int(action) for action in raw.get("wells", [])[: len(env.well_ids)]]
+        if len(vessels) < len(env.vessel_ids):
+            vessels.extend([VESSEL_WAIT] * (len(env.vessel_ids) - len(vessels)))
+        if len(wells) < len(env.well_ids):
+            wells.extend([0] * (len(env.well_ids) - len(wells)))
+        actions.append({"vessels": vessels, "wells": wells})
+    return actions
+
+
+def materialize_relaxed_trip_plan(
+    env,
+    result: TripMilpResult,
+    *,
+    scenario: Scenario | None = None,
+    horizon_h: int | None = None,
+    economics: EconomicParameters | None = None,
+) -> TripMilpResult:
+    """Convert aggregate relaxed trips into a replayable native-action trace.
+
+    Relaxed trips are an optimistic aggregate benchmark: they load and unload an
+    arbitrary mass instantaneously in the MILP. The RL action space cannot
+    express that exactly. This helper turns each relaxed trip into a concrete
+    wait/load, sail, wait/unload trace, dropping trips that cannot be placed
+    without violating the executable path ordering.
+    """
+
+    _require_ready(env, scenario)
+    scenario = scenario or env.scenario
+    H = _horizon(env, scenario, horizon_h or result.horizon_h)
+    start_step = scenario.step_index(_current_start_hour(env))
+    params = economics or EconomicParameters()
+    selected = _materialized_relaxed_options(env, scenario, start_step, H, result.trips)
+    vessel_actions_by_hour = _expand_selected_trip_options_to_actions(
+        env,
+        scenario,
+        start_step,
+        H,
+        selected,
+    )
+    well_rate_indices_by_hour = _max_feasible_well_rate_indices(env, scenario, H)
+    native_actions_by_hour = [
+        {
+            "vessels": [vessel_actions_by_hour[vessel_id][t] for vessel_id in env.vessel_ids],
+            "wells": [well_rate_indices_by_hour[well_id][t] for well_id in env.well_ids],
+        }
+        for t in range(H)
+    ]
+    return materialize_native_action_trace(
+        env,
+        native_actions_by_hour,
+        scenario=scenario,
+        horizon_h=H,
+        economics=params,
+        storage_reward_eur_per_t=result.storage_reward_eur_per_t,
+        level="relaxed_trip_materialized",
+        status=result.status,
+        binary_count=result.binary_count,
+        variable_count=result.variable_count,
+        constraint_count=result.constraint_count,
+    )
 
 
 def _relaxed_trip_options(env, scenario: Scenario, start_step: int, horizon_h: int) -> list[_TripOption]:
@@ -562,6 +800,108 @@ def _bounded_profile(total_t: float, rate_tph: float, hours: int) -> list[float]
         profile.append(amount)
         remaining -= amount
     return profile
+
+
+def _materialized_relaxed_options(
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    trips: list[TripRecord],
+) -> list[_TripOption]:
+    candidates: list[_TripOption] = []
+    for trip in sorted(trips, key=lambda item: (item.vessel_id, item.load_start_h, item.emitter_id)):
+        option = _materialized_option_from_trip(env, scenario, start_step, horizon_h, trip)
+        if option is not None:
+            candidates.append(option)
+    return _filter_path_executable_options(env, scenario, start_step, horizon_h, candidates)
+
+
+def _materialized_option_from_trip(
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    trip: TripRecord,
+) -> _TripOption | None:
+    if trip.vessel_id not in env.vessel_ids or trip.emitter_id not in env.emitter_ids:
+        return None
+    vessel = env.network.entities[trip.vessel_id]
+    emitter = env.network.entities[trip.emitter_id]
+    amount_t = min(float(trip.amount_t), float(vessel.capacity_t))
+    if amount_t <= 1e-9:
+        return None
+    load_rate = min(float(vessel.loading_rate_tph), float(emitter.loading_rate_tph))
+    unload_rate = float(vessel.unloading_rate_tph)
+    load_hours = max(1, math.ceil(amount_t / max(1e-9, load_rate)))
+    unload_hours = max(1, math.ceil(amount_t / max(1e-9, unload_rate)))
+    load_start_h = int(trip.load_start_h)
+    depart_h = load_start_h + load_hours
+    if load_start_h < 0 or depart_h >= horizon_h:
+        return None
+    terminal_id = str(env._routes[trip.vessel_id]["destination"])
+    outbound_h = _sail_hours_between(
+        env,
+        trip.emitter_id,
+        terminal_id,
+        trip.vessel_id,
+        scenario=scenario,
+        start_step=start_step + depart_h,
+        max_horizon_h=horizon_h - depart_h,
+    )
+    arrival_h = depart_h + outbound_h
+    return_start_h = arrival_h + unload_hours
+    if arrival_h >= horizon_h or return_start_h > horizon_h:
+        return None
+    return _TripOption(
+        vessel_id=trip.vessel_id,
+        emitter_id=trip.emitter_id,
+        load_start_h=load_start_h,
+        depart_h=depart_h,
+        arrival_h=arrival_h,
+        return_start_h=return_start_h,
+        end_h=return_start_h,
+        capacity_t=float(vessel.capacity_t),
+        load_rate_tph=load_rate,
+        unload_rate_tph=unload_rate,
+        outbound_sail_h=outbound_h,
+        return_sail_h=0,
+        load_profile_t=tuple(_bounded_profile(amount_t, load_rate, load_hours)),
+        unload_profile_t=tuple(_bounded_profile(amount_t, unload_rate, unload_hours)),
+    )
+
+
+def _filter_path_executable_options(
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    candidates: list[_TripOption],
+) -> list[_TripOption]:
+    selected: list[_TripOption] = []
+    by_vessel: dict[str, _TripOption] = {}
+    for option in sorted(candidates, key=lambda item: (item.load_start_h, item.return_start_h, item.vessel_id)):
+        previous = by_vessel.get(option.vessel_id)
+        if previous is None:
+            start = _path_start(env, scenario, start_step, option.vessel_id, horizon_h)
+            if not _trip_reachable_from_start(env, scenario, start_step, option.vessel_id, start, option):
+                continue
+        elif not _trip_can_precede(env, scenario, start_step, previous, option):
+            continue
+        if _option_conflicts(selected, option):
+            continue
+        selected.append(option)
+        by_vessel[option.vessel_id] = option
+    return selected
+
+
+def _option_conflicts(selected: list[_TripOption], option: _TripOption) -> bool:
+    for other in selected:
+        if other.emitter_id == option.emitter_id and max(other.load_start_h, option.load_start_h) < min(other.depart_h, option.depart_h):
+            return True
+        if max(other.arrival_h, option.arrival_h) < min(other.return_start_h, option.return_start_h):
+            return True
+    return False
 
 
 def _add_relaxed_vessel_occupancy_constraints(prob, options, choose, env, horizon_h: int) -> None:
@@ -1006,6 +1346,18 @@ def _executable_trip_cost_breakdown(
     params: EconomicParameters,
 ) -> dict[str, float]:
     selected = [option for i, option in enumerate(options) if round(_value(choose[i])) == 1]
+    return _selected_trip_cost_breakdown(env, scenario, start_step, horizon_h, selected, stored_t, params)
+
+
+def _selected_trip_cost_breakdown(
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    selected: list[_TripOption],
+    stored_t: float,
+    params: EconomicParameters,
+) -> dict[str, float]:
     vessel_fuel_h = sum(option.sail_fuel_h for option in selected)
     vessel_fuel_h += _reposition_fuel_hours_for_selected_trips(
         env,
@@ -1039,8 +1391,30 @@ def _expand_executable_trips_to_actions(
     options,
     choose,
 ) -> dict[str, list[int]]:
+    selected = [
+        option
+        for i, option in enumerate(options)
+        if round(_value(choose[i])) == 1
+    ]
+    return _expand_selected_trip_options_to_actions(env, scenario, start_step, horizon_h, selected)
+
+
+def _expand_selected_trip_options_to_actions(
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    selected_options: list[_TripOption],
+) -> dict[str, list[int]]:
     actions = {vessel_id: [VESSEL_WAIT] * horizon_h for vessel_id in env.vessel_ids}
-    for vessel_id, selected in _selected_options_by_vessel(env, options, choose).items():
+    selected_by_vessel = {vessel_id: [] for vessel_id in env.vessel_ids}
+    for option in selected_options:
+        selected_by_vessel[option.vessel_id].append(option)
+    for vessel_id in env.vessel_ids:
+        selected_by_vessel[vessel_id].sort(
+            key=lambda option: (option.load_start_h, option.return_start_h, option.emitter_id)
+        )
+    for vessel_id, selected in selected_by_vessel.items():
         start = _path_start(env, scenario, start_step, vessel_id, horizon_h)
         current_node = None if start.node_id is None else str(start.node_id)
         current_h = int(start.start_h)
@@ -1052,6 +1426,14 @@ def _expand_executable_trips_to_actions(
             current_node = str(env._routes[vessel_id]["destination"])
             current_h = option.return_start_h
     return actions
+
+
+def _max_feasible_well_rate_indices(env, scenario: Scenario, horizon_h: int) -> dict[str, list[int]]:
+    well_rate_options = _well_rate_options_by_hour(env, scenario, horizon_h)
+    return {
+        well_id: [max(well_rate_options[(well_id, t)]) for t in range(horizon_h)]
+        for well_id in env.well_ids
+    }
 
 
 def _selected_options_by_vessel(env, options, choose) -> dict[str, list[_TripOption]]:
@@ -1108,6 +1490,256 @@ def _extract_well_rate_indices(env, horizon_h: int, well_rate_options, well_choi
             ]
             indices[well_id][t] = selected[0] if selected else 0
     return indices
+
+
+def _apply_executable_trip_mip_start(
+    env,
+    scenario: Scenario,
+    *,
+    start_step: int,
+    horizon_h: int,
+    options: list[_TripOption],
+    choose,
+    well_rate_options,
+    well_choice,
+    native_actions_by_hour: list[dict[str, list[int]]],
+) -> int:
+    for var in choose.values():
+        var.setInitialValue(0)
+    option_by_key = {
+        (option.vessel_id, option.emitter_id, option.load_start_h, option.depart_h): i
+        for i, option in enumerate(options)
+    }
+    selected = 0
+    used_options: set[int] = set()
+    for key in _native_action_trip_keys(env, scenario, start_step, horizon_h, native_actions_by_hour):
+        option_index = option_by_key.get(key)
+        if option_index is None or option_index in used_options:
+            continue
+        choose[option_index].setInitialValue(1)
+        used_options.add(option_index)
+        selected += 1
+
+    for well_index, well_id in enumerate(env.well_ids):
+        for t in range(horizon_h):
+            rate_index = _warm_start_well_rate_index(native_actions_by_hour, well_index, t)
+            if rate_index not in well_rate_options[(well_id, t)]:
+                rate_index = 0
+            for candidate in well_rate_options[(well_id, t)]:
+                well_choice[(well_id, t, candidate)].setInitialValue(1 if candidate == rate_index else 0)
+    return selected
+
+
+def _options_with_native_warm_start(
+    env,
+    scenario: Scenario,
+    *,
+    start_step: int,
+    horizon_h: int,
+    options: list[_TripOption],
+    native_actions_by_hour: list[dict[str, list[int]]],
+) -> list[_TripOption]:
+    augmented = list(options)
+    existing = {
+        (option.vessel_id, option.emitter_id, option.load_start_h, option.depart_h)
+        for option in augmented
+    }
+    for option in _native_action_trip_options_from_replay(
+        env,
+        scenario,
+        start_step,
+        horizon_h,
+        native_actions_by_hour,
+    ):
+        key = (option.vessel_id, option.emitter_id, option.load_start_h, option.depart_h)
+        if key in existing:
+            continue
+        augmented.append(option)
+        existing.add(key)
+    return augmented
+
+
+def _native_action_trip_options_from_replay(
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    native_actions_by_hour: list[dict[str, list[int]]],
+) -> list[_TripOption]:
+    replay_env = copy.deepcopy(env)
+    active: dict[str, tuple[str, int, list[float]]] = {}
+    options: list[_TripOption] = []
+    for t in range(min(horizon_h, len(native_actions_by_hour))):
+        before_berth = {
+            vessel_id: replay_env.simulator.vessel_states[vessel_id].get("berth")
+            if replay_env.simulator.vessel_states[vessel_id].get("mode") == "berthed"
+            else None
+            for vessel_id in replay_env.vessel_ids
+        }
+        before_cargo = {
+            vessel_id: float(replay_env.simulator.state.entity_inventory_t.get(vessel_id, 0.0))
+            for vessel_id in replay_env.vessel_ids
+        }
+        action = native_actions_by_hour[t]
+        for vessel_index, vessel_id in enumerate(replay_env.vessel_ids):
+            berth = before_berth[vessel_id]
+            vessel_action = _warm_start_vessel_action(native_actions_by_hour, vessel_index, t)
+            destination = _native_action_destination(replay_env, vessel_id, vessel_action)
+            if berth in replay_env.emitter_ids and destination == str(replay_env._routes[vessel_id]["destination"]):
+                option = _option_from_replayed_load_profile(
+                    replay_env,
+                    scenario,
+                    start_step,
+                    horizon_h,
+                    vessel_id,
+                    str(berth),
+                    depart_h=t,
+                    active=active.pop(vessel_id, None),
+                )
+                if option is not None:
+                    options.append(option)
+
+        _obs, _reward, terminated, truncated, _info = replay_env.step(action)
+
+        for vessel_index, vessel_id in enumerate(replay_env.vessel_ids):
+            berth = before_berth[vessel_id]
+            vessel_action = _warm_start_vessel_action(native_actions_by_hour, vessel_index, t)
+            destination = _native_action_destination(replay_env, vessel_id, vessel_action)
+            if berth not in replay_env.emitter_ids or destination is not None:
+                continue
+            after_cargo = float(replay_env.simulator.state.entity_inventory_t.get(vessel_id, 0.0))
+            loaded_t = max(0.0, after_cargo - before_cargo[vessel_id])
+            emitter_id = str(berth)
+            if vessel_id not in active or active[vessel_id][0] != emitter_id:
+                active[vessel_id] = (emitter_id, t, [])
+            active[vessel_id][2].append(loaded_t)
+        if terminated or truncated:
+            break
+    return options
+
+
+def _option_from_replayed_load_profile(
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    vessel_id: str,
+    emitter_id: str,
+    *,
+    depart_h: int,
+    active: tuple[str, int, list[float]] | None,
+) -> _TripOption | None:
+    if active is None:
+        return None
+    active_emitter_id, load_start_h, load_profile = active
+    if active_emitter_id != emitter_id:
+        return None
+    load_profile = [max(0.0, float(amount)) for amount in load_profile]
+    amount_t = sum(load_profile)
+    if amount_t <= 1e-9 or depart_h != load_start_h + len(load_profile):
+        return None
+    if depart_h <= load_start_h or depart_h >= horizon_h:
+        return None
+    vessel = env.network.entities[vessel_id]
+    emitter = env.network.entities[emitter_id]
+    load_rate = min(float(vessel.loading_rate_tph), float(emitter.loading_rate_tph))
+    terminal_id = str(env._routes[vessel_id]["destination"])
+    outbound_h = _sail_hours_between(
+        env,
+        emitter_id,
+        terminal_id,
+        vessel_id,
+        scenario=scenario,
+        start_step=start_step + depart_h,
+        max_horizon_h=horizon_h - depart_h,
+    )
+    arrival_h = depart_h + outbound_h
+    unload_hours = max(1, math.ceil(amount_t / max(1e-9, float(vessel.unloading_rate_tph))))
+    return_start_h = arrival_h + unload_hours
+    if arrival_h >= horizon_h or return_start_h > horizon_h:
+        return None
+    return _TripOption(
+        vessel_id=vessel_id,
+        emitter_id=emitter_id,
+        load_start_h=load_start_h,
+        depart_h=depart_h,
+        arrival_h=arrival_h,
+        return_start_h=return_start_h,
+        end_h=return_start_h,
+        capacity_t=float(vessel.capacity_t),
+        load_rate_tph=load_rate,
+        unload_rate_tph=float(vessel.unloading_rate_tph),
+        outbound_sail_h=outbound_h,
+        return_sail_h=0,
+        load_profile_t=tuple(load_profile),
+        unload_profile_t=tuple(_bounded_profile(amount_t, float(vessel.unloading_rate_tph), unload_hours)),
+    )
+
+
+def _native_action_trip_keys(
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    native_actions_by_hour: list[dict[str, list[int]]],
+) -> list[tuple[str, str, int, int]]:
+    keys: list[tuple[str, str, int, int]] = []
+    for vessel_index, vessel_id in enumerate(env.vessel_ids):
+        start = _path_start(env, scenario, start_step, vessel_id, horizon_h)
+        if start.node_id is None or start.start_h >= horizon_h:
+            continue
+        terminal_id = str(env._routes[vessel_id]["destination"])
+        current_node = str(start.node_id)
+        loading_start_h: int | None = None
+        t = int(start.start_h)
+        while t < horizon_h:
+            action = _warm_start_vessel_action(native_actions_by_hour, vessel_index, t)
+            destination = _native_action_destination(env, vessel_id, action)
+            if destination is None or destination == current_node:
+                if current_node in env.emitter_ids and loading_start_h is None:
+                    loading_start_h = t
+                t += 1
+                continue
+            if current_node in env.emitter_ids and destination == terminal_id and loading_start_h is not None:
+                keys.append((vessel_id, current_node, loading_start_h, t))
+            loading_start_h = None
+            sail_h = _sail_hours_between(
+                env,
+                current_node,
+                destination,
+                vessel_id,
+                scenario=scenario,
+                start_step=start_step + t,
+                max_horizon_h=max(1, horizon_h - t),
+            )
+            current_node = destination
+            t = max(t + 1, t + sail_h)
+    return keys
+
+
+def _warm_start_vessel_action(native_actions_by_hour: list[dict[str, list[int]]], vessel_index: int, t: int) -> int:
+    try:
+        return int(native_actions_by_hour[t]["vessels"][vessel_index])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return VESSEL_WAIT
+
+
+def _warm_start_well_rate_index(native_actions_by_hour: list[dict[str, list[int]]], well_index: int, t: int) -> int:
+    try:
+        return int(native_actions_by_hour[t]["wells"][well_index])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return 0
+
+
+def _native_action_destination(env, vessel_id: str, action: int) -> str | None:
+    if action == VESSEL_WAIT:
+        return None
+    if action == VESSEL_GO_TERMINAL:
+        return str(env._routes[vessel_id]["destination"])
+    emitter_index = action - VESSEL_GO_EMITTER_BASE
+    if 0 <= emitter_index < len(env.emitter_ids):
+        return env.emitter_ids[emitter_index]
+    return None
 
 
 def _record_from_option(option: _TripOption, amount_t: float) -> TripRecord:
@@ -1236,6 +1868,8 @@ def _solve(
     mip_gap_abs: float | None,
     threads: int | None,
     msg: bool,
+    *,
+    warm_start: bool = False,
 ) -> None:
     solver = _make_cplex_cmd(
         cplex_path=cplex_path,
@@ -1243,6 +1877,7 @@ def _solve(
         mip_gap_rel=mip_gap_rel,
         mip_gap_abs=mip_gap_abs,
         threads=threads,
+        warm_start=warm_start,
         msg=msg,
     )
     prob.solve(solver)

@@ -1,4 +1,5 @@
 import csv
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,17 +42,19 @@ def _network() -> PhysicalNetwork:
     return network
 
 
-def _quiet_config() -> ScenarioConfig:
-    return ScenarioConfig(
+def _quiet_config(**overrides) -> ScenarioConfig:
+    base = dict(
         episode_hours=3,
         capture_noise_std=0.0,
         capture_outage_rate_per_week=0.0,
-        enable_weather=False,
+        weather_window_rate_per_week=0.0,
         well_maintenance_rate_per_week=0.0,
         injectivity_max_decline=0.0,
         injectivity_noise_std=0.0,
         randomize_initial_inventory=False,
     )
+    base.update(overrides)
+    return ScenarioConfig(**base)
 
 
 class RouteWaveHelpersTests(unittest.TestCase):
@@ -198,6 +201,12 @@ class LSTMWaveHeightScenarioGeneratorTests(unittest.TestCase):
 
 
 class LegWaveClimatologyScenarioGeneratorTests(unittest.TestCase):
+    def test_leg_climatology_generator_has_no_base_weather_or_injectivity_passthrough_switches(self):
+        parameters = inspect.signature(LegWaveClimatologyScenarioGenerator).parameters
+
+        self.assertNotIn("keep_base_vessel_weather", parameters)
+        self.assertNotIn("keep_base_injectivity", parameters)
+
     def test_leg_climatology_generator_uses_mean_by_hour_of_year(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "leg_wave.csv"
@@ -242,7 +251,54 @@ class LegWaveClimatologyScenarioGeneratorTests(unittest.TestCase):
             [0.7, 0.9, 1.0],
         )
 
-    def test_leg_climatology_generator_disables_base_vessel_weather_and_injectivity_by_default(self):
+    def test_leg_climatology_can_amplify_data_driven_slowdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "leg_wave.csv"
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "global_record",
+                        "source_file",
+                        "source_record",
+                        "leg_id",
+                        "origin",
+                        "destination",
+                        "speed_factor_p75",
+                    ],
+                )
+                writer.writeheader()
+                for hour, value in ((0, 1.0), (1, 0.8), (2, 0.4)):
+                    writer.writerow(
+                        {
+                            "global_record": hour,
+                            "source_file": "wam10ei_2010.nc",
+                            "source_record": hour,
+                            "leg_id": "source->terminal",
+                            "origin": "source",
+                            "destination": "terminal",
+                            "speed_factor_p75": value,
+                        }
+                    )
+
+            generator = LegWaveClimatologyScenarioGenerator(
+                path,
+                config=_quiet_config(
+                    leg_wave_slowdown_multiplier=2.0,
+                    leg_wave_speed_factor_floor=0.25,
+                ),
+                fixed_start_hour_of_year=0,
+            )
+            scenario = generator.sample(_network(), seed=2)
+
+        self.assertEqual(len(scenario.leg_speed_factor["source->terminal"]), 3)
+        for actual, expected in zip(
+            scenario.leg_speed_factor["source->terminal"],
+            [1.0, 0.6, 0.25],
+        ):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_leg_climatology_generator_disables_base_window_weather_and_injectivity_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "leg_wave.csv"
             with path.open("w", newline="", encoding="utf-8") as handle:
@@ -277,7 +333,9 @@ class LegWaveClimatologyScenarioGeneratorTests(unittest.TestCase):
                     episode_hours=3,
                     capture_noise_std=0.0,
                     capture_outage_rate_per_week=0.0,
-                    enable_weather=True,
+                    weather_window_rate_per_week=168.0,
+                    weather_window_mean_hours=1_000.0,
+                    weather_window_speed_factor_range=(0.6, 0.6),
                     well_maintenance_rate_per_week=0.0,
                     injectivity_max_decline=0.0,
                     injectivity_noise_std=0.0,

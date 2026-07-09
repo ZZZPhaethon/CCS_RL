@@ -46,7 +46,7 @@ def write_phase1_route_wave_dataset(
     """Export Phase 1 route-level wave-height and speed-factor rows to CSV."""
     from ...environment import build_phase1_env
 
-    env = build_phase1_env(use_leg_wave_weather=False)
+    env = build_phase1_env(weather_mode="window")
     nc_paths = (
         discover_wave_height_files(wave_dir_or_paths)
         if isinstance(wave_dir_or_paths, (str, Path)) and Path(wave_dir_or_paths).is_dir()
@@ -108,7 +108,7 @@ def write_phase1_leg_wave_dataset(
     """Export Phase 1 leg-level wave-height rows for all controllable legs."""
     from ...environment import build_phase1_env
 
-    env = build_phase1_env(use_leg_wave_weather=False)
+    env = build_phase1_env(weather_mode="window")
     nc_paths = (
         discover_wave_height_files(wave_dir_or_paths)
         if isinstance(wave_dir_or_paths, (str, Path)) and Path(wave_dir_or_paths).is_dir()

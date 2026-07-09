@@ -58,6 +58,20 @@ def yara_buffer_tag(args) -> str:
     return f"_yara{capacity:g}"
 
 
+def bc_tag(args) -> str:
+    return f"_bc{args.bc_episodes}w{args.nonwait_weight:g}"
+
+
+def disturbance_tag(args) -> str:
+    capture = getattr(args, "capture_noise_std", 0.30)
+    inventory = getattr(args, "initial_inventory_fill_max", 0.5)
+    wave_multiplier = getattr(args, "leg_wave_slowdown_multiplier", 1.0)
+    wave_floor = getattr(args, "leg_wave_speed_factor_floor", 0.0)
+    if capture == 0.30 and inventory == 0.5 and wave_multiplier == 1.0 and wave_floor == 0.0:
+        return ""
+    return f"_cap{capture:g}_inv{inventory:g}_wave{wave_multiplier:g}_floor{wave_floor:g}"
+
+
 def summarize(policy: str, metrics) -> dict[str, float | str]:
     return {
         "policy": policy,
@@ -87,6 +101,14 @@ def make_env(args, reward_mode: str):
         carbon_price_eur_per_t=args.carbon_price,
         enforce_full_load_dispatch=args.enforce_full_load_dispatch,
         scenario=args.scenario,
+        weather_mode=args.weather_mode,
+        include_weather_obs=args.weather_obs,
+        wave_height_nc_paths=args.wave_height_nc_paths,
+        lstm_prediction_csv=args.lstm_prediction_csv,
+        capture_noise_std=args.capture_noise_std,
+        initial_inventory_fill_max=args.initial_inventory_fill_max,
+        leg_wave_slowdown_multiplier=args.leg_wave_slowdown_multiplier,
+        leg_wave_speed_factor_floor=args.leg_wave_speed_factor_floor,
     )
     apply_yara_buffer_capacity_override(env, args)
     return env
@@ -205,9 +227,11 @@ def write_outputs(args, rows, model_paths: dict[str, Path]) -> None:
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0.0 else ""
     buffer_tag = yara_buffer_tag(args)
+    demo_tag = bc_tag(args)
+    stress_tag = disturbance_tag(args)
     stem = (
         f"reward_mode_compare_{args.scenario}_{args.episode_hours}h"
-        f"_ts{args.timesteps}{kick_tag}{buffer_tag}_{stamp}"
+        f"_ts{args.timesteps}{kick_tag}{buffer_tag}{demo_tag}{stress_tag}_{stamp}"
     )
     csv_path = out / f"{stem}.csv"
     md_path = out / f"{stem}.md"
@@ -223,8 +247,15 @@ def write_outputs(args, rows, model_paths: dict[str, Path]) -> None:
         f"Generated: {dt.datetime.now().isoformat(timespec='seconds')}",
         f"episode_hours={args.episode_hours}, timesteps={args.timesteps}, seeds={args.eval_seeds}",
         f"kickstart_coef={args.kickstart_coef}",
+        f"bc_episodes={args.bc_episodes}, bc_epochs={args.bc_epochs}, nonwait_weight={args.nonwait_weight:g}",
         f"yara_buffer_capacity={args.yara_buffer_capacity}",
-        f"disturbance=ScenarioConfig defaults, partial_dispatch={not args.enforce_full_load_dispatch}",
+        f"capture_noise_std={args.capture_noise_std:g}",
+        f"initial_inventory_fill_max={args.initial_inventory_fill_max:g}",
+        f"leg_wave_slowdown_multiplier={args.leg_wave_slowdown_multiplier:g}",
+        f"leg_wave_speed_factor_floor={args.leg_wave_speed_factor_floor:g}",
+        f"weather_mode={args.weather_mode}",
+        f"reward_modes={args.reward_modes}",
+        f"partial_dispatch={not args.enforce_full_load_dispatch}",
         "",
         "Actual cost = operating_cost + vent_penalty.",
         "",
@@ -277,6 +308,25 @@ def parse_args():
     parser.add_argument("--overflow-risk-lookahead-h", type=float, default=24.0)
     parser.add_argument("--enforce-full-load-dispatch", action="store_true")
     parser.add_argument("--yara-buffer-capacity", type=float, default=None)
+    parser.add_argument("--capture-noise-std", type=float, default=0.30)
+    parser.add_argument("--initial-inventory-fill-max", type=float, default=0.5)
+    parser.add_argument("--leg-wave-slowdown-multiplier", type=float, default=1.0)
+    parser.add_argument("--leg-wave-speed-factor-floor", type=float, default=0.0)
+    parser.add_argument(
+        "--weather-mode",
+        choices=["window", "leg_wave_climatology", "wave_height_netcdf", "lstm_forecast"],
+        default="window",
+    )
+    parser.add_argument("--weather-obs", action="store_true")
+    parser.add_argument("--wave-height-nc-paths", nargs="+", default=None)
+    parser.add_argument("--lstm-prediction-csv", default=None)
+    parser.add_argument(
+        "--reward-modes",
+        nargs="+",
+        choices=["economic", "vent_first"],
+        default=["economic", "vent_first"],
+        help="reward modes to train/evaluate",
+    )
     parser.add_argument("--out-dir", default="output/rl_ppo")
     return parser.parse_args()
 
@@ -290,7 +340,9 @@ def main() -> None:
     model_paths = {}
     kick_tag = f"_kick{args.kickstart_coef:g}" if args.kickstart_coef > 0.0 else ""
     buffer_tag = yara_buffer_tag(args)
-    for reward_mode in ("economic", "vent_first"):
+    demo_tag = bc_tag(args)
+    stress_tag = disturbance_tag(args)
+    for reward_mode in args.reward_modes:
         model, demo_data = pretrain_one(args, reward_mode)
         print(f"[{dt.datetime.now():%H:%M:%S}] evaluating {reward_mode} after BC", flush=True)
         rows.extend(eval_model(args, reward_mode, model, label_suffix="bc"))
@@ -298,7 +350,7 @@ def main() -> None:
             fine_tune_one(args, reward_mode, model, demo_data)
         model_path = out / (
             f"ppo_{reward_mode}_{args.scenario}_{args.episode_hours}h"
-            f"_ts{args.timesteps}{kick_tag}{buffer_tag}.zip"
+            f"_ts{args.timesteps}{kick_tag}{buffer_tag}{demo_tag}{stress_tag}.zip"
         )
         model.save(str(model_path))
         model_paths[reward_mode] = model_path

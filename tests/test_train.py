@@ -82,6 +82,35 @@ class TrainPPOTests(unittest.TestCase):
         self.assertEqual(captured["total_timesteps"], 7)
         self.assertEqual(captured["learn_kwargs"]["progress_bar"], False)
 
+    def test_make_native_env_passes_stress_disturbance_config(self):
+        from sim import train
+
+        captured = {}
+        sentinel_env = object()
+
+        def fake_build_phase1_env(**kwargs):
+            captured.update(kwargs)
+            return sentinel_env
+
+        with patch.object(train, "build_phase1_env", side_effect=fake_build_phase1_env):
+            env = train.make_native_env(
+                episode_hours=720,
+                capture_noise_std=0.50,
+                initial_inventory_fill_max=0.80,
+                leg_wave_slowdown_multiplier=2.0,
+                leg_wave_speed_factor_floor=0.25,
+            )
+
+        self.assertIs(env, sentinel_env)
+        scenario_config = captured["scenario_config"]
+        self.assertEqual(captured["weather_mode"], "window")
+        self.assertEqual(scenario_config.capture_noise_std, 0.50)
+        self.assertEqual(scenario_config.emitter_initial_fill_range, (0.0, 0.80))
+        self.assertEqual(scenario_config.terminal_initial_fill_range, (0.0, 0.80))
+        self.assertEqual(scenario_config.reservoir_initial_pressure_fill_range, (0.0, 0.80))
+        self.assertEqual(scenario_config.leg_wave_slowdown_multiplier, 2.0)
+        self.assertEqual(scenario_config.leg_wave_speed_factor_floor, 0.25)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -83,7 +83,7 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         self.assertEqual(args.storage_reward_eur_per_t, 1_000.0)
         self.assertEqual(len(env.vessel_ids), 3)
         self.assertTrue(env.scenario_generator.config.randomize_initial_inventory)
-        self.assertTrue(env.scenario_generator.config.enable_weather)
+        self.assertEqual(env.scenario_generator.config.weather_window_rate_per_week, 0.3)
         self.assertGreater(env.scenario_generator.config.capture_noise_std, 0.0)
 
     def test_rule_based_controller_factory_translates_to_hybrid_env_action(self):
