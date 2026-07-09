@@ -266,6 +266,32 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
 
         self.assertEqual(args.scenario, "northern_lights_phase2")
 
+    def test_controller_comparison_uses_scenario_recommended_cap_hours_when_omitted(self):
+        from experiments import compare_controllers_same_scenarios as compare
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            argv = [
+                "compare_controllers_same_scenarios.py",
+                "--scenario",
+                "milk_run_stress",
+                "--controllers",
+                "idle",
+                "--seeds",
+                "1",
+                "--quiet-scenario",
+                "--skip-static-milp",
+                "--output-dir",
+                str(output_dir),
+            ]
+            with patch.object(sys, "argv", argv):
+                compare.main()
+
+            by_seed = (output_dir / "controller_comparison_by_seed.csv").read_text(encoding="utf-8")
+
+        self.assertIn(",milk_run_stress,idle,", by_seed)
+        self.assertIn(",720.0,0.9,720.0,", by_seed)
+
     def test_controller_comparison_cli_rejects_internal_phase2_id(self):
         from experiments import compare_controllers_same_scenarios as compare
 

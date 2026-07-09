@@ -51,6 +51,33 @@ class EnvSpaceTests(unittest.TestCase):
         self.assertTrue(all(isinstance(x, float) for x in obs))
         self.assertTrue(all(-1e6 < x < 1e6 for x in obs))
 
+    def test_weather_observation_exposes_candidate_leg_forecasts(self):
+        env = _env(include_weather_obs=True)
+        obs = env.reset(seed=0)
+        names = env.feature_names
+
+        self.assertEqual(len(obs), env.observation_size)
+        self.assertIn("hour_of_year_sin", names)
+        self.assertIn("hour_of_year_cos", names)
+        self.assertIn("vessel_a.to_terminal.leg_speed_168h_min", names)
+        self.assertIn("vessel_a.to_source_b.leg_speed_24h_mean", names)
+        self.assertIn("vessel_a.to_source_b.travel_hours_now", names)
+        self.assertIn("vessel_b.to_source_a.leg_speed_now", names)
+
+        env.scenario.leg_speed_factor = {
+            "source_a->source_b": [0.5] * 24 + [0.25] * 24,
+            "source_a->terminal": [0.8] * 48,
+        }
+        obs = env._observation()
+
+        self.assertAlmostEqual(obs[names.index("hour_of_year_sin")], 0.0)
+        self.assertAlmostEqual(obs[names.index("hour_of_year_cos")], 1.0)
+        self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_now")], 0.5)
+        self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_24h_mean")], 0.5)
+        self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_168h_min")], 0.25)
+        self.assertAlmostEqual(obs[names.index("vessel_a.to_source_a.travel_hours_now")], 0.0)
+        self.assertGreater(obs[names.index("vessel_a.to_source_b.travel_hours_now")], 0.0)
+
     def test_vessel_action_mask_shape_matches_vessel_action_dims(self):
         env = _env()
         env.reset(seed=0)

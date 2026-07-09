@@ -36,6 +36,7 @@ from sim.network_scenarios import (
     available_fixed_scenario_choices,
     build_fixed_scenario_demo,
     fixed_scenario_locations,
+    recommended_fixed_scenario_episode_hours,
     resolve_fixed_scenario_id,
 )
 from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
@@ -463,7 +464,12 @@ def write_report(path: Path, *, summary_rows: list[dict[str, object]], benchmark
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cap-hours", type=int, default=600)
+    parser.add_argument(
+        "--cap-hours",
+        type=int,
+        default=None,
+        help="Episode horizon in hours. If omitted, uses the selected scenario's recommended_episode_hours or 600 h.",
+    )
     parser.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3, 4, 5])
     parser.add_argument("--output-dir", type=Path, default=Path("output"))
     parser.add_argument(
@@ -532,6 +538,8 @@ def _quiet_config(cap_hours: int, random_initial_inventory: bool) -> ScenarioCon
 def main() -> None:
     args = parse_args()
     fixed_scenario = resolve_fixed_scenario_id(args.scenario)
+    if args.cap_hours is None:
+        args.cap_hours = recommended_fixed_scenario_episode_hours(fixed_scenario, default=600)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     progress_path = args.output_dir / "progress.log"
     progress_path.write_text("", encoding="utf-8")
