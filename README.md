@@ -304,7 +304,7 @@ Some external data files are large and are not fully tracked in git. Download th
 - `docs/previous ideas/northern_lights_mechanism_ladder_L0_L3plus_cn.md`
 - `src/sim/scenario_generation/wave_height/prediction/README.md`
 
-## Citation
+## 📝 Citation
 
 If you use this repository in a paper or report, please cite:
 
@@ -316,3 +316,5 @@ If you use this repository in a paper or report, please cite:
   note   = {Research code for physical-layer CCUS simulation, control, and reinforcement learning}
 }
 ```
+
+⭐ **If you find this work useful, please star the repository!**
