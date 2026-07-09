@@ -1,4 +1,6 @@
-<img width="960" height="180" alt="Image" src="assets/Logo.png" />
+<h1 align="center">
+  <img src="assets/Logo.png" alt="Logo" width="300"/>
+</h1>
 
 <h3 align="center">
 A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains
