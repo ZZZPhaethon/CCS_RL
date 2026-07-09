@@ -87,6 +87,11 @@ class ProjectStructureTests(unittest.TestCase):
             script,
         )
 
+    def test_hpc_shell_scripts_use_unix_line_endings(self):
+        for path in (ROOT / "hpc").glob("*.sh"):
+            with self.subTest(path=path.name):
+                self.assertNotIn(b"\r\n", path.read_bytes())
+
     def test_action_protocol_lives_in_actions_package(self):
         actions_dir = ROOT / "src" / "sim" / "actions"
 
