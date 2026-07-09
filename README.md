@@ -1,18 +1,25 @@
-<h1 align="center">CCS_RLLLM</h1>
-
-<h3 align="center">A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains</h3>
-
-<p align="center">Languages: English | <a href="README_CN.md">简体中文</a></p>
-
+<h1 align="center">
+  <img src="assets/Logo.png" alt="Logo" width="400"/>
+</h1>
+<h3 align="center">
+A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains
+</h3>
 <p align="center">
-  <a href="https://github.com/ZZZPhaethon/CCS_RLLLM"><img src="https://img.shields.io/badge/project-page-brightgreen" alt="Project Page"></a>
+  Languages: English | <a href="README_CN.md">简体中文</a>
 </p>
 
 <p align="center">
-  <strong><span style="font-size: 1.5em;">🎉 First version of CCUS operations optimization 🎉</span></strong>
+  <a href=""><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue" alt="Hugging Face Spaces"></a>
+  <a href=""><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
+  <a href=""><img src="https://img.shields.io/badge/arXiv-2512.23273-b31b1b.svg" alt="arXiv"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="MIT"></a>
+  <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white" alt="Google Drive Dataset"></a>
 </p>
+
+<h3 align="center">🎉 First version of CCUS operations optimization 🎉</h3>
+
 <p align="center">
-  <img src="assets/CCUSRL_overview.png" alt="CCUS teaser" width="95%">
+  <img src="assets/CCUSoverview.png" alt="CCUS teaser" width="95%">
 </p>
 CCS_RLLLM is a modular research codebase for ship-based carbon capture, transport, terminal receiving, pipeline transfer, and injection workflows. The current implementation uses Northern Lights as the primary reference scenario and brings physical-layer simulation, action protocols, rule-based controllers, MILP/MPC, RL environments, disturbance generation, and visualization dashboards into one reproducible experiment framework.
 
@@ -297,7 +304,7 @@ Some external data files are large and are not fully tracked in git. Download th
 - `docs/previous ideas/northern_lights_mechanism_ladder_L0_L3plus_cn.md`
 - `src/sim/scenario_generation/wave_height/prediction/README.md`
 
-## Citation
+## 📝 Citation
 
 If you use this repository in a paper or report, please cite:
 
@@ -309,3 +316,5 @@ If you use this repository in a paper or report, please cite:
   note   = {Research code for physical-layer CCUS simulation, control, and reinforcement learning}
 }
 ```
+
+⭐ **If you find this work useful, please star the repository!**
