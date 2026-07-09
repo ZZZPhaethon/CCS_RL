@@ -12,7 +12,7 @@ A Physical Simulation, Optimization Control, and Reinforcement Learning Playgrou
   <a href=""><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue" alt="Hugging Face Spaces"></a>
   <a href=""><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
   <a href=""><img src="https://img.shields.io/badge/arXiv-2512.23273-b31b1b.svg" alt="arXiv"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="AGPL 3.0"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="MIT"></a>
 </p>
 
 <h3 align="center">🎉 First version of CCUS operations optimization 🎉</h3>
