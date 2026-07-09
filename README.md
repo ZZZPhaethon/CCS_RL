@@ -19,7 +19,7 @@ A Physical Simulation, Optimization Control, and Reinforcement Learning Playgrou
 <h3 align="center">🎉 First version of CCUS operations optimization 🎉</h3>
 
 <p align="center">
-  <img src="assets/CCUSRL_overview.png" alt="CCUS teaser" width="95%">
+  <img src="assets/CCUSoverview.png" alt="CCUS teaser" width="95%">
 </p>
 CCS_RLLLM is a modular research codebase for ship-based carbon capture, transport, terminal receiving, pipeline transfer, and injection workflows. The current implementation uses Northern Lights as the primary reference scenario and brings physical-layer simulation, action protocols, rule-based controllers, MILP/MPC, RL environments, disturbance generation, and visualization dashboards into one reproducible experiment framework.
 
