@@ -67,10 +67,11 @@ class ResidualGymEnv(gym.Env):
     """Gated-override residual wrapper. Vessel action = FOLLOW base or override."""
     metadata = {"render_modes": []}
 
-    def __init__(self, env: CCSEnv):
+    def __init__(self, env: CCSEnv, base_factory=None):
         super().__init__()
         self.env = env
-        self.base = make_cluster_shuttle_policy(env)  # load-balanced cluster base
+        # base_factory(env) -> policy(env); defaults to the load-balanced cluster
+        self.base = (base_factory or (lambda e: make_cluster_shuttle_policy(e)))(env)
         self.nv = len(env.vessel_ids)
         self.nw = len(env.well_ids)
         self.vac = env.vessel_action_count
@@ -157,10 +158,10 @@ def _metrics(env):
     }
 
 
-def eval_residual(env_factory, model, seeds):
+def eval_residual(env_factory, model, seeds, base_factory=None):
     srs, lo, cpt = [], [], []
     for s in seeds:
-        wrapper = ResidualGymEnv(env_factory())
+        wrapper = ResidualGymEnv(env_factory(), base_factory)
         o, _ = wrapper.reset(seed=s)
         done = False
         while not done:
@@ -195,6 +196,8 @@ def main():
     p.add_argument("--kickstart-coef", type=float, default=0.3)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", type=str, default="cuda")
+    p.add_argument("--base", type=str, default="cluster", choices=["cluster", "greedy"],
+                   help="base controller the residual policy corrects")
     p.add_argument("--eval-seeds", type=int, nargs="+", default=[101, 102, 103])
     args = p.parse_args()
 
@@ -203,7 +206,12 @@ def main():
     def env_factory():
         return build_env(args.scenario, args.episode_hours, args.load_shift, args.outage_rate)
 
-    gym_env = ResidualGymEnv(env_factory())
+    if args.base == "greedy":
+        base_factory = lambda e: greedy_shuttle_policy
+    else:
+        base_factory = lambda e: make_cluster_shuttle_policy(e)
+
+    gym_env = ResidualGymEnv(env_factory(), base_factory)
     model = MaskablePPO("MlpPolicy", gym_env, seed=args.seed, gamma=0.999,
                         n_steps=args.n_steps, batch_size=64, learning_rate=3e-4,
                         device=args.device, verbose=1)
@@ -221,7 +229,7 @@ def main():
         model.learn(total_timesteps=args.timesteps, callback=cb)
 
     out = Path("output/rl_ppo"); out.mkdir(parents=True, exist_ok=True)
-    tag = f"residual_{args.scenario.replace('northern_lights_','')}"
+    tag = f"residual_{args.base}base_{args.scenario.replace('northern_lights_','')}"
     tag += ("_loadshift" if args.load_shift else "") + f"_ts{args.timesteps}"
     model.save(str(out / f"{tag}.zip"))
 
@@ -229,7 +237,7 @@ def main():
     rows = []
     rows.append(("greedy", *eval_native(env_factory, lambda e: greedy_shuttle_policy, args.eval_seeds)))
     rows.append(("cluster_base", *eval_native(env_factory, lambda e: make_cluster_shuttle_policy(e), args.eval_seeds)))
-    rows.append(("residual_rl", *eval_residual(env_factory, model, args.eval_seeds)))
+    rows.append((f"residual_rl({args.base})", *eval_residual(env_factory, model, args.eval_seeds, base_factory)))
 
     print(f"{'policy':16s} {'storage':>8s} {'vent':>7s} {'cost/t':>8s}")
     md = [f"# Residual RL over cluster base - {tag}", "",
