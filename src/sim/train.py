@@ -44,6 +44,7 @@ def make_native_env(
     leg_wave_slowdown_multiplier: float = 1.0,
     leg_wave_speed_factor_floor: float = 0.0,
     weather_mode: str = "window",
+    weather_window_rate_per_week: float = 1.0,
     wave_height_nc_paths: str | Path | list[str | Path] | None = None,
     lstm_prediction_csv: str | Path | None = None,
 ):
@@ -94,6 +95,7 @@ def make_native_env(
             emitter_initial_fill_range=(0.0, initial_inventory_fill_max),
             terminal_initial_fill_range=(0.0, initial_inventory_fill_max),
             reservoir_initial_pressure_fill_range=(0.0, initial_inventory_fill_max),
+            weather_window_rate_per_week=weather_window_rate_per_week,
             leg_wave_slowdown_multiplier=leg_wave_slowdown_multiplier,
             leg_wave_speed_factor_floor=leg_wave_speed_factor_floor,
         ),

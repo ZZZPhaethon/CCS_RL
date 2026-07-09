@@ -71,6 +71,22 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertIn('WEATHER_OBS_ARGS=(--weather-obs)', script)
         self.assertIn('"${WEATHER_OBS_ARGS[@]}"', script)
 
+    def test_reward_modes_hpc_script_passes_weather_window_rate(self):
+        script = (ROOT / "hpc" / "submit_reward_modes_bc.sh").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'WEATHER_WINDOW_RATE_PER_WEEK="${WEATHER_WINDOW_RATE_PER_WEEK:-1.0}"',
+            script,
+        )
+        self.assertIn(
+            'echo "Weather window rate per week: $WEATHER_WINDOW_RATE_PER_WEEK"',
+            script,
+        )
+        self.assertIn(
+            '--weather-window-rate-per-week "$WEATHER_WINDOW_RATE_PER_WEEK"',
+            script,
+        )
+
     def test_action_protocol_lives_in_actions_package(self):
         actions_dir = ROOT / "src" / "sim" / "actions"
 

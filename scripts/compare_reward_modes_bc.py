@@ -62,6 +62,10 @@ def bc_tag(args) -> str:
     return f"_bc{args.bc_episodes}w{args.nonwait_weight:g}"
 
 
+def weather_rate_tag(args) -> str:
+    return f"_weatherrate{args.weather_window_rate_per_week:g}"
+
+
 def disturbance_tag(args) -> str:
     capture = getattr(args, "capture_noise_std", 0.30)
     inventory = getattr(args, "initial_inventory_fill_max", 0.5)
@@ -103,6 +107,7 @@ def make_env(args, reward_mode: str):
         scenario=args.scenario,
         weather_mode=args.weather_mode,
         include_weather_obs=args.weather_obs,
+        weather_window_rate_per_week=args.weather_window_rate_per_week,
         wave_height_nc_paths=args.wave_height_nc_paths,
         lstm_prediction_csv=args.lstm_prediction_csv,
         capture_noise_std=args.capture_noise_std,
@@ -229,9 +234,10 @@ def write_outputs(args, rows, model_paths: dict[str, Path]) -> None:
     buffer_tag = yara_buffer_tag(args)
     demo_tag = bc_tag(args)
     stress_tag = disturbance_tag(args)
+    weather_tag = weather_rate_tag(args)
     stem = (
         f"reward_mode_compare_{args.scenario}_{args.episode_hours}h"
-        f"_ts{args.timesteps}{kick_tag}{buffer_tag}{demo_tag}{stress_tag}_{stamp}"
+        f"_ts{args.timesteps}{kick_tag}{buffer_tag}{demo_tag}{stress_tag}{weather_tag}_{stamp}"
     )
     csv_path = out / f"{stem}.csv"
     md_path = out / f"{stem}.md"
@@ -254,6 +260,7 @@ def write_outputs(args, rows, model_paths: dict[str, Path]) -> None:
         f"leg_wave_slowdown_multiplier={args.leg_wave_slowdown_multiplier:g}",
         f"leg_wave_speed_factor_floor={args.leg_wave_speed_factor_floor:g}",
         f"weather_mode={args.weather_mode}",
+        f"weather_window_rate_per_week={args.weather_window_rate_per_week:g}",
         f"reward_modes={args.reward_modes}",
         f"partial_dispatch={not args.enforce_full_load_dispatch}",
         "",
@@ -317,6 +324,7 @@ def parse_args():
         choices=["window", "leg_wave_climatology", "wave_height_netcdf", "lstm_forecast"],
         default="window",
     )
+    parser.add_argument("--weather-window-rate-per-week", type=float, default=1.0)
     parser.add_argument("--weather-obs", action="store_true")
     parser.add_argument("--wave-height-nc-paths", nargs="+", default=None)
     parser.add_argument("--lstm-prediction-csv", default=None)
@@ -342,6 +350,7 @@ def main() -> None:
     buffer_tag = yara_buffer_tag(args)
     demo_tag = bc_tag(args)
     stress_tag = disturbance_tag(args)
+    weather_tag = weather_rate_tag(args)
     for reward_mode in args.reward_modes:
         model, demo_data = pretrain_one(args, reward_mode)
         print(f"[{dt.datetime.now():%H:%M:%S}] evaluating {reward_mode} after BC", flush=True)
@@ -350,7 +359,7 @@ def main() -> None:
             fine_tune_one(args, reward_mode, model, demo_data)
         model_path = out / (
             f"ppo_{reward_mode}_{args.scenario}_{args.episode_hours}h"
-            f"_ts{args.timesteps}{kick_tag}{buffer_tag}{demo_tag}{stress_tag}.zip"
+            f"_ts{args.timesteps}{kick_tag}{buffer_tag}{demo_tag}{stress_tag}{weather_tag}.zip"
         )
         model.save(str(model_path))
         model_paths[reward_mode] = model_path

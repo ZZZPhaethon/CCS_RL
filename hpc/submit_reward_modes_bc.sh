@@ -29,6 +29,7 @@ INITIAL_INVENTORY_FILL_MAX="${INITIAL_INVENTORY_FILL_MAX:-0.5}"
 LEG_WAVE_SLOWDOWN_MULTIPLIER="${LEG_WAVE_SLOWDOWN_MULTIPLIER:-1.0}"
 LEG_WAVE_SPEED_FACTOR_FLOOR="${LEG_WAVE_SPEED_FACTOR_FLOOR:-0.0}"
 WEATHER_MODE="${WEATHER_MODE:-window}"
+WEATHER_WINDOW_RATE_PER_WEEK="${WEATHER_WINDOW_RATE_PER_WEEK:-1.0}"
 WEATHER_OBS="${WEATHER_OBS:-1}"
 WEATHER_OBS_ARGS=()
 if [[ "$WEATHER_OBS" == "1" || "$WEATHER_OBS" == "true" || "$WEATHER_OBS" == "TRUE" || "$WEATHER_OBS" == "yes" || "$WEATHER_OBS" == "YES" ]]; then
@@ -61,6 +62,7 @@ echo "Initial inventory fill max: $INITIAL_INVENTORY_FILL_MAX"
 echo "Leg-wave slowdown multiplier: $LEG_WAVE_SLOWDOWN_MULTIPLIER"
 echo "Leg-wave speed factor floor: $LEG_WAVE_SPEED_FACTOR_FLOOR"
 echo "Weather mode: $WEATHER_MODE"
+echo "Weather window rate per week: $WEATHER_WINDOW_RATE_PER_WEEK"
 echo "Weather obs: $WEATHER_OBS"
 which python
 python --version
@@ -81,6 +83,7 @@ python -u scripts/compare_reward_modes_bc.py \
   --leg-wave-slowdown-multiplier "$LEG_WAVE_SLOWDOWN_MULTIPLIER" \
   --leg-wave-speed-factor-floor "$LEG_WAVE_SPEED_FACTOR_FLOOR" \
   --weather-mode "$WEATHER_MODE" \
+  --weather-window-rate-per-week "$WEATHER_WINDOW_RATE_PER_WEEK" \
   "${WEATHER_OBS_ARGS[@]}" \
   --eval-seeds 101 102 103 104 105 \
   --reward-modes $REWARD_MODES \

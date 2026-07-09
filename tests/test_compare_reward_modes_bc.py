@@ -50,6 +50,11 @@ class CompareRewardModesTests(unittest.TestCase):
 
         self.assertEqual(compare.bc_tag(args), "_bc100w20")
 
+    def test_weather_rate_tag_marks_output_artifacts(self):
+        args = SimpleNamespace(weather_window_rate_per_week=0.3)
+
+        self.assertEqual(compare.weather_rate_tag(args), "_weatherrate0.3")
+
     def test_disturbance_tag_marks_leg_wave_stress(self):
         args = SimpleNamespace(
             capture_noise_std=0.5,
@@ -68,6 +73,7 @@ class CompareRewardModesTests(unittest.TestCase):
         self.assertEqual(args.bc_epochs, 20)
         self.assertEqual(args.reward_modes, ["economic", "vent_first"])
         self.assertEqual(args.weather_mode, "window")
+        self.assertEqual(args.weather_window_rate_per_week, 1.0)
         self.assertFalse(args.weather_obs)
 
     def test_reward_modes_can_limit_run_to_vent_first(self):
@@ -98,6 +104,7 @@ class CompareRewardModesTests(unittest.TestCase):
             scenario="northern_lights_phase1_3vessels",
             weather_mode="window",
             weather_obs=True,
+            weather_window_rate_per_week=1.0,
             wave_height_nc_paths=None,
             lstm_prediction_csv=None,
             capture_noise_std=0.30,
@@ -113,6 +120,22 @@ class CompareRewardModesTests(unittest.TestCase):
 
         self.assertIs(env, sentinel_env)
         self.assertTrue(make_native_env.call_args.kwargs["include_weather_obs"])
+        self.assertEqual(
+            make_native_env.call_args.kwargs["weather_window_rate_per_week"],
+            1.0,
+        )
+
+    def test_weather_window_rate_arg_is_parsed(self):
+        with patch(
+            "sys.argv",
+            [
+                "compare_reward_modes_bc.py",
+                "--weather-window-rate-per-week", "0.3",
+            ],
+        ):
+            args = compare.parse_args()
+
+        self.assertEqual(args.weather_window_rate_per_week, 0.3)
 
     def test_stress_disturbance_args_are_parsed(self):
         with patch(
