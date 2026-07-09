@@ -43,6 +43,7 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertTrue((scenario_generation_dir / "__init__.py").exists())
         self.assertTrue((scenario_generation_dir / "generator.py").exists())
         self.assertTrue((scenario_generation_dir / "disturbance_resolver.py").exists())
+        self.assertFalse((scenario_generation_dir / "load_shift.py").exists())
         self.assertFalse((ROOT / "src" / "sim" / "scenario.py").exists())
         self.assertFalse((ROOT / "src" / "sim" / "disturbances.py").exists())
 
@@ -57,6 +58,18 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertFalse((ROOT / "src" / "sim" / "env.py").exists())
         self.assertFalse((ROOT / "src" / "sim" / "env_scenarios.py").exists())
         self.assertFalse((ROOT / "src" / "sim" / "gym_env.py").exists())
+
+    def test_reward_modes_hpc_script_defaults_to_probability_window_weather(self):
+        script = (ROOT / "hpc" / "submit_reward_modes_bc.sh").read_text(encoding="utf-8")
+
+        self.assertIn('WEATHER_MODE="${WEATHER_MODE:-window}"', script)
+
+    def test_reward_modes_hpc_script_can_enable_weather_observations(self):
+        script = (ROOT / "hpc" / "submit_reward_modes_bc.sh").read_text(encoding="utf-8")
+
+        self.assertIn('WEATHER_OBS="${WEATHER_OBS:-1}"', script)
+        self.assertIn('WEATHER_OBS_ARGS=(--weather-obs)', script)
+        self.assertIn('"${WEATHER_OBS_ARGS[@]}"', script)
 
     def test_action_protocol_lives_in_actions_package(self):
         actions_dir = ROOT / "src" / "sim" / "actions"

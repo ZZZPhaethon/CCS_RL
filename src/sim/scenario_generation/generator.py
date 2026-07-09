@@ -21,15 +21,6 @@ from ..entities.storage import InjectionWell, Reservoir
 from ..entities.terminal import Terminal
 from ..entities.vessel import Vessel
 
-# Regional weather as a sticky 3-state Markov chain; each state maps to a vessel
-# speed multiplier. Shared across vessels because weather is a regional driver.
-_WEATHER_SPEED = {"calm": 1.0, "breeze": 0.85, "storm": 0.6}
-_WEATHER_TRANSITIONS = {
-    "calm": (("calm", 0.90), ("breeze", 0.10)),
-    "breeze": (("calm", 0.30), ("breeze", 0.50), ("storm", 0.20)),
-    "storm": (("breeze", 0.50), ("storm", 0.50)),
-}
-
 
 @dataclass
 class ScenarioConfig:
@@ -42,9 +33,19 @@ class ScenarioConfig:
     capture_noise_std: float = 0.30
     capture_outage_rate_per_week: float = 0.5
     capture_outage_mean_hours: float = 12.0
+    capture_high_output_rate_per_week: float = 0.0
+    capture_high_output_mean_hours: float = 48.0
+    capture_high_output_multiplier_range: tuple[float, float] = (1.25, 1.75)
 
-    # Weather -> vessel speed (Markov chain above). Disable by setting False.
-    enable_weather: bool = True
+    # Probability-window weather -> vessel speed.
+    weather_window_rate_per_week: float = 0.3
+    weather_window_mean_hours: float = 48.0
+    weather_window_speed_factor_range: tuple[float, float] = (0.45, 0.75)
+
+    # Data-driven leg-wave slowdown stress. A multiplier of 1.0 leaves the CSV
+    # speed factors unchanged; values above 1.0 amplify rough-weather slowdown.
+    leg_wave_slowdown_multiplier: float = 1.0
+    leg_wave_speed_factor_floor: float = 0.0
 
     # Injection-well maintenance windows.
     well_maintenance_rate_per_week: float = 0.3
@@ -237,28 +238,62 @@ def _capture_availability_series(rng, n_steps: int, dt: float, config: ScenarioC
         else:
             noisy = 1.0
         series.append(max(0.0, noisy))
-    return series
+    high_output = _factor_window_series(
+        rng,
+        n_steps,
+        dt,
+        config.capture_high_output_rate_per_week,
+        config.capture_high_output_mean_hours,
+        config.capture_high_output_multiplier_range,
+        inactive_value=1.0,
+    )
+    return [availability * factor for availability, factor in zip(series, high_output)]
 
 
 def _weather_speed_series(rng, n_steps: int, config: ScenarioConfig) -> list[float]:
-    if not config.enable_weather:
-        return [1.0] * n_steps
-    state = "calm"
+    window = _factor_window_series(
+        rng,
+        n_steps,
+        config.time_step_hours,
+        config.weather_window_rate_per_week,
+        config.weather_window_mean_hours,
+        config.weather_window_speed_factor_range,
+        inactive_value=1.0,
+    )
+    return [min(1.0, max(0.0, speed_factor)) for speed_factor in window]
+
+
+def _factor_window_series(
+    rng,
+    n_steps: int,
+    dt: float,
+    rate_per_week: float,
+    mean_hours: float,
+    value_range: tuple[float, float],
+    *,
+    inactive_value: float,
+) -> list[float]:
+    """Piecewise-constant event windows using the same start/stop style as outages."""
+    if rate_per_week <= 0.0 or mean_hours <= 0.0:
+        return [inactive_value] * n_steps
+    start_p = _clamp(rate_per_week * dt / 168.0, 0.0, 1.0)
+    end_p = _clamp(dt / mean_hours, 0.0, 1.0)
+    lo, hi = value_range
     series: list[float] = []
+    active = False
+    active_value = inactive_value
     for _ in range(n_steps):
-        series.append(_WEATHER_SPEED[state])
-        state = _next_weather_state(rng, state)
+        if active:
+            series.append(active_value)
+            if rng.random() < end_p:
+                active = False
+        elif rng.random() < start_p:
+            active = True
+            active_value = rng.uniform(lo, hi)
+            series.append(active_value)
+        else:
+            series.append(inactive_value)
     return series
-
-
-def _next_weather_state(rng, state: str) -> str:
-    roll = rng.random()
-    cumulative = 0.0
-    for next_state, probability in _WEATHER_TRANSITIONS[state]:
-        cumulative += probability
-        if roll < cumulative:
-            return next_state
-    return state
 
 
 def _injectivity_series(

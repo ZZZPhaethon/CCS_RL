@@ -79,8 +79,6 @@ class LegWaveClimatologyScenarioGenerator(ScenarioGenerator):
         speed_factor_column: str = "speed_factor_p75",
         period_hours: int = 8784,
         fixed_start_hour_of_year: int | None = None,
-        keep_base_vessel_weather: bool = False,
-        keep_base_injectivity: bool = False,
         config: ScenarioConfig | None = None,
         seed: int | None = None,
         climatology: LegWaveClimatology | None = None,
@@ -92,30 +90,29 @@ class LegWaveClimatologyScenarioGenerator(ScenarioGenerator):
             period_hours=period_hours,
         )
         self.fixed_start_hour_of_year = fixed_start_hour_of_year
-        self.keep_base_vessel_weather = keep_base_vessel_weather
-        self.keep_base_injectivity = keep_base_injectivity
         self.last_start_hour_of_year: int | None = None
 
     def sample(self, network, seed: int | None = None) -> Scenario:
         scenario = super().sample(network, seed=seed)
-        if not self.keep_base_vessel_weather:
-            scenario.vessel_speed_factor = {
-                vessel_id: [1.0] * scenario.n_steps
-                for vessel_id in network._entities_of_type(Vessel)
-            }
-        if not self.keep_base_injectivity:
-            scenario.injectivity_factor = {
-                well_id: [1.0] * scenario.n_steps
-                for well_id in network._entities_of_type(InjectionWell)
-            }
+        scenario.vessel_speed_factor = {
+            vessel_id: [1.0] * scenario.n_steps
+            for vessel_id in network._entities_of_type(Vessel)
+        }
+        scenario.injectivity_factor = {
+            well_id: [1.0] * scenario.n_steps
+            for well_id in network._entities_of_type(InjectionWell)
+        }
         start_hour = self._sample_start_hour(seed)
         self.last_start_hour_of_year = start_hour
         scenario.leg_speed_factor = {
-            leg_id: self.climatology.series(
-                leg_id,
-                start_hour_of_year=start_hour,
-                hours=scenario.n_steps,
-            )
+            leg_id: [
+                _leg_wave_stressed_speed_factor(value, self.config)
+                for value in self.climatology.series(
+                    leg_id,
+                    start_hour_of_year=start_hour,
+                    hours=scenario.n_steps,
+                )
+            ]
             for leg_id in self.climatology.leg_ids
         }
         return scenario
@@ -126,3 +123,11 @@ class LegWaveClimatologyScenarioGenerator(ScenarioGenerator):
         episode_seed = seed if seed is not None else self.seed
         rng = random.Random(f"leg-wave-climatology:{episode_seed}") if episode_seed is not None else random.Random()
         return rng.randrange(self.climatology.period_hours)
+
+
+def _leg_wave_stressed_speed_factor(value: float, config: ScenarioConfig) -> float:
+    floor = min(1.0, max(0.0, float(config.leg_wave_speed_factor_floor)))
+    multiplier = max(0.0, float(config.leg_wave_slowdown_multiplier))
+    slowdown = max(0.0, 1.0 - float(value))
+    stressed = 1.0 - slowdown * multiplier
+    return min(1.0, max(floor, stressed))

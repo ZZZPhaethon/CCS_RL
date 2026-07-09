@@ -83,7 +83,7 @@ def main() -> None:
     p.add_argument("--nonwait-weight", type=float, default=10.0,
                    help="loss up-weight for dispatch (non-WAIT) steps in BC")
     p.add_argument("--weather-obs", action="store_true",
-                   help="expose per-leg wave weather + seasonality in the observation")
+                   help="expose weather speed factors + seasonality in the observation")
     p.add_argument("--kickstart-coef", type=float, default=0.0,
                    help="initial weight of the decaying BC anchor during PPO fine-tune (0 = off)")
     p.add_argument("--store-reward", type=float, default=None,

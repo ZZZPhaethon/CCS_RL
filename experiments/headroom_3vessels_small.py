@@ -32,7 +32,6 @@ def quiet_config(hours: int, *, random_initial_inventory: bool) -> ScenarioConfi
         randomize_initial_inventory=random_initial_inventory,
         capture_noise_std=0.0,
         capture_outage_rate_per_week=0.0,
-        enable_weather=False,
         well_maintenance_rate_per_week=0.0,
         injectivity_max_decline=0.0,
         injectivity_noise_std=0.0,
@@ -44,7 +43,8 @@ def case_config(case: str, hours: int, *, random_initial_inventory: bool) -> Sce
         return quiet_config(hours, random_initial_inventory=random_initial_inventory)
     if case == "weather_only":
         config = quiet_config(hours, random_initial_inventory=random_initial_inventory)
-        config.enable_weather = True
+        config.weather_window_rate_per_week = 1.0
+        config.weather_window_mean_hours = 48.0
         return config
     if case == "capture_only":
         config = quiet_config(hours, random_initial_inventory=random_initial_inventory)

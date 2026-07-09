@@ -28,7 +28,6 @@ def _scenario_config(hours: int) -> ScenarioConfig:
         randomize_initial_inventory=True,
         capture_noise_std=0.0,
         capture_outage_rate_per_week=0.0,
-        enable_weather=False,
         well_maintenance_rate_per_week=0.0,
         injectivity_max_decline=0.0,
         injectivity_noise_std=0.0,

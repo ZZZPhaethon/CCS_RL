@@ -105,10 +105,10 @@ class CCSEnvConfig:
     # dispatch when avoiding venting is worth an extra trip. Turn on only for the
     # old curriculum-style behaviour.
     enforce_full_load_dispatch: bool = False
-    # Expose per-leg wave-height weather (current + 24 h/168 h forecast) and an
-    # annual clock in the observation. Off by default so existing (no-weather)
-    # models keep their observation size; turn on to let the policy route around
-    # rough legs and exploit seasonality.
+    # Expose weather speed factors (current + 24 h/168 h forecast) and an annual
+    # clock. Leg-level wave data is preferred; probability-window weather falls
+    # back to vessel-level factors. Off by default so existing no-weather models
+    # keep their observation size.
     include_weather_obs: bool = False
     # Expose a per-vessel emitter assignment (the high-level "goal") in the
     # observation: for each vessel, a one-hot over emitters marking which it is
@@ -687,9 +687,9 @@ class CCSEnv:
                 values += [1.0, 1.0, 1.0, 1.0, 1.0, 0.0]
                 continue
             leg_id = f"{origin_id}->{destination_id}"
-            now = self._leg_speed_at(leg_id, 0)
-            mean24, min24 = self._leg_speed_forecast(leg_id, 24)
-            mean168, min168 = self._leg_speed_forecast(leg_id, 168)
+            now = self._weather_speed_at(leg_id, vessel_id, 0)
+            mean24, min24 = self._weather_speed_forecast(leg_id, vessel_id, 24)
+            mean168, min168 = self._weather_speed_forecast(leg_id, vessel_id, 168)
             travel_hours = self._normalized_travel_hours(origin_id, destination_id, route, now)
             values += [now, mean24, min24, mean168, min168, travel_hours]
         return values
@@ -726,24 +726,27 @@ class CCSEnv:
         self._leg_distance_cache[key] = distance_km
         return distance_km
 
-    def _leg_speed_series(self, leg_id: str) -> list[float] | None:
-        """Full per-leg wave speed-factor series for the episode, if present."""
+    def _weather_speed_series(self, leg_id: str, vessel_id: str) -> list[float] | None:
+        """Full weather speed-factor series, preferring leg-level data when present."""
         if self.scenario is None:
             return None
         series = self.scenario.leg_speed_factor.get(leg_id)
+        if series:
+            return series
+        series = self.scenario.vessel_speed_factor.get(vessel_id)
         return series if series else None
 
-    def _leg_speed_at(self, leg_id: str, offset_h: int) -> float:
-        series = self._leg_speed_series(leg_id)
+    def _weather_speed_at(self, leg_id: str, vessel_id: str, offset_h: int) -> float:
+        series = self._weather_speed_series(leg_id, vessel_id)
         if not series:
             return 1.0
         idx = int(round(self.simulator.state.time_h / self.network.time_step_hours)) + offset_h
         idx = max(0, min(idx, len(series) - 1))
         return float(series[idx])
 
-    def _leg_speed_forecast(self, leg_id: str, window_h: int) -> tuple[float, float]:
-        """(mean, min) leg speed factor over the next ``window_h`` hours."""
-        series = self._leg_speed_series(leg_id)
+    def _weather_speed_forecast(self, leg_id: str, vessel_id: str, window_h: int) -> tuple[float, float]:
+        """(mean, min) weather speed factor over the next ``window_h`` hours."""
+        series = self._weather_speed_series(leg_id, vessel_id)
         if not series:
             return 1.0, 1.0
         start = int(round(self.simulator.state.time_h / self.network.time_step_hours))

@@ -11,6 +11,7 @@ Run as a script:
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from .economics import CostModel, EconomicParameters
 from .control.baselines import greedy_shuttle_policy, idle_policy
@@ -38,6 +39,13 @@ def make_native_env(
     enforce_full_load_dispatch: bool = False,
     scenario: str = "northern_lights_phase1",
     include_goal_obs: bool = False,
+    capture_noise_std: float = 0.30,
+    initial_inventory_fill_max: float = 0.5,
+    leg_wave_slowdown_multiplier: float = 1.0,
+    leg_wave_speed_factor_floor: float = 0.0,
+    weather_mode: str = "window",
+    wave_height_nc_paths: str | Path | list[str | Path] | None = None,
+    lstm_prediction_csv: str | Path | None = None,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
@@ -46,8 +54,8 @@ def make_native_env(
     ``injection_reward_eur_per_t`` adds a dense per-step reward for injected
     CO2 (0.0 = off); a positive value fixes the short-horizon objective, which
     otherwise rewards idling until the delayed venting penalty kicks in.
-    ``include_weather_obs`` exposes per-leg wave weather + seasonality in the
-    observation so the policy can route around rough legs.
+    ``include_weather_obs`` exposes weather speed factors + seasonality in the
+    observation so the policy can react to rough weather.
     ``carbon_price_eur_per_t`` is the single, economically-faithful knob: it sets
     both the venting carbon tax and (by default) the stored-CO2 credit to the
     same value, so storing and avoiding a vent are worth the same (symmetric).
@@ -60,6 +68,9 @@ def make_native_env(
     cost_model = CostModel(EconomicParameters(**econ_kwargs))
     return build_phase1_env(
         scenario=scenario,
+        weather_mode=weather_mode,
+        wave_height_nc_paths=wave_height_nc_paths,
+        lstm_prediction_csv=lstm_prediction_csv,
         cost_model=cost_model,
         config=CCSEnvConfig(
             episode_hours=episode_hours,
@@ -76,7 +87,16 @@ def make_native_env(
             enforce_full_load_dispatch=enforce_full_load_dispatch,
             include_goal_obs=include_goal_obs,
         ),
-        scenario_config=ScenarioConfig(episode_hours=episode_hours, warm_start=warm_start),
+        scenario_config=ScenarioConfig(
+            episode_hours=episode_hours,
+            warm_start=warm_start,
+            capture_noise_std=capture_noise_std,
+            emitter_initial_fill_range=(0.0, initial_inventory_fill_max),
+            terminal_initial_fill_range=(0.0, initial_inventory_fill_max),
+            reservoir_initial_pressure_fill_range=(0.0, initial_inventory_fill_max),
+            leg_wave_slowdown_multiplier=leg_wave_slowdown_multiplier,
+            leg_wave_speed_factor_floor=leg_wave_speed_factor_floor,
+        ),
     )
 
 

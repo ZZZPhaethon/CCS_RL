@@ -7,7 +7,18 @@ from sim.control.baselines import greedy_shuttle_policy, idle_policy
 from sim.environment import CCSEnvConfig, build_phase1_env
 from sim.metrics import run_episode
 from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
-from sim.scenario_generation.wave_height import LegWaveClimatologyScenarioGenerator
+from sim.scenario_generation.wave_height import (
+    LegWaveClimatologyScenarioGenerator,
+    LSTMWaveHeightScenarioGenerator,
+    WaveHeightScenarioGenerator,
+)
+
+
+class FakeWaveReader:
+    total_records = 12
+
+    def route_wave_height_series(self, route_coordinates, *, start_record=0, hours=None):
+        return [0.0] * int(hours)
 
 
 class Phase1EnvTests(unittest.TestCase):
@@ -53,7 +64,16 @@ class Phase1EnvTests(unittest.TestCase):
         # Real buffers give ~7 days of autonomy, so a short run should not vent.
         self.assertEqual(metrics.vented_t, 0.0)
 
-    def test_phase1_default_scenario_uses_leg_wave_weather_when_csv_exists(self):
+    def test_phase1_default_weather_mode_uses_probability_window_generator(self):
+        env = build_phase1_env(
+            config=CCSEnvConfig(episode_hours=3),
+            scenario_config=ScenarioConfig(episode_hours=3),
+        )
+
+        self.assertIsInstance(env.scenario_generator, ScenarioGenerator)
+        self.assertNotIsInstance(env.scenario_generator, LegWaveClimatologyScenarioGenerator)
+
+    def test_phase1_leg_wave_mode_uses_leg_wave_weather_when_csv_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "leg_wave.csv"
             with path.open("w", newline="", encoding="utf-8") as handle:
@@ -84,10 +104,153 @@ class Phase1EnvTests(unittest.TestCase):
 
             env = build_phase1_env(
                 config=CCSEnvConfig(episode_hours=3),
+                weather_mode="leg_wave_climatology",
                 leg_wave_csv=path,
             )
 
         self.assertIsInstance(env.scenario_generator, LegWaveClimatologyScenarioGenerator)
+
+    def test_phase1_three_vessel_scenario_uses_leg_wave_weather_when_csv_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "leg_wave.csv"
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "global_record",
+                        "source_file",
+                        "source_record",
+                        "leg_id",
+                        "origin",
+                        "destination",
+                        "speed_factor_p75",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "global_record": 0,
+                        "source_file": "wam10ei_2010.nc",
+                        "source_record": 0,
+                        "leg_id": "brevik->oygarden_terminal",
+                        "origin": "brevik",
+                        "destination": "oygarden_terminal",
+                        "speed_factor_p75": 0.8,
+                    }
+                )
+
+            env = build_phase1_env(
+                scenario="northern_lights_phase1_3vessels",
+                config=CCSEnvConfig(episode_hours=3),
+                weather_mode="leg_wave_climatology",
+                leg_wave_csv=path,
+            )
+
+        self.assertIsInstance(env.scenario_generator, LegWaveClimatologyScenarioGenerator)
+
+    def test_phase1_window_weather_mode_uses_probability_window_generator(self):
+        env = build_phase1_env(
+            config=CCSEnvConfig(episode_hours=3),
+            scenario_config=ScenarioConfig(
+                episode_hours=3,
+                capture_noise_std=0.0,
+                capture_outage_rate_per_week=0.0,
+                weather_window_rate_per_week=168.0,
+                weather_window_mean_hours=1_000.0,
+                weather_window_speed_factor_range=(0.6, 0.6),
+                well_maintenance_rate_per_week=0.0,
+                injectivity_max_decline=0.0,
+                injectivity_noise_std=0.0,
+                randomize_initial_inventory=False,
+            ),
+            weather_mode="window",
+        )
+        scenario = env.scenario_generator.sample(env.network, seed=1)
+
+        self.assertIsInstance(env.scenario_generator, ScenarioGenerator)
+        self.assertNotIsInstance(env.scenario_generator, LegWaveClimatologyScenarioGenerator)
+        self.assertEqual(set(scenario.vessel_speed_factor["northern_pathfinder"]), {0.6})
+
+    def test_weather_observation_uses_window_vessel_speed_when_leg_weather_is_absent(self):
+        env = build_phase1_env(
+            config=CCSEnvConfig(episode_hours=3, include_weather_obs=True),
+            scenario_config=ScenarioConfig(
+                episode_hours=3,
+                capture_noise_std=0.0,
+                capture_outage_rate_per_week=0.0,
+                weather_window_rate_per_week=168.0,
+                weather_window_mean_hours=1_000.0,
+                weather_window_speed_factor_range=(0.6, 0.6),
+                well_maintenance_rate_per_week=0.0,
+                injectivity_max_decline=0.0,
+                injectivity_noise_std=0.0,
+                randomize_initial_inventory=False,
+            ),
+            weather_mode="window",
+        )
+
+        obs = env.reset(seed=1)
+        weather_values = env._weather_observation_for_vessel("northern_pathfinder")
+        current_speed_values = weather_values[0::6]
+
+        self.assertEqual(len(obs), env.observation_size)
+        self.assertEqual(len(obs), len(env.feature_names))
+        self.assertIn(0.6, current_speed_values)
+
+    def test_phase1_wave_height_mode_uses_netcdf_generator(self):
+        env = build_phase1_env(
+            config=CCSEnvConfig(episode_hours=3),
+            scenario_config=ScenarioConfig(episode_hours=3),
+            weather_mode="wave_height_netcdf",
+            wave_height_reader=FakeWaveReader(),
+        )
+
+        self.assertIsInstance(env.scenario_generator, WaveHeightScenarioGenerator)
+
+    def test_phase1_lstm_forecast_mode_uses_prediction_generator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "predictions.csv"
+            with path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "sample_index",
+                        "vessel_id",
+                        "horizon_index",
+                        "global_record",
+                        "actual",
+                        "predicted",
+                        "error",
+                    ],
+                )
+                writer.writeheader()
+                for vessel_id in (
+                    "northern_pathfinder",
+                    "northern_phoenix",
+                    "northern_pioneer",
+                    "phase1_vessel_04",
+                ):
+                    for horizon_index in range(3):
+                        writer.writerow(
+                            {
+                                "sample_index": 0,
+                                "vessel_id": vessel_id,
+                                "horizon_index": horizon_index,
+                                "global_record": 100 + horizon_index,
+                                "actual": 0.0,
+                                "predicted": 0.0,
+                                "error": 0.0,
+                            }
+                        )
+
+            env = build_phase1_env(
+                config=CCSEnvConfig(episode_hours=3),
+                scenario_config=ScenarioConfig(episode_hours=3),
+                weather_mode="lstm_forecast",
+                lstm_prediction_csv=path,
+            )
+
+        self.assertIsInstance(env.scenario_generator, LSTMWaveHeightScenarioGenerator)
 
     def test_warm_start_reservoir_inventory_is_capped_at_half_pressure_capacity(self):
         env = build_phase1_env(

@@ -77,7 +77,7 @@ env = make_phase1_env()
 scenario_generator = LSTMWaveHeightScenarioGenerator.from_env(
     env,
     "output/wave_height/wave_height_lstm_2014_rolling24_predictions.csv",
-    config=ScenarioConfig(episode_hours=168, enable_weather=False),
+    config=ScenarioConfig(episode_hours=168),
 )
 env.scenario_generator = scenario_generator
 ```
