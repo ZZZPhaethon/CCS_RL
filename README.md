@@ -9,33 +9,10 @@ A Physical Simulation, Optimization Control, and Reinforcement Learning Playgrou
 </p>
 
 <p align="center">
-  <a href="https://github.com/ZZZPhaethon/CCS_RLLLM">
-    <img src="https://img.shields.io/badge/Project-Page-brightgreen?style=flat-square&logo=github" alt="Project Page">
-  </a>
-  <a href="https://github.com/ZZZPhaethon/CCS_RLLLM">
-    <img src="https://img.shields.io/badge/Code-GitHub-black?style=flat-square&logo=github" alt="Code">
-  </a>
-  <a href="#">
-    <img src="https://img.shields.io/badge/Paper-Coming%20Soon-red?style=flat-square&logo=arxiv" alt="Paper">
-  </a>
-  <a href="#">
-    <img src="https://img.shields.io/badge/Demo-Coming%20Soon-blue?style=flat-square" alt="Demo">
-  </a>
-  <a href="#">
-    <img src="https://img.shields.io/badge/Task-CCUS%20Operations-0E76A8?style=flat-square" alt="Task">
-  </a>
-  <a href="#">
-    <img src="https://img.shields.io/badge/Method-RL%20%2B%20MILP%20%2B%20MPC-purple?style=flat-square" alt="Method">
-  </a>
-  <a href="#">
-    <img src="https://img.shields.io/badge/Simulator-Physical%20Layer-success?style=flat-square" alt="Simulator">
-  </a>
-  <a href="#">
-    <img src="https://img.shields.io/badge/Scenario-Northern%20Lights-orange?style=flat-square" alt="Scenario">
-  </a>
-  <a href="./LICENSE">
-    <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="License">
-  </a>
+  <a href=""><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue" alt="Hugging Face Spaces"></a>
+  <a href=""><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
+  <a href=""><img src="https://img.shields.io/badge/arXiv-2512.23273-b31b1b.svg" alt="arXiv"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="AGPL 3.0"></a>
 </p>
 
 <h3 align="center">🎉 First version of CCUS operations optimization 🎉</h3>
