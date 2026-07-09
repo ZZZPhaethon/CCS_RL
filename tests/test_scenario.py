@@ -122,7 +122,11 @@ class ScenarioGeneratorTests(unittest.TestCase):
                 return 0.42
 
         rng = FakeRng()
-        config = ScenarioConfig(capture_noise_std=0.30, capture_outage_rate_per_week=0.0)
+        config = ScenarioConfig(
+            capture_noise_std=0.30,
+            capture_outage_rate_per_week=0.0,
+            capture_high_output_rate_per_week=0.0,
+        )
         series = _capture_availability_series(rng, n_steps=1, dt=1.0, config=config)
         self.assertEqual(series, [0.42])
         self.assertEqual(rng.gauss_args, (1.0, 0.30))
@@ -195,7 +199,9 @@ class ScenarioGeneratorTests(unittest.TestCase):
         config = ScenarioConfig()
         self.assertEqual(config.capture_noise_std, 0.30)
         self.assertEqual(config.capture_outage_mean_hours, 12.0)
+        self.assertEqual(config.capture_high_output_rate_per_week, 0.5)
         self.assertEqual(config.weather_window_rate_per_week, 0.3)
+        self.assertEqual(config.weather_window_speed_factor_range, (0.6, 0.8))
         self.assertEqual(config.well_maintenance_mean_hours, 24.0)
 
     def test_injectivity_disturbance_defaults_to_nominal(self):
