@@ -47,6 +47,13 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertFalse((ROOT / "src" / "sim" / "scenario.py").exists())
         self.assertFalse((ROOT / "src" / "sim" / "disturbances.py").exists())
 
+    def test_residual_rl_has_no_load_shift_entry_points(self):
+        source = (ROOT / "scripts" / "train_residual_rl.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("scenario_generation.load_shift", source)
+        self.assertNotIn("--load-shift", source)
+        self.assertNotIn("args.load_shift", source)
+
     def test_rl_environment_lives_in_environment_package(self):
         environment_dir = ROOT / "src" / "sim" / "environment"
 

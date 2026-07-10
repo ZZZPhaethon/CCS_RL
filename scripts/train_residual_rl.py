@@ -14,7 +14,7 @@ Results are written to output/rl_ppo/residual_*.md/.csv.
 
 Usage (ccs-rlllm-gpu env, from repo root):
     set PYTHONPATH=src
-    python scripts/train_residual_rl.py --timesteps 150000 --load-shift
+    python scripts/train_residual_rl.py --timesteps 150000
 """
 from __future__ import annotations
 
@@ -47,25 +47,11 @@ from sim.metrics import run_episode
 CARBON = 80.0
 
 
-def build_env(scenario, episode_hours, load_shift, outage_rate):
+def build_env(scenario, episode_hours, outage_rate):
     net, _ = build_fixed_scenario_demo(scenario)
     loc = _scenario_locations(_load_fixed_scenario_data(scenario))
     scen_cfg = ScenarioConfig(episode_hours=episode_hours, capture_outage_rate_per_week=outage_rate)
-    if load_shift:
-        try:
-            from sim.scenario_generation.load_shift import (
-                LoadShiftScenarioGenerator, LoadShiftConfig,
-            )
-        except ImportError as exc:  # load_shift was removed as obsolete upstream
-            raise SystemExit(
-                "--load-shift requires sim.scenario_generation.load_shift, which is "
-                "no longer in the repo. Run without --load-shift."
-            ) from exc
-        gen = LoadShiftScenarioGenerator(config=scen_cfg,
-              load_shift=LoadShiftConfig(phase_hours=120, hot_level=1.0, cold_level=0.15, hot_count=2))
-    else:
-        gen = ScenarioGenerator(config=scen_cfg)
-    return CCSEnv(net, loc, scenario_generator=gen,
+    return CCSEnv(net, loc, scenario_generator=ScenarioGenerator(config=scen_cfg),
                   cost_model=CostModel(EconomicParameters(carbon_price_eur_per_t=CARBON)),
                   config=CCSEnvConfig(episode_hours=episode_hours, store_reward_eur_per_t=CARBON,
                                       enforce_full_load_dispatch=False))
@@ -195,7 +181,6 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--scenario", default="northern_lights_phase1_milkrun")
     p.add_argument("--episode-hours", type=int, default=720)
-    p.add_argument("--load-shift", action="store_true", help="rotating capture hot spot")
     p.add_argument("--outage-rate", type=float, default=0.5)
     p.add_argument("--bc-episodes", type=int, default=20)
     p.add_argument("--bc-epochs", type=int, default=15)
@@ -212,7 +197,7 @@ def main():
     from sb3_contrib import MaskablePPO
 
     def env_factory():
-        return build_env(args.scenario, args.episode_hours, args.load_shift, args.outage_rate)
+        return build_env(args.scenario, args.episode_hours, args.outage_rate)
 
     if args.base == "greedy":
         base_factory = lambda e: greedy_shuttle_policy
@@ -238,7 +223,7 @@ def main():
 
     out = Path("output/rl_ppo"); out.mkdir(parents=True, exist_ok=True)
     tag = f"residual_{args.base}base_{args.scenario.replace('northern_lights_','')}"
-    tag += ("_loadshift" if args.load_shift else "") + f"_ts{args.timesteps}"
+    tag += f"_ts{args.timesteps}"
     model.save(str(out / f"{tag}.zip"))
 
     print(f"[{dt.datetime.now():%H:%M:%S}] === EVAL ===", flush=True)
@@ -250,7 +235,7 @@ def main():
     print(f"{'policy':16s} {'storage':>8s} {'vent':>7s} {'cost/t':>8s}")
     md = [f"# Residual RL over cluster base - {tag}", "",
           f"Generated: {dt.datetime.now().isoformat(timespec='seconds')}",
-          f"scenario={args.scenario}, load_shift={args.load_shift}, outage_rate={args.outage_rate}, "
+          f"scenario={args.scenario}, outage_rate={args.outage_rate}, "
           f"episode_hours={args.episode_hours}, timesteps={args.timesteps}", "",
           "| policy | storage | vent | cost/t |", "|---|---|---|---|"]
     for name, sr, lo, cpt in rows:
