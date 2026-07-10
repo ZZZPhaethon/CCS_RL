@@ -37,7 +37,6 @@ from sim.environment.env import CCSEnv, CCSEnvConfig
 from sim.environment.factories import _scenario_locations
 from sim.environment.gym_adapter import flat_action_mask
 from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
-from sim.scenario_generation.load_shift import LoadShiftScenarioGenerator, LoadShiftConfig
 from sim.economics import CostModel, EconomicParameters
 from sim.control.baselines import (
     greedy_shuttle_policy, make_cluster_shuttle_policy, balanced_capture_assignment,
@@ -53,6 +52,15 @@ def build_env(scenario, episode_hours, load_shift, outage_rate):
     loc = _scenario_locations(_load_fixed_scenario_data(scenario))
     scen_cfg = ScenarioConfig(episode_hours=episode_hours, capture_outage_rate_per_week=outage_rate)
     if load_shift:
+        try:
+            from sim.scenario_generation.load_shift import (
+                LoadShiftScenarioGenerator, LoadShiftConfig,
+            )
+        except ImportError as exc:  # load_shift was removed as obsolete upstream
+            raise SystemExit(
+                "--load-shift requires sim.scenario_generation.load_shift, which is "
+                "no longer in the repo. Run without --load-shift."
+            ) from exc
         gen = LoadShiftScenarioGenerator(config=scen_cfg,
               load_shift=LoadShiftConfig(phase_hours=120, hot_level=1.0, cold_level=0.15, hot_count=2))
     else:
