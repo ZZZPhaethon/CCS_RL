@@ -173,6 +173,22 @@ class Phase1EnvTests(unittest.TestCase):
         self.assertNotIsInstance(env.scenario_generator, LegWaveClimatologyScenarioGenerator)
         self.assertEqual(set(scenario.vessel_speed_factor["northern_pathfinder"]), {0.6})
 
+    def test_phase1_block_weather_mode_uses_configured_update_interval(self):
+        env = build_phase1_env(
+            config=CCSEnvConfig(episode_hours=48),
+            scenario_config=ScenarioConfig(
+                episode_hours=48,
+                weather_update_hours=24.0,
+                weather_update_speed_factor_range=(0.6, 0.6),
+            ),
+            weather_mode="block",
+        )
+
+        scenario = env.scenario_generator.sample(env.network, seed=1)
+
+        self.assertEqual(env.config.weather_observation_layout, "global")
+        self.assertEqual(set(scenario.vessel_speed_factor["northern_pathfinder"]), {0.6})
+
     def test_weather_observation_uses_window_vessel_speed_when_leg_weather_is_absent(self):
         env = build_phase1_env(
             scenario="northern_lights_phase1_3vessels",

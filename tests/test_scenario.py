@@ -179,6 +179,23 @@ class ScenarioGeneratorTests(unittest.TestCase):
         self.assertEqual(min(speeds), 0.6)
         self.assertTrue(all(0.6 <= value <= 1.0 for value in speeds))
 
+    def test_block_weather_is_shared_and_constant_within_each_update_interval(self):
+        network = _network()
+        network.add_entity(Vessel("ship_2", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
+        config = _quiet_config(
+            episode_hours=72,
+            weather_process="block",
+            weather_update_hours=24,
+            weather_update_speed_factor_range=(0.75, 0.95),
+        )
+
+        scenario = ScenarioGenerator(config=config, seed=14).sample(network)
+
+        speeds = scenario.vessel_speed_factor["ship_1"]
+        self.assertEqual(speeds, scenario.vessel_speed_factor["ship_2"])
+        self.assertTrue(all(len(set(speeds[start:start + 24])) == 1 for start in range(0, 72, 24)))
+        self.assertGreater(len({speeds[0], speeds[24], speeds[48]}), 1)
+
     def test_randomized_initial_inventory_respects_capacity_fractions(self):
         network = _network()
         config = ScenarioConfig(

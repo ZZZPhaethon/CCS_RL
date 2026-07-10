@@ -23,7 +23,7 @@ from ..scenario_generation import ScenarioConfig, ScenarioGenerator
 from .env import CCSEnv, CCSEnvConfig
 
 Coordinate = tuple[float, float]
-WeatherMode = Literal["window", "leg_wave_climatology", "wave_height_netcdf", "lstm_forecast"]
+WeatherMode = Literal["window", "block", "leg_wave_climatology", "wave_height_netcdf", "lstm_forecast"]
 DEFAULT_PHASE1_LEG_WAVE_CSV = Path("output/wave_height/phase1_leg_wave_2010_2014.csv")
 
 
@@ -51,8 +51,8 @@ def build_phase1_env(
 
     ``scenario`` selects any id in the fixed-scenario registry (e.g. the milk-run
     variants). ``weather_mode`` chooses one of the supported weather sources:
-    probability windows, leg-wave climatology, wave-height NetCDF, or LSTM
-    forecast CSV.
+    probability windows, fixed-interval global blocks, leg-wave climatology,
+    wave-height NetCDF, or LSTM forecast CSV.
     """
     if scenario == "northern_lights_phase1":
         network, _state = build_northern_lights_phase1_demo()
@@ -60,7 +60,7 @@ def build_phase1_env(
     else:
         network, _state = build_fixed_scenario_demo(scenario)
         locations = _scenario_locations(_load_fixed_scenario_data(scenario))
-    weather_observation_layout = "global" if weather_mode == "window" else "leg"
+    weather_observation_layout = "global" if weather_mode in {"window", "block"} else "leg"
     env_config = replace(
         config or CCSEnvConfig(),
         weather_observation_layout=weather_observation_layout,
@@ -107,6 +107,8 @@ def _default_phase1_scenario_generator(
     )
     if weather_mode == "window":
         return ScenarioGenerator(config=effective_scenario_config)
+    if weather_mode == "block":
+        return ScenarioGenerator(config=replace(effective_scenario_config, weather_process="block"))
     if weather_mode == "leg_wave_climatology":
         if not path.exists():
             raise FileNotFoundError(f"Leg-wave climatology CSV not found: {path}")

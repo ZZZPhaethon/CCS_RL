@@ -37,10 +37,14 @@ class ScenarioConfig:
     capture_high_output_mean_hours: float = 48.0
     capture_high_output_multiplier_range: tuple[float, float] = (1.25, 1.75)
 
-    # Probability-window weather -> vessel speed.
+    # Global weather -> vessel speed. ``window`` samples occasional slowdown
+    # windows; ``block`` re-samples one shared factor every fixed interval.
+    weather_process: str = "window"
     weather_window_rate_per_week: float = 0.3
     weather_window_mean_hours: float = 48.0
     weather_window_speed_factor_range: tuple[float, float] = (0.6, 0.8)
+    weather_update_hours: float = 24.0
+    weather_update_speed_factor_range: tuple[float, float] = (0.75, 1.0)
 
     # Data-driven leg-wave slowdown stress. A multiplier of 1.0 leaves the CSV
     # speed factors unchanged; values above 1.0 amplify rough-weather slowdown.
@@ -251,6 +255,10 @@ def _capture_availability_series(rng, n_steps: int, dt: float, config: ScenarioC
 
 
 def _weather_speed_series(rng, n_steps: int, config: ScenarioConfig) -> list[float]:
+    if config.weather_process == "block":
+        return _weather_update_speed_series(rng, n_steps, config)
+    if config.weather_process != "window":
+        raise ValueError(f"Unknown weather_process: {config.weather_process!r}")
     window = _factor_window_series(
         rng,
         n_steps,
@@ -261,6 +269,16 @@ def _weather_speed_series(rng, n_steps: int, config: ScenarioConfig) -> list[flo
         inactive_value=1.0,
     )
     return [min(1.0, max(0.0, speed_factor)) for speed_factor in window]
+
+
+def _weather_update_speed_series(rng, n_steps: int, config: ScenarioConfig) -> list[float]:
+    update_steps = max(1, int(round(config.weather_update_hours / config.time_step_hours)))
+    lo, hi = config.weather_update_speed_factor_range
+    series: list[float] = []
+    for start in range(0, n_steps, update_steps):
+        speed_factor = min(1.0, max(0.0, rng.uniform(lo, hi)))
+        series.extend([speed_factor] * min(update_steps, n_steps - start))
+    return series
 
 
 def _factor_window_series(
