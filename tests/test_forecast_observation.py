@@ -13,7 +13,6 @@ from sim.train import make_native_env
 def _env(hours=2):
     return make_native_env(
         episode_hours=hours,
-        scenario_context_hours=168,
         scenario="northern_lights_phase1_3vessels",
         weather_mode="block",
         include_weather_obs=False,
@@ -54,7 +53,16 @@ def test_current_state_has_current_weather_but_no_future_summaries():
 
 
 def test_last_rl_step_still_has_full_forecast_context():
-    env = _env(hours=2)
+    env = _env(hours=720)
     env.reset(seed=7)
-    env.step({"vessels": [0] * len(env.vessel_ids), "wells": [0] * len(env.well_ids)})
-    assert np.asarray(future_forecast_observation(env)).shape == (168, 9)
+    idle = {"vessels": [0] * len(env.vessel_ids), "wells": [0] * len(env.well_ids)}
+    for _ in range(719):
+        _observation, _reward, terminated, truncated, _info = env.step(idle)
+        assert not terminated
+        assert not truncated
+
+    forecast = np.asarray(future_forecast_observation(env))
+    vessel_id = env.vessel_ids[0]
+    assert forecast.shape == (168, 9)
+    assert forecast[0, 8] == env.scenario.vessel_speed_factor[vessel_id][720]
+    assert forecast[-1, 8] == env.scenario.vessel_speed_factor[vessel_id][887]

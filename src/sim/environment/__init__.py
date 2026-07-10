@@ -1,5 +1,7 @@
 """RL environment package for CCS training and evaluation."""
 
+from importlib import import_module
+
 from .env import (
     CCSEnv,
     CCSEnvConfig,
@@ -24,10 +26,28 @@ from .forecast import (
     future_forecast_observation,
 )
 
+_FORECAST_GYM_EXPORTS = frozenset(
+    {
+        "ForecastGymEnv",
+        "forecast_policy_observation",
+        "make_forecast_ppo_policy",
+    }
+)
+
+
+def __getattr__(name: str):
+    if name in _FORECAST_GYM_EXPORTS:
+        module = import_module(".forecast_gym", __name__)
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 __all__ = [
     "CCSEnv",
     "CCSEnvConfig",
     "FORECAST_HORIZON_H",
+    "ForecastGymEnv",
     "MAX_WELL_RATE_INDEX",
     "MAX_WELL_RATE_MTPA",
     "MIN_WELL_RATE_INDEX",
@@ -43,5 +63,7 @@ __all__ = [
     "current_state_feature_names",
     "current_state_observation",
     "forecast_channel_names",
+    "forecast_policy_observation",
     "future_forecast_observation",
+    "make_forecast_ppo_policy",
 ]

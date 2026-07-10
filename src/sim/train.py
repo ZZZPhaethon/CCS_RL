@@ -47,7 +47,7 @@ def make_native_env(
     weather_window_rate_per_week: float = 1.0,
     wave_height_nc_paths: str | Path | list[str | Path] | None = None,
     lstm_prediction_csv: str | Path | None = None,
-    scenario_context_hours: int = 0,
+    scenario_context_hours: int = 169,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
@@ -58,6 +58,8 @@ def make_native_env(
     otherwise rewards idling until the delayed venting penalty kicks in.
     ``include_weather_obs`` exposes weather speed factors + seasonality in the
     observation so the policy can react to rough weather.
+    ``scenario_context_hours`` defaults to 169 so a terminal observation after
+    a 720-hour episode still has a complete 168-hour continuation forecast.
     ``carbon_price_eur_per_t`` is the single, economically-faithful knob: it sets
     both the venting carbon tax and (by default) the stored-CO2 credit to the
     same value, so storing and avoiding a vent are worth the same (symmetric).

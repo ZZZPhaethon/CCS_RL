@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Scenario is `northern_lights_phase1_3vessels` with its registered 15,000 t Yara buffer.
-- RL episodes are 720 h; sampled disturbance trajectories are 888 h so hour 719 still exposes `t+1..t+168`.
+- RL episodes are 720 h; sampled disturbance trajectories are 889 h so hour 719 and the hour-720 timeout observation both expose `t+1..t+168`.
 - Forecast shape is exactly `[168, 9]`: 3 capture, 3 emitter availability, 1 well availability, 1 injectivity, 1 global weather channel.
 - Global weather uses 24 h block updates and occupies forecast channel index 8.
 - All variants use `vent_first`, partial-load dispatch, the same demonstrations, BC settings, kickstarting schedule, PPO hyperparameters, and paired seeds.
@@ -51,7 +51,7 @@
 
 **Interfaces:**
 - Produces: `FORECAST_HORIZON_H`, `forecast_channel_names(env)`, `current_state_feature_names(env)`, `current_state_observation(env)`, and `future_forecast_observation(env, horizon_h=168)`.
-- Produces: `make_native_env(..., scenario_context_hours=0)` so a 720 h RL environment may sample an 888 h scenario.
+- Produces: `make_native_env(..., scenario_context_hours=169)` so a 720 h RL environment samples an 889 h scenario by default.
 - Consumes: `CCSEnv.scenario`, current simulator time, entity definitions, and existing global weather helpers.
 
 - [ ] **Step 1: Write failing forecast shape and timing tests**
@@ -71,7 +71,7 @@ from sim.train import make_native_env
 def _env(hours=2):
     return make_native_env(
         episode_hours=hours,
-        scenario_context_hours=168,
+        scenario_context_hours=169,
         scenario="northern_lights_phase1_3vessels",
         weather_mode="block",
         include_weather_obs=False,
@@ -214,7 +214,7 @@ def future_forecast_observation(
 
 - [ ] **Step 5: Separate episode length from scenario context**
 
-Add `scenario_context_hours: int = 0` to `make_native_env` in `src/sim/train.py` and change only the scenario generator horizon:
+Add `scenario_context_hours: int = 169` to `make_native_env` in `src/sim/train.py` and change only the scenario generator horizon:
 
 ```python
 scenario_config=ScenarioConfig(
@@ -230,7 +230,7 @@ scenario_config=ScenarioConfig(
 )
 ```
 
-Add a `tests/test_train.py` assertion that `CCSEnvConfig.episode_hours == 720` while `ScenarioConfig.episode_hours == 888` when context is 168.
+Add a `tests/test_train.py` assertion that `CCSEnvConfig.episode_hours == 720` while `ScenarioConfig.episode_hours == 889` when context is 169.
 
 - [ ] **Step 6: Export the forecast functions and run targeted tests**
 
@@ -274,7 +274,7 @@ from sim.train import make_native_env
 def _native():
     return make_native_env(
         episode_hours=2,
-        scenario_context_hours=168,
+        scenario_context_hours=169,
         scenario="northern_lights_phase1_3vessels",
         weather_mode="block",
     )
@@ -312,7 +312,11 @@ import numpy as np
 from gymnasium import Env, spaces
 
 from .env import CCSEnv
-from .forecast import current_state_observation, future_forecast_observation
+from .forecast import (
+    current_state_feature_names,
+    current_state_observation,
+    future_forecast_observation,
+)
 from .gym_adapter import flat_action_mask, native_action_from_flat
 
 ObservationVariant = Literal["state", "flat", "tcn"]
@@ -322,16 +326,29 @@ def forecast_policy_observation(
     env: CCSEnv,
     variant: ObservationVariant,
     *,
-    terminal: bool = False,
+    timeout: bool = False,
 ):
     state = np.asarray(current_state_observation(env), dtype=np.float32)
+    if timeout:
+        index = env.scenario.step_index(env.simulator.state.time_h)
+        feature_index = {
+            name: position
+            for position, name in enumerate(current_state_feature_names(env))
+        }
+        for emitter_id in env.emitter_ids:
+            state[feature_index[f"{emitter_id}.availability"]] = (
+                env.scenario.emitter_availability[emitter_id][index]
+            )
+        for well_id in env.well_ids:
+            state[feature_index[f"{well_id}.available"]] = float(
+                env.scenario.well_available[well_id][index]
+            )
+            state[feature_index[f"{well_id}.injectivity"]] = (
+                env.scenario.injectivity_factor[well_id][index]
+            )
     if variant == "state":
         return state
-    forecast = (
-        np.zeros((168, 9), dtype=np.float32)
-        if terminal
-        else np.asarray(future_forecast_observation(env), dtype=np.float32)
-    )
+    forecast = np.asarray(future_forecast_observation(env), dtype=np.float32)
     if variant == "flat":
         return np.concatenate((state, forecast.reshape(-1))).astype(np.float32)
     if variant == "tcn":
@@ -349,9 +366,7 @@ class ForecastGymEnv(Env):
         self.action_space = spaces.MultiDiscrete(
             env.vessel_action_dims + env.well_rate_action_dims
         )
-        state_size = len(env.feature_names) + 1 + len(env.vessel_ids) * (
-            len(env.terminal_ids) + len(env.emitter_ids)
-        )
+        state_size = len(current_state_feature_names(env))
         if variant == "state":
             self.observation_space = spaces.Box(-10.0, 10.0, (state_size,), np.float32)
         elif variant == "flat":
@@ -380,7 +395,7 @@ class ForecastGymEnv(Env):
             forecast_policy_observation(
                 self.env,
                 self.variant,
-                terminal=terminated or truncated,
+                timeout=truncated,
             ),
             float(reward), terminated, truncated, info,
         )
@@ -407,7 +422,7 @@ def make_forecast_ppo_policy(model, variant: ObservationVariant, deterministic=F
     return policy
 ```
 
-Add a test that executes the two-hour environment through truncation and verifies the returned terminal observation retains the mode's declared shape. The terminal forecast is zero-filled because it is never used for another action; the pre-action observation at hour 719 still contains the complete real `t+1..t+168` forecast. Export the interfaces, then run:
+Add a test that executes the two-hour environment through truncation and verifies the returned terminal observation retains the mode's declared shape and real `t+1..t+168` forecast. SB3 uses this observation for timeout bootstrapping, so keep `truncated=True` and test it through `DummyVecEnv`. Also force an availability/injectivity transition at the timeout and verify the terminal current-state fields use that hour's values without mutating the ended native environment. The pre-action observation at hour 719 also contains the complete real forecast. Export the optional-RL interfaces lazily so importing the core package does not require NumPy/Gymnasium, then run:
 
 `pytest -q tests/test_forecast_gym.py tests/test_gym_env.py`
 
@@ -446,7 +461,7 @@ from sim.train import make_native_env
 def test_tcn_encoder_maps_structured_forecast_to_128_features():
     native = make_native_env(
         episode_hours=2,
-        scenario_context_hours=168,
+        scenario_context_hours=169,
         scenario="northern_lights_phase1_3vessels",
         weather_mode="block",
     )
@@ -695,7 +710,7 @@ def collect_mpc_demonstrations(env_factory, seeds, episode_hours=720):
     )
 ```
 
-The environment factory must return a fresh 888 h demonstration environment and expose deterministic schema metadata through `metadata()`.
+The environment factory must return a fresh 889 h demonstration environment and expose deterministic schema metadata through `metadata()`.
 
 - [ ] **Step 5: Run cache and short-episode collection tests**
 
@@ -864,8 +879,8 @@ Expected: FAIL because the script does not exist.
 
 ```python
 def make_experiment_env(args, *, demonstration=False):
-    episode_hours = args.episode_hours + args.forecast_horizon_h if demonstration else args.episode_hours
-    context_hours = 0 if demonstration else args.forecast_horizon_h
+    episode_hours = args.episode_hours + args.forecast_horizon_h + 1 if demonstration else args.episode_hours
+    context_hours = 0 if demonstration else args.forecast_horizon_h + 1
     return make_native_env(
         episode_hours=episode_hours,
         scenario_context_hours=context_hours,
@@ -1249,6 +1264,6 @@ If verification required code changes, stage only the files directly involved an
 
 ## Plan Self-Review
 
-- Spec coverage: forecast schema, weather channel, 888/720 boundary handling, three variants, shared MPC cache, structured imitation, fixed reward, paired evaluation, HPC separation, and failure handling all map to explicit tasks.
+- Spec coverage: forecast schema, weather channel, 889/720 boundary handling, three variants, shared MPC cache, structured imitation, fixed reward, paired evaluation, HPC separation, and failure handling all map to explicit tasks.
 - Completeness scan: every implementation step names concrete APIs, files, commands, expected results, and failure behaviour.
 - Type consistency: forecast is time-major NumPy `[N, 168, 9]`, structured Gym observation is `{"state", "forecast"}`, PyTorch TCN input is transposed to `[N, 9, 168]`, and all three variants consume the same cached actions/masks.

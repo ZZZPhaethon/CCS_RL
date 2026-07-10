@@ -67,15 +67,17 @@ Emitter capture 使用对应 emitter 的最大生产率归一化。即使 outage
 
 ## Episode 尾部处理
 
-720 h rollout 在第 719 h 仍需要完整的未来 168 h forecast。因此 scenario generator 应生成 888 h 的 disturbance，但 RL 环境仍在 720 h 截断：
+720 h rollout 在第 719 h 仍需要完整的未来 168 h forecast，同时 SB3 的 timeout bootstrap 还需要第 720 h 的 terminal observation 包含同样完整的 forecast。因此 scenario generator 应生成 889 h 的 disturbance，但 RL 环境仍在 720 h 截断：
 
 ```text
-720 h RL episode + 168 h forecast context = 888 h scenario trajectory
+720 h RL episode + 169 h forecast/bootstrap context = 889 h scenario trajectory
 ```
 
-MPC demonstration 环境运行时拥有 888 h trajectory，但每个 episode 只收集前 720 个 state-action pairs。这样每个被收集的 MPC 决策都拥有完整的 168 h lookahead。
+MPC demonstration 环境运行时拥有 889 h trajectory，但每个 episode 只收集前 720 个 state-action pairs。这样每个被收集的 MPC 决策以及 RL terminal observation 都拥有完整的 168 h lookahead。
 
-RL 环境仍在 720 h 截断，但从相同的 888 h trajectory 中读取未来 forecast。额外的 168 h 只作为预测上下文，不计入 episode KPI，也不计入 PPO timesteps。
+RL 环境仍在 720 h 截断，但从相同的 889 h trajectory 中读取未来 forecast。额外的 169 h 只作为预测与 timeout-bootstrap 上下文，不计入 episode KPI，也不计入 PPO timesteps。
+
+Timeout observation 必须是真实的第 720 h 状态：当前 emitter availability、well availability 和 injectivity 从第 720 h scenario 非破坏性读取，future forecast 则从第 721 h 开始。
 
 这样可以避免 MPC 在 episode 后 168 h 内预测时域逐渐从 168 h 缩短到 1 h，也不需要通过重复最后一个值或补零制造虚假 forecast。
 

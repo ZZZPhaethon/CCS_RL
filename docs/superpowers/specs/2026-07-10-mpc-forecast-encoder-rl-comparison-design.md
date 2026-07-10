@@ -63,9 +63,11 @@ All values must be finite and have stable channel order. The forecast metadata r
 
 ## Episode-Tail Handling
 
-A 720 h rollout still needs a full 168 h forecast at hour 719. Scenario generation therefore produces 888 h of disturbances while the RL environment truncates after 720 h.
+A 720 h rollout still needs a full 168 h forecast at hour 719, and SB3 timeout bootstrapping needs the same full forecast in the terminal observation at hour 720. Scenario generation therefore produces 889 h of disturbances while the RL environment truncates after 720 h.
 
-MPC demonstration environments run for 888 h, but only their first 720 state-action pairs are collected. Consequently, every collected MPC decision has a full 168 h lookahead. RL environments truncate at 720 h while reading their forecast from the same 888 h sampled trajectory. The extra 168 h is forecast context only and is excluded from episode KPIs and PPO timesteps.
+MPC demonstration environments run for 889 h, but only their first 720 state-action pairs are collected. Consequently, every collected MPC decision and the RL terminal observation have a full 168 h lookahead. RL environments truncate at 720 h while reading their forecast from the same 889 h sampled trajectory. The extra 169 h is forecast and timeout-bootstrap context only and is excluded from episode KPIs and PPO timesteps.
+
+The timeout observation is a genuine hour-720 state: its current emitter availability, well availability, and injectivity come from the hour-720 scenario without mutating the ended native environment, and its future forecast starts at hour 721.
 
 This separation prevents the MPC horizon from shrinking near the artificial episode boundary and avoids padding the forecast with fabricated values.
 

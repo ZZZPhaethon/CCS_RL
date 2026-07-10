@@ -121,10 +121,10 @@ class TrainPPOTests(unittest.TestCase):
             return object()
 
         with patch.object(train, "build_phase1_env", side_effect=fake_build_phase1_env):
-            train.make_native_env(episode_hours=720, scenario_context_hours=168)
+            train.make_native_env(episode_hours=720, scenario_context_hours=169)
 
         self.assertEqual(captured["config"].episode_hours, 720)
-        self.assertEqual(captured["scenario_config"].episode_hours, 888)
+        self.assertEqual(captured["scenario_config"].episode_hours, 889)
 
     def test_make_native_env_preserves_existing_positional_argument_order(self):
         from sim import train
@@ -139,7 +139,7 @@ class TrainPPOTests(unittest.TestCase):
             train.make_native_env(720, 0.95)
 
         self.assertEqual(captured["config"].storage_target_rate, 0.95)
-        self.assertEqual(captured["scenario_config"].episode_hours, 720)
+        self.assertEqual(captured["scenario_config"].episode_hours, 889)
 
 
 if __name__ == "__main__":
