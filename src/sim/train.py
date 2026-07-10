@@ -23,6 +23,7 @@ from .scenario_generation import ScenarioConfig
 
 def make_native_env(
     episode_hours: int = 168,
+    scenario_context_hours: int = 0,
     storage_target_rate: float = 0.9,
     warm_start: bool = True,
     storage_shortfall_penalty: float = 0.0,
@@ -89,7 +90,7 @@ def make_native_env(
             include_goal_obs=include_goal_obs,
         ),
         scenario_config=ScenarioConfig(
-            episode_hours=episode_hours,
+            episode_hours=episode_hours + scenario_context_hours,
             warm_start=warm_start,
             capture_noise_std=capture_noise_std,
             emitter_initial_fill_range=(0.0, initial_inventory_fill_max),

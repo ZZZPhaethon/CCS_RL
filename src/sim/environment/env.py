@@ -697,20 +697,34 @@ class CCSEnv:
         slots.extend((f"to_{emitter_id}", emitter_id) for emitter_id in self.emitter_ids)
         return slots
 
-    def _global_weather_observation(self) -> list[float]:
+    def _global_current_weather_feature_names(self) -> list[str]:
+        names = ["weather.speed_now"]
+        for vessel_id in self.vessel_ids:
+            names += [
+                f"{vessel_id}.{label}.travel_hours_now"
+                for label, _destination_id in self._weather_destination_slots()
+            ]
+        return names
+
+    def _global_current_weather_observation(self) -> list[float]:
         vessel_id = self.vessel_ids[0]
         now = self._weather_speed_at("", vessel_id, 0)
-        mean24, min24 = self._weather_speed_forecast("", vessel_id, 24)
-        mean168, min168 = self._weather_speed_forecast("", vessel_id, 168)
-        values = [now, mean24, min24, mean168, min168]
-        for vid in self.vessel_ids:
-            route = self._routes[vid]
-            origin_id = self._weather_reference_origin(vid)
+        values = [now]
+        for current_vessel_id in self.vessel_ids:
+            route = self._routes[current_vessel_id]
+            origin_id = self._weather_reference_origin(current_vessel_id)
             for _label, destination_id in self._weather_destination_slots():
                 values.append(
                     self._normalized_travel_hours(origin_id, destination_id, route, now)
                 )
         return values
+
+    def _global_weather_observation(self) -> list[float]:
+        vessel_id = self.vessel_ids[0]
+        mean24, min24 = self._weather_speed_forecast("", vessel_id, 24)
+        mean168, min168 = self._weather_speed_forecast("", vessel_id, 168)
+        current = self._global_current_weather_observation()
+        return [current[0], mean24, min24, mean168, min168, *current[1:]]
 
     def _weather_observation_for_vessel(self, vessel_id: str) -> list[float]:
         route = self._routes[vessel_id]

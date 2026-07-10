@@ -111,6 +111,21 @@ class TrainPPOTests(unittest.TestCase):
         self.assertEqual(scenario_config.leg_wave_slowdown_multiplier, 2.0)
         self.assertEqual(scenario_config.leg_wave_speed_factor_floor, 0.25)
 
+    def test_make_native_env_separates_episode_length_from_scenario_context(self):
+        from sim import train
+
+        captured = {}
+
+        def fake_build_phase1_env(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        with patch.object(train, "build_phase1_env", side_effect=fake_build_phase1_env):
+            train.make_native_env(episode_hours=720, scenario_context_hours=168)
+
+        self.assertEqual(captured["config"].episode_hours, 720)
+        self.assertEqual(captured["scenario_config"].episode_hours, 888)
+
 
 if __name__ == "__main__":
     unittest.main()

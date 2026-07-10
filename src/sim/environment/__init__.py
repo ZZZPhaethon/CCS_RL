@@ -16,10 +16,18 @@ from .env import (
     WELL_RATE_LEVELS_MTPA,
 )
 from .factories import build_phase1_env
+from .forecast import (
+    FORECAST_HORIZON_H,
+    current_state_feature_names,
+    current_state_observation,
+    forecast_channel_names,
+    future_forecast_observation,
+)
 
 __all__ = [
     "CCSEnv",
     "CCSEnvConfig",
+    "FORECAST_HORIZON_H",
     "MAX_WELL_RATE_INDEX",
     "MAX_WELL_RATE_MTPA",
     "MIN_WELL_RATE_INDEX",
@@ -32,4 +40,8 @@ __all__ = [
     "WELL_RATE_BOUNDS_MTPA",
     "WELL_RATE_LEVELS_MTPA",
     "build_phase1_env",
+    "current_state_feature_names",
+    "current_state_observation",
+    "forecast_channel_names",
+    "future_forecast_observation",
 ]
