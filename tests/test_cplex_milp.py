@@ -113,6 +113,13 @@ class CplexMilpInterfaceTests(unittest.TestCase):
         self.assertNotIn("change problem fixed", actual_solve_source)
 
     @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_cplex_solver_ignores_parallel_default_log_cleanup_lock(self):
+        cmd = cplex_milp._make_cplex_cmd(msg=False)
+
+        with patch.object(cmd, "delete_tmp_files", side_effect=PermissionError("locked")):
+            cmd._delete_default_log()
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
     def test_status_label_distinguishes_time_limit_feasible_from_optimal(self):
         label = cplex_milp._solution_status_label(
             cplex_milp.pulp.constants.LpStatusOptimal,

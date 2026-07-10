@@ -1,4 +1,6 @@
+import copy
 import unittest
+from dataclasses import replace
 
 from sim.control import trip_milp
 from sim.economics import EconomicParameters
@@ -99,17 +101,6 @@ class TripMilpTests(unittest.TestCase):
         )
         env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
         options = trip_milp._executable_trip_options(env, env.scenario, start_step=0, horizon_h=5)
-        choose = {i: trip_milp.pulp.LpVariable(f"trip_{i}", cat="Binary") for i in range(len(options))}
-        well_rate_options = trip_milp._well_rate_options_by_hour(env, env.scenario, horizon_h=5)
-        well_choice = {
-            (well_id, t, rate_index): trip_milp.pulp.LpVariable(
-                f"well_{well_id}_{t}_{rate_index}",
-                cat="Binary",
-            )
-            for well_id in env.well_ids
-            for t in range(5)
-            for rate_index in well_rate_options[(well_id, t)]
-        }
         native_actions = [
             {"vessels": [VESSEL_WAIT], "wells": [0]},
             {"vessels": [VESSEL_GO_TERMINAL], "wells": [1]},
@@ -118,24 +109,16 @@ class TripMilpTests(unittest.TestCase):
             {"vessels": [VESSEL_WAIT], "wells": [0]},
         ]
 
-        selected = trip_milp._apply_executable_trip_mip_start(
+        augmented, selected_indices = trip_milp._augment_options_with_native_warm_start(
             env,
             env.scenario,
             start_step=0,
             horizon_h=5,
             options=options,
-            choose=choose,
-            well_rate_options=well_rate_options,
-            well_choice=well_choice,
             native_actions_by_hour=native_actions,
         )
 
-        self.assertGreaterEqual(selected, 1)
-        matched = [
-            option
-            for i, option in enumerate(options)
-            if choose[i].varValue == 1
-        ]
+        matched = [augmented[index] for index in selected_indices]
         self.assertEqual(len(matched), 1)
         self.assertEqual(matched[0].emitter_id, "source")
         self.assertEqual(matched[0].load_start_h, 0)
@@ -219,6 +202,371 @@ class TripMilpTests(unittest.TestCase):
 
         self.assertEqual(len(augmented), 1)
         self.assertAlmostEqual(augmented[0].amount_t, 200.0)
+
+    def test_native_warm_start_keeps_replayed_amount_when_standard_option_has_same_times(self):
+        env = _no_capture_env(cap_hours=5)
+        _add_route_coordinates(env)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 200.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=5,
+            emitter_availability={"source": [0.0] * 5},
+            vessel_speed_factor={"ship": [1.0] * 5},
+            well_available={"well": [True] * 5},
+            injectivity_factor={"well": [1.0] * 5},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+        native_actions = [
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+            {"vessels": [VESSEL_GO_TERMINAL], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+        ]
+
+        standard = trip_milp._executable_trip_options(env, env.scenario, start_step=0, horizon_h=5)
+        augmented = trip_milp._options_with_native_warm_start(
+            env,
+            env.scenario,
+            start_step=0,
+            horizon_h=5,
+            options=standard,
+            native_actions_by_hour=native_actions,
+        )
+
+        matching = [
+            option
+            for option in augmented
+            if option.vessel_id == "ship"
+            and option.emitter_id == "source"
+            and option.load_start_h == 0
+            and option.depart_h == 1
+        ]
+        self.assertTrue(any(abs(option.amount_t - 200.0) <= 1e-9 for option in matching))
+
+    def test_native_warm_start_uses_replayed_terminal_limited_unload_profile(self):
+        env = _no_capture_env(cap_hours=6)
+        _add_route_coordinates(env)
+        env.reset(seed=1)
+        env.network.entities["terminal"] = replace(
+            env.network.entities["terminal"],
+            storage_capacity_t=200.0,
+        )
+        env.simulator.state.entity_inventory_t["source"] = 500.0
+        env.simulator.state.entity_inventory_t["terminal"] = 200.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=6,
+            emitter_availability={"source": [0.0] * 6},
+            vessel_speed_factor={"ship": [1.0] * 6},
+            well_available={"well": [True] * 6},
+            injectivity_factor={"well": [1.0] * 6},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+        native_actions = [
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+            {"vessels": [VESSEL_GO_TERMINAL], "wells": [0]},
+            {"vessels": [VESSEL_WAIT], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+        ]
+        replay_env = copy.deepcopy(env)
+        actual_unload = []
+        for action in native_actions:
+            before_berth = replay_env.simulator.state.vessel_berths.get("ship")
+            before_cargo = replay_env.simulator.state.entity_inventory_t.get("ship", 0.0)
+            replay_env.step(action)
+            if before_berth == "terminal":
+                after_cargo = replay_env.simulator.state.entity_inventory_t.get("ship", 0.0)
+                actual_unload.append(max(0.0, before_cargo - after_cargo))
+
+        options = trip_milp._native_action_trip_options_from_replay(
+            env,
+            env.scenario,
+            start_step=0,
+            horizon_h=6,
+            native_actions_by_hour=native_actions,
+        )
+
+        self.assertEqual(len(options), 1)
+        self.assertEqual(options[0].unload_profile_t, tuple(actual_unload))
+
+    def test_native_warm_start_keeps_loading_at_emitter_through_horizon(self):
+        env = _no_capture_env(cap_hours=2)
+        _add_route_coordinates(env)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 200.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=2,
+            emitter_availability={"source": [0.0] * 2},
+            vessel_speed_factor={"ship": [1.0] * 2},
+            well_available={"well": [True] * 2},
+            injectivity_factor={"well": [1.0] * 2},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+        native_actions = [
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+        ]
+
+        options = trip_milp._native_action_trip_options_from_replay(
+            env,
+            env.scenario,
+            start_step=0,
+            horizon_h=2,
+            native_actions_by_hour=native_actions,
+        )
+
+        self.assertEqual(len(options), 1)
+        self.assertAlmostEqual(options[0].amount_t, 200.0)
+        self.assertEqual(options[0].depart_h, 2)
+        self.assertEqual(options[0].unload_profile_t, ())
+
+    def test_native_warm_start_keeps_loaded_trip_still_sailing_at_horizon(self):
+        env = _no_capture_env(cap_hours=2)
+        _add_route_coordinates(env)
+        env.reset(seed=1)
+        env._routes["ship"]["distance_km"] = 18.52
+        env.simulator.routes["ship"]["distance_km"] = 18.52
+        env.simulator.state.entity_inventory_t["source"] = 500.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=2,
+            emitter_availability={"source": [0.0] * 2},
+            vessel_speed_factor={"ship": [1.0] * 2},
+            well_available={"well": [True] * 2},
+            injectivity_factor={"well": [1.0] * 2},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+        native_actions = [
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+            {"vessels": [VESSEL_GO_TERMINAL], "wells": [0]},
+        ]
+
+        options = trip_milp._native_action_trip_options_from_replay(
+            env,
+            env.scenario,
+            start_step=0,
+            horizon_h=2,
+            native_actions_by_hour=native_actions,
+        )
+
+        self.assertEqual(len(options), 1)
+        self.assertAlmostEqual(options[0].amount_t, 500.0)
+        self.assertGreater(options[0].arrival_h, 2)
+        self.assertEqual(options[0].unload_profile_t, ())
+
+    def test_replayed_trip_warm_start_is_completed_by_the_executable_model(self):
+        env = _no_capture_env(cap_hours=6)
+        _add_route_coordinates(env)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 200.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=6,
+            emitter_availability={"source": [0.0] * 6},
+            vessel_speed_factor={"ship": [1.0] * 6},
+            well_available={"well": [True] * 6},
+            injectivity_factor={"well": [1.0] * 6},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+        native_actions = [
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+            {"vessels": [VESSEL_GO_TERMINAL], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [1]},
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+            {"vessels": [VESSEL_WAIT], "wells": [0]},
+        ]
+        options = trip_milp._native_action_trip_options_from_replay(
+            env,
+            env.scenario,
+            start_step=0,
+            horizon_h=6,
+            native_actions_by_hour=native_actions,
+        )
+
+        warm_model = trip_milp._solve_executable_trip_warm_start(
+            env,
+            env.scenario,
+            start_step=0,
+            horizon_h=6,
+            selected_options=options,
+            economics=EconomicParameters(),
+            storage_reward_eur_per_t=0.0,
+            cplex_path=None,
+            time_limit_s=10.0,
+            threads=1,
+            msg=False,
+        )
+
+        self.assertIn(warm_model.status, ("Optimal", "Integer Feasible"))
+        self.assertTrue(all(constraint.valid(1e-6) for constraint in warm_model.prob.constraints.values()))
+
+    def test_executable_trip_model_allows_waiting_while_one_vessel_unloads(self):
+        env = _two_ship_high_rate_source_env()
+        env.reset(seed=1)
+        options = [
+            trip_milp._TripOption(
+                vessel_id="ship_a",
+                emitter_id="source",
+                load_start_h=0,
+                depart_h=0,
+                arrival_h=1,
+                return_start_h=3,
+                end_h=3,
+                capacity_t=1_000.0,
+                load_rate_tph=1_000.0,
+                unload_rate_tph=1_000.0,
+                outbound_sail_h=1,
+                return_sail_h=0,
+                unload_profile_t=(1_000.0, 0.0),
+            ),
+            trip_milp._TripOption(
+                vessel_id="ship_b",
+                emitter_id="source",
+                load_start_h=0,
+                depart_h=0,
+                arrival_h=1,
+                return_start_h=3,
+                end_h=3,
+                capacity_t=1_000.0,
+                load_rate_tph=1_000.0,
+                unload_rate_tph=1_000.0,
+                outbound_sail_h=1,
+                return_sail_h=0,
+                unload_profile_t=(0.0, 1_000.0),
+            ),
+        ]
+
+        status = self._solve_fixed_executable_resource_options(env, options)
+
+        self.assertEqual(status, "Optimal")
+
+    def test_executable_trip_model_forbids_two_simultaneous_unloads(self):
+        env = _two_ship_high_rate_source_env()
+        env.reset(seed=1)
+        options = [
+            trip_milp._TripOption(
+                vessel_id=vessel_id,
+                emitter_id="source",
+                load_start_h=0,
+                depart_h=0,
+                arrival_h=1,
+                return_start_h=2,
+                end_h=2,
+                capacity_t=1_000.0,
+                load_rate_tph=1_000.0,
+                unload_rate_tph=1_000.0,
+                outbound_sail_h=1,
+                return_sail_h=0,
+                unload_profile_t=(1_000.0,),
+            )
+            for vessel_id in ("ship_a", "ship_b")
+        ]
+
+        status = self._solve_fixed_executable_resource_options(env, options)
+
+        self.assertEqual(status, "Infeasible")
+
+    def test_executable_trip_model_allows_waiting_while_one_vessel_loads(self):
+        env = _two_ship_high_rate_source_env()
+        env.reset(seed=1)
+        options = [
+            trip_milp._TripOption(
+                vessel_id="ship_a",
+                emitter_id="source",
+                load_start_h=0,
+                depart_h=2,
+                arrival_h=3,
+                return_start_h=3,
+                end_h=3,
+                capacity_t=1_000.0,
+                load_rate_tph=1_000.0,
+                unload_rate_tph=1_000.0,
+                outbound_sail_h=1,
+                return_sail_h=0,
+                load_profile_t=(1_000.0, 0.0),
+            ),
+            trip_milp._TripOption(
+                vessel_id="ship_b",
+                emitter_id="source",
+                load_start_h=0,
+                depart_h=2,
+                arrival_h=3,
+                return_start_h=3,
+                end_h=3,
+                capacity_t=1_000.0,
+                load_rate_tph=1_000.0,
+                unload_rate_tph=1_000.0,
+                outbound_sail_h=1,
+                return_sail_h=0,
+                load_profile_t=(0.0, 1_000.0),
+            ),
+        ]
+
+        status = self._solve_fixed_executable_resource_options(env, options)
+
+        self.assertEqual(status, "Optimal")
+
+    def test_executable_trip_model_forbids_two_simultaneous_loads(self):
+        env = _two_ship_high_rate_source_env()
+        env.reset(seed=1)
+        options = [
+            trip_milp._TripOption(
+                vessel_id=vessel_id,
+                emitter_id="source",
+                load_start_h=0,
+                depart_h=1,
+                arrival_h=2,
+                return_start_h=2,
+                end_h=2,
+                capacity_t=1_000.0,
+                load_rate_tph=1_000.0,
+                unload_rate_tph=1_000.0,
+                outbound_sail_h=1,
+                return_sail_h=0,
+                load_profile_t=(1_000.0,),
+            )
+            for vessel_id in ("ship_a", "ship_b")
+        ]
+
+        status = self._solve_fixed_executable_resource_options(env, options)
+
+        self.assertEqual(status, "Infeasible")
+
+    def _solve_fixed_executable_resource_options(self, env, options):
+        prob = trip_milp.pulp.LpProblem("executable_berth_test", trip_milp.pulp.LpMinimize)
+        choose = {
+            index: trip_milp.pulp.LpVariable(f"berth_trip_{index}", cat="Binary")
+            for index in range(len(options))
+        }
+        trip_milp._add_executable_vessel_and_berth_constraints(
+            prob,
+            options,
+            choose,
+            env,
+            env.scenario,
+            0,
+            3,
+        )
+        for variable in choose.values():
+            prob += variable == 1
+        prob += 0
+        trip_milp._solve(prob, None, 10.0, None, None, 1, False)
+        return trip_milp._solution_status_label(prob.status, getattr(prob, "sol_status", None))
+
+    def test_warm_start_copy_clamps_solver_noise_at_variable_bounds(self):
+        source = trip_milp.pulp.LpVariable("source_noise", lowBound=0.0, upBound=1.0)
+        target = trip_milp.pulp.LpVariable("target_noise", lowBound=0.0, upBound=1.0)
+        source.varValue = -1e-12
+
+        trip_milp._copy_initial_values({"value": target}, {"value": source})
+
+        self.assertEqual(target.varValue, 0.0)
 
     def test_native_action_trace_materialization_uses_replay_metrics(self):
         env = _no_capture_env(cap_hours=5)

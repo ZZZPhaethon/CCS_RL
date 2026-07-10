@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 import math
+import random
 import sys
 import time
 from contextlib import contextmanager
@@ -18,9 +19,8 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from sim.control import trip_milp
+from sim.control import cplex_milp, trip_milp
 from sim.control.baselines import greedy_shuttle_policy
-from sim.control.trip_milp import replay_trip_milp_plan
 from sim.economics import CostModel, EconomicParameters
 from sim.environment import CCSEnv, CCSEnvConfig
 from sim.metrics import EpisodeMetrics, run_episode
@@ -58,8 +58,68 @@ def parse_csv_ints(value: str) -> list[int]:
     return [int(item.strip()) for item in value.split(",") if item.strip()]
 
 
+def apply_scenario_config_defaults(args: argparse.Namespace) -> None:
+    defaults = ScenarioConfig()
+    args.capture_noise_std = defaults.capture_noise_std
+    args.capture_outage_rate_per_week = defaults.capture_outage_rate_per_week
+    args.capture_outage_mean_hours = defaults.capture_outage_mean_hours
+    args.capture_high_output_rates = str(defaults.capture_high_output_rate_per_week)
+    args.capture_high_output_mean_hours = defaults.capture_high_output_mean_hours
+    args.capture_multiplier_min, args.capture_multiplier_max = defaults.capture_high_output_multiplier_range
+    args.weather_window_mode = "hourly"
+    args.weather_rates = str(defaults.weather_window_rate_per_week)
+    args.weather_window_mean_hours = defaults.weather_window_mean_hours
+    args.weather_speed_min, args.weather_speed_max = defaults.weather_window_speed_factor_range
+    args.well_maintenance_rate_per_week = defaults.well_maintenance_rate_per_week
+    args.well_maintenance_mean_hours = defaults.well_maintenance_mean_hours
+
+
 def reported_total_cost(operating_cost: float, vented_t: float, carbon_price_eur_per_t: float) -> float:
     return float(operating_cost) + float(vented_t) * float(carbon_price_eur_per_t)
+
+
+class WeeklyWeatherScenarioGenerator(ScenarioGenerator):
+    """Apply at most one probabilistic weather window per full week."""
+
+    def __init__(
+        self,
+        config: ScenarioConfig,
+        *,
+        weekly_probability: float,
+        duration_min_h: int,
+        duration_max_h: int,
+        speed_factor_range: tuple[float, float],
+    ) -> None:
+        super().__init__(config=config)
+        self.weekly_probability = max(0.0, min(1.0, float(weekly_probability)))
+        self.duration_min_h = max(1, int(duration_min_h))
+        self.duration_max_h = max(self.duration_min_h, int(duration_max_h))
+        self.speed_factor_range = speed_factor_range
+
+    def sample(self, network, seed: int | None = None) -> Scenario:
+        scenario = super().sample(network, seed=seed)
+        if self.weekly_probability <= 0.0:
+            return scenario
+
+        rng = random.Random(f"weekly-weather:{seed}")
+        full_weeks = max(1, int((scenario.n_steps * scenario.time_step_hours) // 168))
+        lo, hi = self.speed_factor_range
+        for week_index in range(full_weeks):
+            if rng.random() > self.weekly_probability:
+                continue
+            week_start = int(round(week_index * 168 / scenario.time_step_hours))
+            if week_start >= scenario.n_steps:
+                continue
+            latest_offset = min(120, max(0, scenario.n_steps - week_start - 1))
+            start = week_start + rng.randint(0, latest_offset)
+            duration_h = rng.randint(self.duration_min_h, self.duration_max_h)
+            duration_steps = max(1, int(round(duration_h / scenario.time_step_hours)))
+            end = min(scenario.n_steps, start + duration_steps)
+            factor = rng.uniform(lo, hi)
+            for series in scenario.vessel_speed_factor.values():
+                for t in range(start, end):
+                    series[t] = min(series[t], factor)
+        return scenario
 
 
 def make_config(
@@ -67,6 +127,7 @@ def make_config(
     capture_high_output_rate_per_week: float,
     weather_rate_per_week: float,
 ) -> ScenarioConfig:
+    weather_rate = 0.0 if args.weather_window_mode == "weekly" else weather_rate_per_week
     return ScenarioConfig(
         episode_hours=args.hours,
         randomize_initial_inventory=True,
@@ -79,7 +140,7 @@ def make_config(
             args.capture_multiplier_min,
             args.capture_multiplier_max,
         ),
-        weather_window_rate_per_week=weather_rate_per_week,
+        weather_window_rate_per_week=weather_rate,
         weather_window_mean_hours=args.weather_window_mean_hours,
         weather_window_speed_factor_range=(
             args.weather_speed_min,
@@ -107,16 +168,46 @@ def make_env(
         network.entities["oygarden_terminal"],
         storage_capacity_t=args.terminal_buffer_t,
     )
+    config = make_config(args, capture_high_output_rate_per_week, weather_rate_per_week)
+    if args.weather_window_mode == "weekly":
+        weekly_probability = (
+            args.weather_weekly_probability
+            if args.weather_weekly_probability is not None
+            else 1.0
+        )
+        duration_min_h = (
+            args.weather_weekly_duration_min_hours
+            if args.weather_weekly_duration_min_hours is not None
+            else int(round(args.weather_window_mean_hours * 0.75))
+        )
+        duration_max_h = (
+            args.weather_weekly_duration_max_hours
+            if args.weather_weekly_duration_max_hours is not None
+            else int(round(args.weather_window_mean_hours * 1.25))
+        )
+        scenario_generator = WeeklyWeatherScenarioGenerator(
+            config,
+            weekly_probability=weekly_probability,
+            duration_min_h=duration_min_h,
+            duration_max_h=duration_max_h,
+            speed_factor_range=(args.weather_speed_min, args.weather_speed_max),
+        )
+    else:
+        scenario_generator = ScenarioGenerator(config)
+
     return CCSEnv(
         network,
         fixed_scenario_locations(SCENARIO_ID),
-        scenario_generator=ScenarioGenerator(
-            make_config(args, capture_high_output_rate_per_week, weather_rate_per_week)
-        ),
+        scenario_generator=scenario_generator,
         cost_model=CostModel(economics),
         config=CCSEnvConfig(
             episode_hours=args.hours,
-            store_reward_eur_per_t=0.0,
+            store_reward_eur_per_t=args.storage_reward_eur_per_t,
+            reward_mode=args.reward_mode,
+            vent_first_vent_eur_per_t=args.vent_first_vent_eur_per_t,
+            overflow_risk_eur_per_t=args.overflow_risk_eur_per_t,
+            overflow_risk_lookahead_h=args.overflow_risk_lookahead_h,
+            operating_cost_weight=args.operating_cost_weight,
         ),
     )
 
@@ -276,34 +367,59 @@ def summarize(rows: list[dict[str, object]]) -> list[dict[str, object]]:
         "well_down_hours_total",
         "executable_solve_time_s",
     ]
+    exact_only_keys = {
+        key
+        for key in numeric_keys
+        if key.startswith(("optimized_", "best_"))
+        or "saving" in key
+        or "reduction" in key
+    }
     out: list[dict[str, object]] = []
     groups = sorted({
         (
             float(row.get("vent_penalty_eur_per_t", 80.0)),
+            str(row.get("weather_window_mode", "hourly")),
             float(row["rate_per_week"]),
             float(row.get("weather_rate_per_week", row["rate_per_week"])),
         )
         for row in rows
     })
-    for vent_penalty, rate, weather_rate in groups:
+    for vent_penalty, weather_window_mode, rate, weather_rate in groups:
         subset = [
             row
             for row in rows
             if float(row.get("vent_penalty_eur_per_t", 80.0)) == vent_penalty
+            and str(row.get("weather_window_mode", "hourly")) == weather_window_mode
             and float(row["rate_per_week"]) == rate
             and float(row.get("weather_rate_per_week", row["rate_per_week"])) == weather_rate
         ]
         summary: dict[str, object] = {
             "vent_penalty_eur_per_t": vent_penalty,
+            "weather_window_mode": weather_window_mode,
             "rate_per_week": rate,
             "capture_high_output_rate_per_week": rate,
             "weather_rate_per_week": weather_rate,
             "episodes": len(subset),
             "seeds": ",".join(str(row["seed"]) for row in subset),
             "all_replay_executable": all(str(row["replay_is_executable"]) == "True" for row in subset),
+            "all_replay_exact": all(
+                str(row.get("replay_is_exact", "False")) == "True"
+                for row in subset
+            ),
         }
         for key in numeric_keys:
-            values = [float(row[key]) for row in subset if row.get(key, "") not in {"", "nan"}]
+            value_rows = subset
+            if key in exact_only_keys:
+                value_rows = [
+                    row
+                    for row in subset
+                    if str(row.get("replay_is_exact", "False")) == "True"
+                ]
+            values = [
+                float(row[key])
+                for row in value_rows
+                if row.get(key, "") not in {"", "nan"}
+            ]
             if values:
                 mean = sum(values) / len(values)
                 variance = sum((value - mean) ** 2 for value in values) / len(values)
@@ -311,6 +427,28 @@ def summarize(rows: list[dict[str, object]]) -> list[dict[str, object]]:
                 summary[f"{key}_std"] = math.sqrt(variance)
         out.append(summary)
     return out
+
+
+def solve_oracle(
+    args: argparse.Namespace,
+    env: CCSEnv,
+    economics: EconomicParameters,
+    warm_start_actions: list[dict[str, list[int]]] | None,
+):
+    kwargs = {
+        "horizon_h": args.hours,
+        "economics": economics,
+        "storage_reward_eur_per_t": args.storage_reward_eur_per_t,
+        "warm_start_native_actions_by_hour": warm_start_actions,
+        "cplex_path": getattr(args, "cplex_path", None),
+        "time_limit_s": args.cplex_time_limit_s,
+        "mip_gap_rel": args.cplex_mip_gap_rel,
+        "threads": args.cplex_threads,
+        "msg": args.cplex_msg,
+    }
+    if args.oracle_model == "native_action":
+        return cplex_milp.solve_full_scenario_with_cplex(env, **kwargs)
+    return trip_milp.solve_executable_trip_milp_with_cplex(env, **kwargs)
 
 
 def run_case(
@@ -354,19 +492,9 @@ def run_case(
     solve_env.reset(seed=seed)
     stats = scenario_stats(args, solve_env.scenario, seed, capture_high_output_rate_per_week)
     start = time.perf_counter()
-    result = trip_milp.solve_executable_trip_milp_with_cplex(
-        solve_env,
-        horizon_h=args.hours,
-        economics=economics,
-        storage_reward_eur_per_t=0.0,
-        warm_start_native_actions_by_hour=warm_start_actions,
-        time_limit_s=args.cplex_time_limit_s,
-        mip_gap_rel=args.cplex_mip_gap_rel,
-        threads=args.cplex_threads,
-        msg=args.cplex_msg,
-    )
+    result = solve_oracle(args, solve_env, economics, warm_start_actions)
     solve_s = time.perf_counter() - start
-    replay = replay_trip_milp_plan(solve_env, result, stored_tol_t=1e-3)
+    replay = cplex_milp.replay_full_scenario_cplex_plan(solve_env, result, stored_tol_t=1e-3)
 
     optimized_unit_cost = replay.total_cost / replay.stored_t if replay.stored_t > 0.0 else math.nan
     greedy_unit_cost = greedy.total_cost / greedy.stored_t if greedy.stored_t > 0.0 else math.nan
@@ -388,7 +516,9 @@ def run_case(
     )
     vented_reduction_t = greedy.vented_t - replay.vented_t
     total_cost_saving_eur = greedy.total_cost - replay.total_cost
-    use_replay = total_cost_saving_eur > 0.0
+    greedy_objective = -greedy.total_reward / float(greedy_env.config.reward_scale)
+    optimized_objective = replay.objective_value
+    use_replay = replay.is_exact and optimized_objective < greedy_objective
     best_stored_t = replay.stored_t if use_replay else greedy.stored_t
     best_vented_t = replay.vented_t if use_replay else greedy.vented_t
     best_total_cost = replay.total_cost if use_replay else greedy.total_cost
@@ -397,16 +527,39 @@ def run_case(
         optimized_report_total_cost if use_replay else greedy_report_total_cost
     )
     best_report_unit_cost = best_report_total_cost / best_stored_t if best_stored_t > 0.0 else math.nan
+    optimized_metric_values = replay_metric_fields("optimized", replay)
+    if not replay.is_exact:
+        optimized_metric_values = {key: "" for key in optimized_metric_values}
+
+    def exact_value(value):
+        return value if replay.is_exact else ""
 
     return {
         "rate_per_week": capture_high_output_rate_per_week,
         "capture_high_output_rate_per_week": capture_high_output_rate_per_week,
         "weather_rate_per_week": weather_rate_per_week,
+        "weather_window_mode": args.weather_window_mode,
+        "weather_weekly_probability": (
+            args.weather_weekly_probability
+            if args.weather_weekly_probability is not None
+            else 1.0
+        )
+        if args.weather_window_mode == "weekly"
+        else "",
         "seed": seed,
         "hours": args.hours,
-        "objective": "vent_first_total_cost",
+        "oracle_model": args.oracle_model,
+        "objective": args.reward_mode,
+        "greedy_objective": greedy_objective,
+        "optimized_objective": exact_value(optimized_objective),
+        "objective_headroom": exact_value(greedy_objective - optimized_objective),
+        "vent_first_vent_eur_per_t": args.vent_first_vent_eur_per_t,
+        "overflow_risk_eur_per_t": args.overflow_risk_eur_per_t,
+        "overflow_risk_lookahead_h": args.overflow_risk_lookahead_h,
+        "operating_cost_weight": args.operating_cost_weight,
         "vent_penalty_eur_per_t": economics.carbon_price_eur_per_t,
         "report_carbon_price_eur_per_t": args.report_carbon_price_eur_per_t,
+        "storage_reward_eur_per_t": args.storage_reward_eur_per_t,
         "warm_start_policy": args.warm_start_policy,
         "warm_start_hours": len(warm_start_actions) if warm_start_actions is not None else 0,
         "capture_outage_rate_per_week": args.capture_outage_rate_per_week,
@@ -424,29 +577,37 @@ def run_case(
         "executable_is_valid": result.is_valid,
         "executable_validation_error": result.validation_error,
         "executable_deliveries": result.deliveries,
-        "executable_binary_count": result.binary_count,
-        "executable_variable_count": result.variable_count,
-        "executable_constraint_count": result.constraint_count,
+        "executable_binary_count": getattr(result, "binary_count", ""),
+        "executable_variable_count": getattr(result, "variable_count", ""),
+        "executable_constraint_count": getattr(result, "constraint_count", ""),
         "replay_is_executable": replay.is_executable,
+        "replay_is_exact": replay.is_exact,
+        "replay_mismatch_count": len(replay.mismatches),
+        "replay_mismatches_sample": ";".join(replay.mismatches[:20]),
+        "replay_compared_fields": ";".join(sorted(replay.compared_fields)),
         "replay_stored_gap_t": replay.stored_gap_t,
         "replay_violation_count": len(replay.violations),
         "replay_violations_sample": ";".join(replay.violations[:20]),
-        "vented_reduction_t": vented_reduction_t,
-        "vented_reduction_pct": (
+        "vented_reduction_t": exact_value(vented_reduction_t),
+        "vented_reduction_pct": exact_value(
             vented_reduction_t / greedy.vented_t if greedy.vented_t > 1e-9 else math.nan
         ),
-        "total_cost_saving_eur": total_cost_saving_eur,
-        "total_cost_saving_pct": (
+        "total_cost_saving_eur": exact_value(total_cost_saving_eur),
+        "total_cost_saving_pct": exact_value(
             total_cost_saving_eur / greedy.total_cost if greedy.total_cost > 1e-9 else math.nan
         ),
-        "unit_cost_saving_eur_per_t": greedy_unit_cost - optimized_unit_cost,
+        "unit_cost_saving_eur_per_t": exact_value(greedy_unit_cost - optimized_unit_cost),
         "greedy_report_total_cost": greedy_report_total_cost,
-        "optimized_report_total_cost": optimized_report_total_cost,
-        "report_total_cost_saving_eur": greedy_report_total_cost - optimized_report_total_cost,
+        "optimized_report_total_cost": exact_value(optimized_report_total_cost),
+        "report_total_cost_saving_eur": exact_value(
+            greedy_report_total_cost - optimized_report_total_cost
+        ),
         "greedy_report_unit_cost": greedy_report_unit_cost,
-        "optimized_report_unit_cost": optimized_report_unit_cost,
-        "report_unit_cost_saving_eur_per_t": greedy_report_unit_cost - optimized_report_unit_cost,
-        "stored_delta_t": replay.stored_t - greedy.stored_t,
+        "optimized_report_unit_cost": exact_value(optimized_report_unit_cost),
+        "report_unit_cost_saving_eur_per_t": exact_value(
+            greedy_report_unit_cost - optimized_report_unit_cost
+        ),
+        "stored_delta_t": exact_value(replay.stored_t - greedy.stored_t),
         "best_policy": "optimized_replay" if use_replay else "greedy_fallback",
         "best_stored_t": best_stored_t,
         "best_vented_t": best_vented_t,
@@ -461,7 +622,7 @@ def run_case(
         "best_report_unit_cost_saving_eur_per_t": greedy_report_unit_cost - best_report_unit_cost,
         **stats,
         **metric_fields("greedy", greedy),
-        **replay_metric_fields("optimized", replay),
+        **optimized_metric_values,
         "milp_stored_t": result.stored_t,
         "milp_vented_t": result.vented_t,
         "milp_total_cost": result.total_cost,
@@ -478,9 +639,22 @@ def main() -> None:
     parser.add_argument("--seeds", default="1,2,3,4,5")
     parser.add_argument("--vent-penalties-eur-per-t", default="80")
     parser.add_argument("--report-carbon-price-eur-per-t", type=float, default=80.0)
+    parser.add_argument("--storage-reward-eur-per-t", type=float, default=0.0)
+    parser.add_argument("--reward-mode", choices=("economic", "vent_first"), default="vent_first")
+    parser.add_argument("--vent-first-vent-eur-per-t", type=float, default=10_000.0)
+    parser.add_argument("--overflow-risk-eur-per-t", type=float, default=100.0)
+    parser.add_argument("--overflow-risk-lookahead-h", type=float, default=24.0)
+    parser.add_argument("--operating-cost-weight", type=float, default=1.0)
     parser.add_argument("--warm-start-policy", choices=("none", "greedy"), default="greedy")
+    parser.add_argument(
+        "--oracle-model",
+        choices=("executable_trip", "native_action"),
+        default="executable_trip",
+    )
+    parser.add_argument("--scenario-config-defaults", action="store_true")
     parser.add_argument("--output-dir", default="output/window_stress_720h_total_cost_headroom")
     parser.add_argument("--cplex-time-limit-s", type=float, default=180.0)
+    parser.add_argument("--cplex-path", default=None)
     parser.add_argument("--cplex-mip-gap-rel", type=float, default=0.02)
     parser.add_argument("--cplex-threads", type=int, default=1)
     parser.add_argument("--cplex-msg", action="store_true")
@@ -489,19 +663,25 @@ def main() -> None:
     parser.add_argument("--window-mean-hours", type=float, default=48.0)
     parser.add_argument("--capture-high-output-mean-hours", type=float, default=None)
     parser.add_argument("--weather-window-mean-hours", type=float, default=None)
+    parser.add_argument("--weather-window-mode", choices=("hourly", "weekly"), default="hourly")
+    parser.add_argument("--weather-weekly-probability", type=float, default=1.0)
+    parser.add_argument("--weather-weekly-duration-min-hours", type=int, default=None)
+    parser.add_argument("--weather-weekly-duration-max-hours", type=int, default=None)
     parser.add_argument("--capture-noise-std", type=float, default=0.10)
     parser.add_argument("--capture-outage-rate-per-week", type=float, default=0.0)
     parser.add_argument("--capture-outage-mean-hours", type=float, default=12.0)
     parser.add_argument("--capture-multiplier-min", type=float, default=1.25)
     parser.add_argument("--capture-multiplier-max", type=float, default=1.75)
-    parser.add_argument("--weather-speed-min", type=float, default=0.45)
-    parser.add_argument("--weather-speed-max", type=float, default=0.75)
+    parser.add_argument("--weather-speed-min", type=float, default=0.6)
+    parser.add_argument("--weather-speed-max", type=float, default=0.8)
     parser.add_argument("--well-maintenance-rate-per-week", type=float, default=0.0)
     parser.add_argument("--well-maintenance-mean-hours", type=float, default=24.0)
     parser.add_argument("--yara-buffer-t", type=float, default=7500.0)
     parser.add_argument("--terminal-buffer-t", type=float, default=7500.0)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
+    if args.scenario_config_defaults:
+        apply_scenario_config_defaults(args)
     if args.capture_high_output_mean_hours is None:
         args.capture_high_output_mean_hours = args.window_mean_hours
     if args.weather_window_mean_hours is None:
@@ -518,6 +698,7 @@ def main() -> None:
     done = {
         (
             float(row.get("vent_penalty_eur_per_t", 80.0)),
+            str(row.get("weather_window_mode", "hourly")),
             float(row["rate_per_week"]),
             float(row.get("weather_rate_per_week", row["rate_per_week"])),
             int(row["seed"]),
@@ -538,7 +719,7 @@ def main() -> None:
             for capture_rate in capture_rates:
                 for weather_rate in weather_rates:
                     for seed in seeds:
-                        key = (vent_penalty, capture_rate, weather_rate, seed)
+                        key = (vent_penalty, args.weather_window_mode, capture_rate, weather_rate, seed)
                         if key in done:
                             print(
                                 f"skip Pvent={vent_penalty:g} capture_rate={capture_rate:g} "
@@ -550,20 +731,32 @@ def main() -> None:
                         rows.append(row)
                         write_csv(by_seed_path, rows)
                         write_csv(summary_path, summarize(rows))
-                        print(
-                            "done "
-                            f"Pvent={vent_penalty:g} "
-                            f"capture_rate={capture_rate:g} "
-                            f"weather_rate={weather_rate:g} "
-                            f"seed={seed} "
-                            f"greedy_vent={row['greedy_vented_t']:.1f} "
-                            f"opt_vent={row['optimized_vented_t']:.1f} "
-                            f"vent_red={row['vented_reduction_t']:.1f} "
-                            f"objective_save={row['total_cost_saving_eur']:.0f} "
-                            f"solve_s={row['executable_solve_time_s']:.1f} "
-                            f"status={row['executable_status']}",
-                            flush=True,
-                        )
+                        if row["replay_is_exact"]:
+                            message = (
+                                "done "
+                                f"Pvent={vent_penalty:g} "
+                                f"capture_rate={capture_rate:g} "
+                                f"weather_rate={weather_rate:g} "
+                                f"seed={seed} "
+                                f"greedy_vent={row['greedy_vented_t']:.1f} "
+                                f"opt_vent={row['optimized_vented_t']:.1f} "
+                                f"vent_red={row['vented_reduction_t']:.1f} "
+                                f"objective_save={row['total_cost_saving_eur']:.0f} "
+                                f"solve_s={row['executable_solve_time_s']:.1f} "
+                                f"status={row['executable_status']} replay_exact=True"
+                            )
+                        else:
+                            message = (
+                                "done "
+                                f"Pvent={vent_penalty:g} "
+                                f"capture_rate={capture_rate:g} "
+                                f"weather_rate={weather_rate:g} "
+                                f"seed={seed} "
+                                f"solve_s={row['executable_solve_time_s']:.1f} "
+                                f"status={row['executable_status']} replay_exact=False "
+                                f"mismatches={row['replay_mismatches_sample']}"
+                            )
+                        print(message, flush=True)
 
 
 if __name__ == "__main__":

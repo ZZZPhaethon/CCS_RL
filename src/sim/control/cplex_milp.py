@@ -35,6 +35,8 @@ from ..line_source import variable_rate_bottomhole_pressure_bar
 from ..operations.pressure_limits import mtpa_to_tph, pressure_limited_rate_level_mask, tph_to_mtpa
 from ..routes import route_distance_km, sea_route
 from ..scenario_generation import Scenario
+from .objective import control_objective_value, control_objective_weights
+from .replay import ReplayExpectation, ReplayTolerances, replay_native_actions
 
 KNOTS_TO_KMH = 1.852
 
@@ -91,8 +93,7 @@ if pulp is not None:
             else:
                 status, values, reducedCosts, shadowPrices, slacks, solStatus = self.readsol(tmpSol)
             self.delete_tmp_files(tmpLp, tmpMst, tmpSol)
-            if self.optionsDict.get("logPath") != "cplex.log":
-                self.delete_tmp_files("cplex.log")
+            self._delete_default_log()
             if status != pulp.constants.LpStatusInfeasible:
                 lp.assignVarsVals(values)
                 lp.assignVarsDj(reducedCosts)
@@ -100,6 +101,14 @@ if pulp is not None:
                 lp.assignConsSlack(slacks)
             lp.assignStatus(status, solStatus)
             return status
+
+        def _delete_default_log(self) -> None:
+            if self.optionsDict.get("logPath") == "cplex.log":
+                return
+            try:
+                self.delete_tmp_files("cplex.log")
+            except PermissionError:
+                pass
 
 
 @dataclass(frozen=True)
@@ -161,6 +170,8 @@ class FullScenarioCplexMilpResult:
     reconditioning: float = 0.0
     loading: float = 0.0
     unloading: float = 0.0
+    captured_from_operations_t: float = 0.0
+    overflow_risk_t: float = 0.0
     is_valid: bool = True
     validation_error: str = ""
     max_binary_integrality_violation: float = 0.0
@@ -173,9 +184,15 @@ class CplexMilpReplayResult:
     vented_t: float
     operating_cost: float
     total_cost: float
+    total_reward: float
+    objective_value: float
+    overflow_risk_t: float
     stored_gap_t: float
     violations: list[str]
     is_executable: bool
+    is_exact: bool = False
+    mismatches: tuple[str, ...] = ()
+    compared_fields: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -252,7 +269,12 @@ def solve_full_scenario_with_cplex(
         raise ValueError("The CPLEX MILP currently expects 1-hour network time steps.")
 
     params = economics or EconomicParameters()
-    reward_per_t = _storage_reward_eur_per_t(env, storage_reward_eur_per_t)
+    objective_weights = control_objective_weights(
+        env,
+        params,
+        storage_reward_eur_per_t=storage_reward_eur_per_t,
+    )
+    reward_per_t = objective_weights.storage_reward_eur_per_t
     start_h = _current_start_hour(env)
     start_step = scenario.step_index(start_h)
     if horizon_h is None:
@@ -442,6 +464,16 @@ def solve_full_scenario_with_cplex(
                 <= emitter.loading_rate_tph
             )
 
+    overflow_risk = _add_overflow_risk_constraints(
+        prob,
+        env,
+        scenario,
+        start_step,
+        H,
+        source_stock,
+        objective_weights.overflow_risk_lookahead_h,
+    )
+
     well_request = {
         (well_id, t): pulp.lpSum(
             mtpa_to_tph(WELL_RATE_LEVELS_MTPA[rate_index]) * well_choice[(well_id, t, rate_index)]
@@ -522,13 +554,17 @@ def solve_full_scenario_with_cplex(
         for t in hours
     )
     stored_expr = pulp.lpSum(well_inj[(well_id, t)] for well_id in env.well_ids for t in hours)
-    prob += (
+    operating_cost_expr = (
         _sailing_cost_expression(arcs, arc_vars, params)
         + _loading_cost_expression(env, load, params)
         + _unloading_cost_expression(env, unload, params)
         + stored_expr * params.reconditioning_eur_per_t
-        + pulp.lpSum(vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours)
-        * params.carbon_price_eur_per_t
+    )
+    prob += (
+        objective_weights.operating_cost_weight * operating_cost_expr
+        + objective_weights.vent_eur_per_t
+        * pulp.lpSum(vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours)
+        + objective_weights.overflow_risk_eur_per_t * pulp.lpSum(overflow_risk.values())
         - stored_expr * reward_per_t
     )
 
@@ -608,7 +644,15 @@ def solve_full_scenario_with_cplex(
     unloaded_t = sum(_value(unload[(vessel_id, t)]) for vessel_id in env.vessel_ids for t in hours)
     cost = _native_cost_breakdown(env, arcs, arc_vars, load, unload, stored_t, params)
     total_cost = cost.operating_cost + vented_t * params.carbon_price_eur_per_t
-    net_reward = reward_per_t * stored_t - total_cost
+    overflow_risk_t = sum(_value(var) for var in overflow_risk.values())
+    objective_value = control_objective_value(
+        objective_weights,
+        operating_cost=cost.operating_cost,
+        vented_t=vented_t,
+        stored_t=stored_t,
+        overflow_risk_t=overflow_risk_t,
+    )
+    net_reward = -objective_value
     departures, arrivals = _extract_departures_and_arrivals(env, arcs, arc_vars, H)
     validation = _validate_solution(
         status=status,
@@ -653,12 +697,14 @@ def solve_full_scenario_with_cplex(
         total_cost_per_stored_t=total_cost / stored_t if stored_t > 0.0 else float("nan"),
         storage_reward_eur_per_t=reward_per_t,
         net_reward=net_reward,
-        objective_value=-net_reward,
+        objective_value=objective_value,
         vessel_fuel=cost.vessel_fuel,
         conditioning=cost.conditioning,
         reconditioning=cost.reconditioning,
         loading=cost.loading,
         unloading=cost.unloading,
+        captured_from_operations_t=captured_from_operations_t,
+        overflow_risk_t=overflow_risk_t,
         is_valid=validation.is_valid,
         validation_error=validation.validation_error,
         max_binary_integrality_violation=validation.max_binary_integrality_violation,
@@ -678,31 +724,68 @@ def replay_full_scenario_cplex_plan(
     reset, when checking whether the MILP plan is executable by the RL wrapper.
     """
 
-    start_stored_t = float(env.cumulative_stored_t)
-    start_vented_t = float(env.ledger.vented_t)
-    start_operating_cost = float(env.ledger.operating_cost)
-    start_total_cost = float(env.ledger.total_cost)
-    violations: list[str] = []
-    elapsed_hours = 0
-    for action in result.native_actions_by_hour[: result.horizon_h]:
-        _obs, _reward, terminated, truncated, info = env.step(action)
-        elapsed_hours += 1
-        violations.extend(str(violation) for violation in info.get("violations", []))
-        if terminated or truncated:
-            break
-
-    stored_t = float(env.cumulative_stored_t) - start_stored_t
-    executable_violations = {"berth_required", "bottomhole_pressure_clipped"}
-    stored_gap_t = stored_t - result.stored_t
+    required_fields = frozenset(
+        {
+            "elapsed_hours",
+            "stored_t",
+            "vented_t",
+            "captured_t",
+            "in_transit_t",
+            "vessel_fuel",
+            "conditioning",
+            "reconditioning",
+            "loading",
+            "unloading",
+            "operating_cost",
+            "total_cost",
+            "objective_value",
+            "overflow_risk_t",
+            "injection_tph",
+        }
+    )
+    expectation = ReplayExpectation(
+        required_fields=required_fields,
+        elapsed_hours=result.horizon_h,
+        stored_t=result.stored_t,
+        vented_t=result.vented_t,
+        captured_t=result.captured_from_operations_t,
+        in_transit_t=result.in_transit_t,
+        vessel_fuel=result.vessel_fuel,
+        conditioning=result.conditioning,
+        reconditioning=result.reconditioning,
+        loading=result.loading,
+        unloading=result.unloading,
+        operating_cost=result.operating_cost,
+        total_cost=result.total_cost,
+        objective_value=result.objective_value,
+        overflow_risk_t=result.overflow_risk_t,
+        injection_tph=tuple(result.injection_tph),
+    )
+    report = replay_native_actions(
+        env,
+        result.native_actions_by_hour,
+        horizon_h=result.horizon_h,
+        expected=expectation,
+        tolerances=ReplayTolerances(mass_t=stored_tol_t),
+        copy_env=False,
+    )
+    actual = report.actual
+    stored_gap_t = actual.stored_t - result.stored_t
     return CplexMilpReplayResult(
-        elapsed_hours=elapsed_hours,
-        stored_t=stored_t,
-        vented_t=float(env.ledger.vented_t) - start_vented_t,
-        operating_cost=float(env.ledger.operating_cost) - start_operating_cost,
-        total_cost=float(env.ledger.total_cost) - start_total_cost,
+        elapsed_hours=actual.elapsed_hours,
+        stored_t=actual.stored_t,
+        vented_t=actual.vented_t,
+        operating_cost=actual.operating_cost,
+        total_cost=actual.total_cost,
+        total_reward=actual.total_reward,
+        objective_value=actual.objective_value,
+        overflow_risk_t=actual.overflow_risk_t,
         stored_gap_t=stored_gap_t,
-        violations=violations,
-        is_executable=not (set(violations) & executable_violations) and abs(stored_gap_t) <= stored_tol_t,
+        violations=list(report.violations),
+        is_executable=report.is_executable,
+        is_exact=report.is_exact,
+        mismatches=report.mismatches,
+        compared_fields=report.compared_fields,
     )
 
 
@@ -1485,6 +1568,34 @@ def _capture_tonnes(env, scenario: Scenario, emitter_id: str, scenario_step: int
     availability = _scenario_series_value(scenario.emitter_availability, emitter_id, scenario_step, emitter.availability)
     time_h = scenario_step * scenario.time_step_hours
     return emitter.capture_rate_tph_at(time_h) * max(0.0, float(availability))
+
+
+def _add_overflow_risk_constraints(
+    prob,
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    source_stock,
+    lookahead_h: float,
+):
+    if lookahead_h <= 0.0:
+        return {}
+    risk = {
+        (emitter_id, t): pulp.LpVariable(f"overflow_risk_{emitter_id}_{t}", lowBound=0.0)
+        for emitter_id in env.emitter_ids
+        for t in range(horizon_h)
+    }
+    for emitter_id in env.emitter_ids:
+        emitter = env.network.entities[emitter_id]
+        for t in range(horizon_h):
+            capture_tph = _capture_tonnes(env, scenario, emitter_id, start_step + t)
+            prob += risk[(emitter_id, t)] >= (
+                capture_tph * lookahead_h
+                - emitter.buffer_capacity_t
+                + source_stock[(emitter_id, t + 1)]
+            )
+    return risk
 
 
 def _storage_shortfall_t(env, captured_from_operations_t: float, stored_t: float) -> float:

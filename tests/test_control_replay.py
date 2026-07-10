@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from sim.control.replay import (
     ReplayExpectation,
     ReplaySnapshot,
@@ -63,11 +65,10 @@ def test_exact_requires_every_required_field_to_be_present_and_equal():
         vented_t=0.0,
     )
 
-    exact, mismatches, compared = compare_replay_snapshots(expected, _snapshot())
+    exact, mismatches = compare_replay_snapshots(expected, _snapshot())
 
     assert exact
     assert not mismatches
-    assert compared == expected.required_fields
 
 
 def test_missing_required_expectation_is_not_exact():
@@ -76,10 +77,9 @@ def test_missing_required_expectation_is_not_exact():
         stored_t=10.0,
     )
 
-    exact, mismatches, compared = compare_replay_snapshots(expected, _snapshot())
+    exact, mismatches = compare_replay_snapshots(expected, _snapshot())
 
     assert not exact
-    assert compared == frozenset({"stored_t"})
     assert any("objective_value" in mismatch and "missing" in mismatch for mismatch in mismatches)
 
 
@@ -89,14 +89,13 @@ def test_field_specific_tolerance_reports_named_mismatch():
         stored_t=10.0,
     )
 
-    exact, mismatches, compared = compare_replay_snapshots(
+    exact, mismatches = compare_replay_snapshots(
         expected,
         _snapshot(stored_t=10.01),
         tolerances=ReplayTolerances(mass_t=1e-3),
     )
 
     assert not exact
-    assert compared == frozenset({"stored_t"})
     assert len(mismatches) == 1
     assert "stored_t" in mismatches[0]
     assert "0.001" in mismatches[0]
@@ -109,10 +108,9 @@ def test_supplied_final_state_is_compared_even_when_not_required():
         entity_inventory_t={"source": 1.0, "terminal": 0.0, "ship": 0.0},
     )
 
-    exact, mismatches, compared = compare_replay_snapshots(expected, _snapshot())
+    exact, mismatches = compare_replay_snapshots(expected, _snapshot())
 
     assert not exact
-    assert compared == frozenset({"stored_t", "entity_inventory_t"})
     assert any("entity_inventory_t[source]" in mismatch for mismatch in mismatches)
 
 
@@ -161,6 +159,19 @@ def test_mask_invalid_action_is_non_executable():
     assert not result.is_executable
     assert result.actual.elapsed_hours == 0
     assert any("vessel_a" in mismatch and "not executable" in mismatch for mismatch in result.mismatches)
+
+
+def test_numpy_integer_actions_are_accepted():
+    env = _replay_env(hours=1)
+    env.reset(seed=1)
+    action = {
+        "vessels": [np.int64(VESSEL_WAIT), np.int64(VESSEL_WAIT)],
+        "wells": [np.int64(0), np.int64(0)],
+    }
+
+    result = replay_native_actions(env, [action], horizon_h=1)
+
+    assert result.is_executable
 
 
 def test_short_trace_is_non_executable():

@@ -14,7 +14,7 @@ Two levels are exposed:
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 
 try:
@@ -32,6 +32,8 @@ from ..entities.vessel import Vessel
 from ..environment import VESSEL_GO_EMITTER_BASE, VESSEL_GO_TERMINAL, VESSEL_WAIT, WELL_RATE_LEVELS_MTPA
 from ..operations.pressure_limits import mtpa_to_tph
 from ..scenario_generation import Scenario
+from .objective import control_objective_value, control_objective_weights
+from .replay import replay_native_actions
 from .cplex_milp import (
     CplexMilpReplayResult,
     _add_single_well_dynamic_bhp_constraints,
@@ -88,6 +90,8 @@ class TripMilpResult:
     reconditioning: float = 0.0
     loading: float = 0.0
     unloading: float = 0.0
+    captured_from_operations_t: float = 0.0
+    overflow_risk_t: float = 0.0
     is_valid: bool = True
     validation_error: str = ""
     max_binary_integrality_violation: float = 0.0
@@ -122,11 +126,38 @@ class _TripOption:
         return max(0, self.outbound_sail_h - 1) + max(0, self.return_sail_h - 1)
 
 
+@dataclass
+class _ReplayedTripBuilder:
+    emitter_id: str
+    load_start_h: int
+    depart_h: int
+    load_profile_t: list[float]
+    arrival_h: int | None = None
+    unload_profile_t: list[float] = field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class _Validation:
     is_valid: bool
     validation_error: str
     max_binary_integrality_violation: float
+
+
+@dataclass
+class _ExecutableTripModel:
+    prob: object
+    choose: dict
+    source_stock: dict
+    source_ready: dict
+    source_overflow: dict
+    vent: dict
+    overflow_risk: dict
+    terminal_stock: dict
+    well_rate_options: dict
+    well_choice: dict
+    well_inj: dict
+    injection_limit_choice: dict
+    status: str = "Not Solved"
 
 
 def solve_relaxed_trip_milp_with_cplex(
@@ -148,7 +179,12 @@ def solve_relaxed_trip_milp_with_cplex(
     _require_ready(env, scenario)
     scenario = scenario or env.scenario
     params = economics or EconomicParameters()
-    reward_per_t = _storage_reward_eur_per_t(env, storage_reward_eur_per_t)
+    objective_weights = control_objective_weights(
+        env,
+        params,
+        storage_reward_eur_per_t=storage_reward_eur_per_t,
+    )
+    reward_per_t = objective_weights.storage_reward_eur_per_t
     H = _horizon(env, scenario, horizon_h)
     if H <= 0:
         return _empty_result("relaxed_trip", H)
@@ -190,6 +226,15 @@ def solve_relaxed_trip_milp_with_cplex(
             if option.emitter_id == emitter_id and option.load_start_h == t
         ),
     )
+    overflow_risk = _add_overflow_risk_constraints(
+        prob,
+        env,
+        scenario,
+        start_step,
+        H,
+        source_stock,
+        objective_weights.overflow_risk_lookahead_h,
+    )
     _add_relaxed_terminal_and_injection_constraints(
         prob,
         env,
@@ -208,9 +253,11 @@ def solve_relaxed_trip_milp_with_cplex(
     stored_expr = pulp.lpSum(well_inj[(well_id, t)] for well_id in env.well_ids for t in hours)
 
     prob += (
-        _relaxed_trip_cost_expression(env, options, choose, shipped, stored_expr, params)
-        + pulp.lpSum(vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours)
-        * params.carbon_price_eur_per_t
+        objective_weights.operating_cost_weight
+        * _relaxed_trip_cost_expression(env, options, choose, shipped, stored_expr, params)
+        + objective_weights.vent_eur_per_t
+        * pulp.lpSum(vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours)
+        + objective_weights.overflow_risk_eur_per_t * pulp.lpSum(overflow_risk.values())
         - stored_expr * reward_per_t
     )
     _solve(prob, cplex_path, time_limit_s, mip_gap_rel, mip_gap_abs, threads, msg)
@@ -232,7 +279,15 @@ def solve_relaxed_trip_milp_with_cplex(
     in_transit_t = initial_in_transit_t + captured_from_operations_t - stored_t - vented_t
     cost = _relaxed_trip_cost_breakdown(env, options, choose, shipped, stored_t, params)
     total_cost = cost["operating_cost"] + vented_t * params.carbon_price_eur_per_t
-    net_reward = reward_per_t * stored_t - total_cost
+    overflow_risk_t = sum(_value(var) for var in overflow_risk.values())
+    objective_value = control_objective_value(
+        objective_weights,
+        operating_cost=cost["operating_cost"],
+        vented_t=vented_t,
+        stored_t=stored_t,
+        overflow_risk_t=overflow_risk_t,
+    )
+    net_reward = -objective_value
     validation = _validate_trip_solution(
         status,
         [choose[i].value() for i in choose],
@@ -262,6 +317,8 @@ def solve_relaxed_trip_milp_with_cplex(
         total_cost=total_cost,
         storage_reward_eur_per_t=reward_per_t,
         net_reward=net_reward,
+        objective_value=objective_value,
+        overflow_risk_t=overflow_risk_t,
         validation=validation,
         binary_count=len(choose),
         variable_count=len(prob.variables()),
@@ -289,17 +346,22 @@ def solve_executable_trip_milp_with_cplex(
     _require_ready(env, scenario)
     scenario = scenario or env.scenario
     params = economics or EconomicParameters()
-    reward_per_t = _storage_reward_eur_per_t(env, storage_reward_eur_per_t)
+    objective_weights = control_objective_weights(
+        env,
+        params,
+        storage_reward_eur_per_t=storage_reward_eur_per_t,
+    )
+    reward_per_t = objective_weights.storage_reward_eur_per_t
     H = _horizon(env, scenario, horizon_h)
     if H <= 0:
         return _empty_result("executable_trip", H)
 
     start_step = scenario.step_index(_current_start_hour(env))
     hours = range(H)
-    terminal_capacity_t = _terminal_capacity_t(env)
     options = _executable_trip_options(env, scenario, start_step, H)
+    warm_start_option_indices: list[int] = []
     if warm_start_native_actions_by_hour is not None:
-        options = _options_with_native_warm_start(
+        options, warm_start_option_indices = _augment_options_with_native_warm_start(
             env,
             scenario,
             start_step=start_step,
@@ -307,82 +369,43 @@ def solve_executable_trip_milp_with_cplex(
             options=options,
             native_actions_by_hour=warm_start_native_actions_by_hour,
         )
-    well_rate_options = _well_rate_options_by_hour(env, scenario, H)
-
-    prob = pulp.LpProblem("executable_trip_cplex_milp", pulp.LpMinimize)
-    choose = {i: pulp.LpVariable(f"trip_{i}", cat="Binary") for i in range(len(options))}
-    source_stock, source_ready, source_overflow, vent = _source_variables(env, H)
-    terminal_stock = _terminal_stock_variables(H, terminal_capacity_t)
-    well_choice = {
-        (well_id, t, rate_index): pulp.LpVariable(f"well_{well_id}_{t}_{rate_index}", cat="Binary")
-        for well_id in env.well_ids
-        for t in hours
-        for rate_index in well_rate_options[(well_id, t)]
-    }
-    well_inj = _well_injection_variables(env, H)
-    injection_limit_choice = {
-        (t, limit): pulp.LpVariable(f"injection_limit_{t}_{limit}", cat="Binary")
-        for t in hours
-        for limit in range(2)
-    }
-
-    _add_executable_vessel_and_berth_constraints(prob, options, choose, env, scenario, start_step, H)
-    _add_executable_trip_path_constraints(prob, options, choose, env, scenario, start_step, H)
-    _add_source_balance_constraints(
-        prob,
+    model = _build_executable_trip_model(
         env,
         scenario,
-        start_step,
-        H,
-        source_stock,
-        source_ready,
-        source_overflow,
-        vent,
-        load_at=lambda emitter_id, t: pulp.lpSum(
-            amount * choose[i]
-            for i, option in enumerate(options)
-            for offset, amount in enumerate(option.load_profile_t)
-            if option.emitter_id == emitter_id and option.load_start_h + offset == t
-        ),
+        start_step=start_step,
+        horizon_h=H,
+        options=options,
+        economics=params,
+        storage_reward_eur_per_t=reward_per_t,
     )
-    _add_executable_terminal_and_injection_constraints(
-        prob,
-        env,
-        scenario,
-        start_step,
-        H,
-        terminal_stock,
-        options,
-        choose,
-        well_rate_options,
-        well_choice,
-        well_inj,
-        injection_limit_choice,
-    )
-    _add_single_well_dynamic_bhp_constraints(prob, env, well_inj, H)
+    prob = model.prob
+    choose = model.choose
+    source_overflow = model.source_overflow
+    vent = model.vent
+    well_rate_options = model.well_rate_options
+    well_choice = model.well_choice
+    well_inj = model.well_inj
+    injection_limit_choice = model.injection_limit_choice
 
     captured_from_operations_t = _captured_from_operations(env, scenario, start_step, H)
     stored_expr = pulp.lpSum(well_inj[(well_id, t)] for well_id in env.well_ids for t in hours)
-    prob += (
-        _executable_trip_cost_expression(options, choose, stored_expr, params)
-        + pulp.lpSum(vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours)
-        * params.carbon_price_eur_per_t
-        - stored_expr * reward_per_t
-    )
 
     use_warm_start = warm_start_native_actions_by_hour is not None
     if warm_start_native_actions_by_hour is not None:
-        _apply_executable_trip_mip_start(
+        warm_model = _solve_executable_trip_warm_start(
             env,
             scenario,
             start_step=start_step,
             horizon_h=H,
-            options=options,
-            choose=choose,
-            well_rate_options=well_rate_options,
-            well_choice=well_choice,
-            native_actions_by_hour=warm_start_native_actions_by_hour,
+            selected_options=[options[index] for index in warm_start_option_indices],
+            economics=params,
+            storage_reward_eur_per_t=reward_per_t,
+            cplex_path=cplex_path,
+            time_limit_s=min(30.0, time_limit_s) if time_limit_s is not None else 30.0,
+            threads=threads,
+            msg=msg,
         )
+        _seed_executable_trip_model(model, warm_model, warm_start_option_indices)
 
     _solve(prob, cplex_path, time_limit_s, mip_gap_rel, mip_gap_abs, threads, msg, warm_start=use_warm_start)
     status = _solution_status_label(prob.status, getattr(prob, "sol_status", None))
@@ -419,7 +442,15 @@ def solve_executable_trip_milp_with_cplex(
     in_transit_t = initial_in_transit_t + captured_from_operations_t - stored_t - vented_t
     cost = _executable_trip_cost_breakdown(env, scenario, start_step, H, options, choose, stored_t, params)
     total_cost = cost["operating_cost"] + vented_t * params.carbon_price_eur_per_t
-    net_reward = reward_per_t * stored_t - total_cost
+    overflow_risk_t = sum(_value(var) for var in model.overflow_risk.values())
+    objective_value = control_objective_value(
+        objective_weights,
+        operating_cost=cost["operating_cost"],
+        vented_t=vented_t,
+        stored_t=stored_t,
+        overflow_risk_t=overflow_risk_t,
+    )
+    net_reward = -objective_value
     validation = _validate_trip_solution(
         status,
         [
@@ -463,6 +494,8 @@ def solve_executable_trip_milp_with_cplex(
         total_cost=total_cost,
         storage_reward_eur_per_t=reward_per_t,
         net_reward=net_reward,
+        objective_value=objective_value,
+        overflow_risk_t=overflow_risk_t,
         validation=validation,
         binary_count=len(choose) + len(source_overflow) + len(well_choice) + len(injection_limit_choice),
         variable_count=len(prob.variables()),
@@ -477,6 +510,211 @@ def solve_executable_trip_milp_with_cplex(
             storage_reward_eur_per_t=reward_per_t,
         )
     return result
+
+
+def _build_executable_trip_model(
+    env,
+    scenario: Scenario,
+    *,
+    start_step: int,
+    horizon_h: int,
+    options: list[_TripOption],
+    economics: EconomicParameters,
+    storage_reward_eur_per_t: float,
+) -> _ExecutableTripModel:
+    hours = range(horizon_h)
+    objective_weights = control_objective_weights(
+        env,
+        economics,
+        storage_reward_eur_per_t=storage_reward_eur_per_t,
+    )
+    well_rate_options = _well_rate_options_by_hour(env, scenario, horizon_h)
+    prob = pulp.LpProblem("executable_trip_cplex_milp", pulp.LpMinimize)
+    choose = {i: pulp.LpVariable(f"trip_{i}", cat="Binary") for i in range(len(options))}
+    source_stock, source_ready, source_overflow, vent = _source_variables(env, horizon_h)
+    terminal_stock = _terminal_stock_variables(horizon_h, _terminal_capacity_t(env))
+    well_choice = {
+        (well_id, t, rate_index): pulp.LpVariable(f"well_{well_id}_{t}_{rate_index}", cat="Binary")
+        for well_id in env.well_ids
+        for t in hours
+        for rate_index in well_rate_options[(well_id, t)]
+    }
+    well_inj = _well_injection_variables(env, horizon_h)
+    injection_limit_choice = {
+        (t, limit): pulp.LpVariable(f"injection_limit_{t}_{limit}", cat="Binary")
+        for t in hours
+        for limit in range(2)
+    }
+
+    _add_executable_vessel_and_berth_constraints(
+        prob,
+        options,
+        choose,
+        env,
+        scenario,
+        start_step,
+        horizon_h,
+    )
+    _add_executable_trip_path_constraints(
+        prob,
+        options,
+        choose,
+        env,
+        scenario,
+        start_step,
+        horizon_h,
+    )
+    _add_source_balance_constraints(
+        prob,
+        env,
+        scenario,
+        start_step,
+        horizon_h,
+        source_stock,
+        source_ready,
+        source_overflow,
+        vent,
+        load_at=lambda emitter_id, t: pulp.lpSum(
+            amount * choose[i]
+            for i, option in enumerate(options)
+            for offset, amount in enumerate(option.load_profile_t)
+            if option.emitter_id == emitter_id and option.load_start_h + offset == t
+        ),
+    )
+    overflow_risk = _add_overflow_risk_constraints(
+        prob,
+        env,
+        scenario,
+        start_step,
+        horizon_h,
+        source_stock,
+        objective_weights.overflow_risk_lookahead_h,
+    )
+    _add_executable_terminal_and_injection_constraints(
+        prob,
+        env,
+        scenario,
+        start_step,
+        horizon_h,
+        terminal_stock,
+        options,
+        choose,
+        well_rate_options,
+        well_choice,
+        well_inj,
+        injection_limit_choice,
+    )
+    _add_single_well_dynamic_bhp_constraints(prob, env, well_inj, horizon_h)
+
+    stored_expr = pulp.lpSum(
+        well_inj[(well_id, t)]
+        for well_id in env.well_ids
+        for t in hours
+    )
+    prob += (
+        objective_weights.operating_cost_weight
+        * _executable_trip_cost_expression(options, choose, stored_expr, economics)
+        + objective_weights.vent_eur_per_t
+        * pulp.lpSum(
+            vent[(emitter_id, t)]
+            for emitter_id in env.emitter_ids
+            for t in hours
+        )
+        + objective_weights.overflow_risk_eur_per_t * pulp.lpSum(overflow_risk.values())
+        - stored_expr * objective_weights.storage_reward_eur_per_t
+    )
+    return _ExecutableTripModel(
+        prob=prob,
+        choose=choose,
+        source_stock=source_stock,
+        source_ready=source_ready,
+        source_overflow=source_overflow,
+        vent=vent,
+        overflow_risk=overflow_risk,
+        terminal_stock=terminal_stock,
+        well_rate_options=well_rate_options,
+        well_choice=well_choice,
+        well_inj=well_inj,
+        injection_limit_choice=injection_limit_choice,
+    )
+
+
+def _solve_executable_trip_warm_start(
+    env,
+    scenario: Scenario,
+    *,
+    start_step: int,
+    horizon_h: int,
+    selected_options: list[_TripOption],
+    economics: EconomicParameters,
+    storage_reward_eur_per_t: float,
+    cplex_path: str | None,
+    time_limit_s: float,
+    threads: int | None,
+    msg: bool,
+) -> _ExecutableTripModel:
+    model = _build_executable_trip_model(
+        env,
+        scenario,
+        start_step=start_step,
+        horizon_h=horizon_h,
+        options=selected_options,
+        economics=economics,
+        storage_reward_eur_per_t=storage_reward_eur_per_t,
+    )
+    for variable in model.choose.values():
+        model.prob += variable == 1
+    _solve(
+        model.prob,
+        cplex_path,
+        time_limit_s,
+        None,
+        None,
+        threads,
+        msg,
+        warm_start=False,
+    )
+    model.status = _solution_status_label(
+        model.prob.status,
+        getattr(model.prob, "sol_status", None),
+    )
+    if model.status not in ("Optimal", "Integer Feasible"):
+        raise RuntimeError(
+            "The replay-derived greedy trip warm start is infeasible in the executable trip model "
+            f"(status={model.status})."
+        )
+    return model
+
+
+def _seed_executable_trip_model(
+    model: _ExecutableTripModel,
+    warm_model: _ExecutableTripModel,
+    selected_option_indices: list[int],
+) -> None:
+    selected = set(selected_option_indices)
+    for index, variable in model.choose.items():
+        variable.setInitialValue(1 if index in selected else 0)
+    _copy_initial_values(model.source_stock, warm_model.source_stock)
+    _copy_initial_values(model.source_ready, warm_model.source_ready)
+    _copy_initial_values(model.source_overflow, warm_model.source_overflow)
+    _copy_initial_values(model.vent, warm_model.vent)
+    _copy_initial_values(model.overflow_risk, warm_model.overflow_risk)
+    _copy_initial_values(model.terminal_stock, warm_model.terminal_stock)
+    _copy_initial_values(model.well_choice, warm_model.well_choice)
+    _copy_initial_values(model.well_inj, warm_model.well_inj)
+    _copy_initial_values(model.injection_limit_choice, warm_model.injection_limit_choice)
+
+
+def _copy_initial_values(target: dict, source: dict) -> None:
+    for key, target_variable in target.items():
+        value = _value(source[key])
+        if target_variable.lowBound is not None and value < target_variable.lowBound:
+            if target_variable.lowBound - value <= 1e-6:
+                value = float(target_variable.lowBound)
+        if target_variable.upBound is not None and value > target_variable.upBound:
+            if value - target_variable.upBound <= 1e-6:
+                value = float(target_variable.upBound)
+        target_variable.setInitialValue(value)
 
 
 def replay_trip_milp_plan(env, result: TripMilpResult, *, stored_tol_t: float = 1e-6) -> CplexMilpReplayResult:
@@ -504,70 +742,68 @@ def materialize_native_action_trace(
     H = _horizon(env, scenario, horizon_h or len(native_actions_by_hour))
     start_step = scenario.step_index(_current_start_hour(env))
     params = economics or EconomicParameters()
-    reward_per_t = _storage_reward_eur_per_t(env, storage_reward_eur_per_t)
-    native_actions = _normalise_native_actions(env, native_actions_by_hour, H)
-    vessel_actions_by_hour = {
-        vessel_id: [native_actions[t]["vessels"][vessel_index] for t in range(H)]
-        for vessel_index, vessel_id in enumerate(env.vessel_ids)
-    }
-    well_rate_indices_by_hour = {
-        well_id: [native_actions[t]["wells"][well_index] for t in range(H)]
-        for well_index, well_id in enumerate(env.well_ids)
-    }
+    objective_weights = control_objective_weights(
+        env,
+        params,
+        storage_reward_eur_per_t=storage_reward_eur_per_t,
+    )
+    reward_per_t = objective_weights.storage_reward_eur_per_t
+    initial_in_transit_t = _initial_in_transit_t(env)
+    replay = replay_native_actions(env, native_actions_by_hour, horizon_h=H)
+    native_actions = list(native_actions_by_hour)
+    vessel_actions_by_hour: dict[str, list[int]] = {}
+    well_rate_indices_by_hour: dict[str, list[int]] = {}
+    if replay.is_executable:
+        native_actions = [
+            {
+                "vessels": [int(action) for action in raw["vessels"]],
+                "wells": [int(action) for action in raw["wells"]],
+            }
+            for raw in native_actions_by_hour
+        ]
+        vessel_actions_by_hour = {
+            vessel_id: [native_actions[t]["vessels"][vessel_index] for t in range(H)]
+            for vessel_index, vessel_id in enumerate(env.vessel_ids)
+        }
+        well_rate_indices_by_hour = {
+            well_id: [native_actions[t]["wells"][well_index] for t in range(H)]
+            for well_index, well_id in enumerate(env.well_ids)
+        }
 
-    replay_env = copy.deepcopy(env)
-    start_stored_t = float(replay_env.cumulative_stored_t)
-    start_vented_t = float(replay_env.ledger.vented_t)
-    start_captured_t = float(replay_env.cumulative_captured_t)
-    start_ledger = copy.deepcopy(replay_env.ledger)
-    initial_in_transit_t = _initial_in_transit_t(replay_env)
-    injection_tph: list[float] = []
-    violations: list[str] = []
-    for action in native_actions:
-        before_stored_t = float(replay_env.cumulative_stored_t)
-        _obs, _reward, terminated, truncated, info = replay_env.step(action)
-        injection_tph.append(float(replay_env.cumulative_stored_t) - before_stored_t)
-        violations.extend(str(violation) for violation in info.get("violations", []))
-        if terminated or truncated:
-            break
-    if len(injection_tph) < H:
-        injection_tph.extend([0.0] * (H - len(injection_tph)))
+    actual = replay.actual
+    injection_tph = list(actual.injection_tph)
 
-    stored_t = float(replay_env.cumulative_stored_t) - start_stored_t
-    vented_t = float(replay_env.ledger.vented_t) - start_vented_t
-    captured_from_operations_t = float(replay_env.cumulative_captured_t) - start_captured_t
-    in_transit_t = _initial_in_transit_t(replay_env)
+    stored_t = actual.stored_t
+    vented_t = actual.vented_t
+    captured_from_operations_t = actual.captured_t
+    in_transit_t = actual.in_transit_t
     shortfall_t = _storage_shortfall_t(env, captured_from_operations_t, stored_t)
     cost = {
-        "vessel_fuel": float(replay_env.ledger.vessel_fuel) - float(start_ledger.vessel_fuel),
-        "conditioning": float(replay_env.ledger.conditioning) - float(start_ledger.conditioning),
-        "reconditioning": float(replay_env.ledger.reconditioning) - float(start_ledger.reconditioning),
-        "loading": float(replay_env.ledger.loading) - float(start_ledger.loading),
-        "unloading": float(replay_env.ledger.unloading) - float(start_ledger.unloading),
+        "vessel_fuel": actual.vessel_fuel,
+        "conditioning": actual.conditioning,
+        "reconditioning": actual.reconditioning,
+        "loading": actual.loading,
+        "unloading": actual.unloading,
+        "operating_cost": actual.operating_cost,
     }
-    cost["operating_cost"] = (
-        cost["vessel_fuel"]
-        + cost["conditioning"]
-        + cost["reconditioning"]
-        + cost["loading"]
-        + cost["unloading"]
-    )
-    total_cost = cost["operating_cost"] + vented_t * params.carbon_price_eur_per_t
-    net_reward = reward_per_t * stored_t - total_cost
-    executable_violations = {"berth_required", "bottomhole_pressure_clipped"}
-    is_valid = not (set(violations) & executable_violations)
+    total_cost = actual.total_cost
+    objective_value = actual.objective_value
+    net_reward = -objective_value
+    validation_details = (*replay.violations, *replay.mismatches)
     validation = _Validation(
-        is_valid,
-        "" if is_valid else ";".join(dict.fromkeys(violations)),
+        replay.is_executable,
+        "" if replay.is_executable else ";".join(dict.fromkeys(validation_details)),
         0.0,
     )
-    selected = _native_action_trip_options_from_replay(
-        env,
-        scenario,
-        start_step,
-        H,
-        native_actions,
-    )
+    selected = []
+    if replay.is_executable:
+        selected = _native_action_trip_options_from_replay(
+            env,
+            scenario,
+            start_step,
+            H,
+            native_actions,
+        )
     return _result(
         level=level,
         status=status,
@@ -587,6 +823,8 @@ def materialize_native_action_trace(
         total_cost=total_cost,
         storage_reward_eur_per_t=reward_per_t,
         net_reward=net_reward,
+        objective_value=objective_value,
+        overflow_risk_t=actual.overflow_risk_t,
         validation=validation,
         binary_count=binary_count,
         variable_count=variable_count,
@@ -614,24 +852,6 @@ def _replay_native_solver_trace(
         variable_count=solver_result.variable_count,
         constraint_count=solver_result.constraint_count,
     )
-
-
-def _normalise_native_actions(
-    env,
-    native_actions_by_hour: list[dict[str, list[int]]],
-    horizon_h: int,
-) -> list[dict[str, list[int]]]:
-    actions: list[dict[str, list[int]]] = []
-    for t in range(horizon_h):
-        raw = native_actions_by_hour[t] if t < len(native_actions_by_hour) else {}
-        vessels = [int(action) for action in raw.get("vessels", [])[: len(env.vessel_ids)]]
-        wells = [int(action) for action in raw.get("wells", [])[: len(env.well_ids)]]
-        if len(vessels) < len(env.vessel_ids):
-            vessels.extend([VESSEL_WAIT] * (len(env.vessel_ids) - len(vessels)))
-        if len(wells) < len(env.well_ids):
-            wells.extend([0] * (len(env.well_ids) - len(wells)))
-        actions.append({"vessels": vessels, "wells": wells})
-    return actions
 
 
 def materialize_relaxed_trip_plan(
@@ -965,7 +1185,10 @@ def _add_executable_vessel_and_berth_constraints(
                 choose[i]
                 for i, option in enumerate(options)
                 if option.emitter_id == emitter_id
-                and option.load_start_h <= t < option.depart_h
+                and any(
+                    amount > 1e-9 and option.load_start_h + offset == t
+                    for offset, amount in enumerate(option.load_profile_t)
+                )
             ]
             if active_loads:
                 prob += pulp.lpSum(active_loads) <= 1
@@ -982,7 +1205,10 @@ def _add_executable_vessel_and_berth_constraints(
                 choose[i]
                 for i, option in enumerate(options)
                 if option.vessel_id in vessels_for_terminal
-                and option.arrival_h <= t < option.return_start_h
+                and any(
+                    amount > 1e-9 and option.arrival_h + offset == t
+                    for offset, amount in enumerate(option.unload_profile_t)
+                )
             ]
             if active_unloads:
                 prob += pulp.lpSum(active_unloads) <= min(1, berth_count)
@@ -1492,44 +1718,6 @@ def _extract_well_rate_indices(env, horizon_h: int, well_rate_options, well_choi
     return indices
 
 
-def _apply_executable_trip_mip_start(
-    env,
-    scenario: Scenario,
-    *,
-    start_step: int,
-    horizon_h: int,
-    options: list[_TripOption],
-    choose,
-    well_rate_options,
-    well_choice,
-    native_actions_by_hour: list[dict[str, list[int]]],
-) -> int:
-    for var in choose.values():
-        var.setInitialValue(0)
-    option_by_key = {
-        (option.vessel_id, option.emitter_id, option.load_start_h, option.depart_h): i
-        for i, option in enumerate(options)
-    }
-    selected = 0
-    used_options: set[int] = set()
-    for key in _native_action_trip_keys(env, scenario, start_step, horizon_h, native_actions_by_hour):
-        option_index = option_by_key.get(key)
-        if option_index is None or option_index in used_options:
-            continue
-        choose[option_index].setInitialValue(1)
-        used_options.add(option_index)
-        selected += 1
-
-    for well_index, well_id in enumerate(env.well_ids):
-        for t in range(horizon_h):
-            rate_index = _warm_start_well_rate_index(native_actions_by_hour, well_index, t)
-            if rate_index not in well_rate_options[(well_id, t)]:
-                rate_index = 0
-            for candidate in well_rate_options[(well_id, t)]:
-                well_choice[(well_id, t, candidate)].setInitialValue(1 if candidate == rate_index else 0)
-    return selected
-
-
 def _options_with_native_warm_start(
     env,
     scenario: Scenario,
@@ -1539,11 +1727,29 @@ def _options_with_native_warm_start(
     options: list[_TripOption],
     native_actions_by_hour: list[dict[str, list[int]]],
 ) -> list[_TripOption]:
+    augmented, _selected_indices = _augment_options_with_native_warm_start(
+        env,
+        scenario,
+        start_step=start_step,
+        horizon_h=horizon_h,
+        options=options,
+        native_actions_by_hour=native_actions_by_hour,
+    )
+    return augmented
+
+
+def _augment_options_with_native_warm_start(
+    env,
+    scenario: Scenario,
+    *,
+    start_step: int,
+    horizon_h: int,
+    options: list[_TripOption],
+    native_actions_by_hour: list[dict[str, list[int]]],
+) -> tuple[list[_TripOption], list[int]]:
     augmented = list(options)
-    existing = {
-        (option.vessel_id, option.emitter_id, option.load_start_h, option.depart_h)
-        for option in augmented
-    }
+    index_by_option = {option: index for index, option in enumerate(augmented)}
+    selected_indices: list[int] = []
     for option in _native_action_trip_options_from_replay(
         env,
         scenario,
@@ -1551,12 +1757,13 @@ def _options_with_native_warm_start(
         horizon_h,
         native_actions_by_hour,
     ):
-        key = (option.vessel_id, option.emitter_id, option.load_start_h, option.depart_h)
-        if key in existing:
-            continue
-        augmented.append(option)
-        existing.add(key)
-    return augmented
+        option_index = index_by_option.get(option)
+        if option_index is None:
+            option_index = len(augmented)
+            augmented.append(option)
+            index_by_option[option] = option_index
+        selected_indices.append(option_index)
+    return augmented, selected_indices
 
 
 def _native_action_trip_options_from_replay(
@@ -1568,6 +1775,7 @@ def _native_action_trip_options_from_replay(
 ) -> list[_TripOption]:
     replay_env = copy.deepcopy(env)
     active: dict[str, tuple[str, int, list[float]]] = {}
+    pending: dict[str, _ReplayedTripBuilder] = {}
     options: list[_TripOption] = []
     for t in range(min(horizon_h, len(native_actions_by_hour))):
         before_berth = {
@@ -1586,15 +1794,23 @@ def _native_action_trip_options_from_replay(
             vessel_action = _warm_start_vessel_action(native_actions_by_hour, vessel_index, t)
             destination = _native_action_destination(replay_env, vessel_id, vessel_action)
             if berth in replay_env.emitter_ids and destination == str(replay_env._routes[vessel_id]["destination"]):
-                option = _option_from_replayed_load_profile(
+                loaded = active.pop(vessel_id, None)
+                if loaded is not None:
+                    emitter_id, load_start_h, load_profile = loaded
+                    if sum(load_profile) > 1e-9:
+                        pending[vessel_id] = _ReplayedTripBuilder(
+                            emitter_id=emitter_id,
+                            load_start_h=load_start_h,
+                            depart_h=t,
+                            load_profile_t=list(load_profile),
+                        )
+            terminal_id = str(replay_env._routes[vessel_id]["destination"])
+            if berth == terminal_id and vessel_id in pending and destination not in (None, terminal_id):
+                option = _option_from_replayed_trip(
                     replay_env,
-                    scenario,
-                    start_step,
-                    horizon_h,
                     vessel_id,
-                    str(berth),
-                    depart_h=t,
-                    active=active.pop(vessel_id, None),
+                    pending.pop(vessel_id),
+                    return_start_h=t,
                 )
                 if option is not None:
                     options.append(option)
@@ -1613,108 +1829,88 @@ def _native_action_trip_options_from_replay(
             if vessel_id not in active or active[vessel_id][0] != emitter_id:
                 active[vessel_id] = (emitter_id, t, [])
             active[vessel_id][2].append(loaded_t)
+
+            continue
+
+        for vessel_id in replay_env.vessel_ids:
+            trip = pending.get(vessel_id)
+            if trip is None:
+                continue
+            terminal_id = str(replay_env._routes[vessel_id]["destination"])
+            after_state = replay_env.simulator.vessel_states[vessel_id]
+            if trip.arrival_h is None and after_state.get("mode") == "berthed" and after_state.get("berth") == terminal_id:
+                trip.arrival_h = t + 1
+            if before_berth[vessel_id] == terminal_id and trip.arrival_h is not None:
+                after_cargo = float(replay_env.simulator.state.entity_inventory_t.get(vessel_id, 0.0))
+                trip.unload_profile_t.append(max(0.0, before_cargo[vessel_id] - after_cargo))
         if terminated or truncated:
             break
+
+    replay_horizon_h = min(horizon_h, len(native_actions_by_hour))
+    for vessel_id, trip in pending.items():
+        if trip.arrival_h is None:
+            trip.arrival_h = replay_horizon_h + 1
+            return_start_h = replay_horizon_h + 1
+        else:
+            return_start_h = replay_horizon_h
+        option = _option_from_replayed_trip(
+            replay_env,
+            vessel_id,
+            trip,
+            return_start_h=return_start_h,
+        )
+        if option is not None:
+            options.append(option)
+    for vessel_id, (emitter_id, load_start_h, load_profile) in active.items():
+        option = _option_from_replayed_trip(
+            replay_env,
+            vessel_id,
+            _ReplayedTripBuilder(
+                emitter_id=emitter_id,
+                load_start_h=load_start_h,
+                depart_h=replay_horizon_h,
+                load_profile_t=list(load_profile),
+                arrival_h=replay_horizon_h,
+            ),
+            return_start_h=replay_horizon_h,
+        )
+        if option is not None:
+            options.append(option)
     return options
 
 
-def _option_from_replayed_load_profile(
+def _option_from_replayed_trip(
     env,
-    scenario: Scenario,
-    start_step: int,
-    horizon_h: int,
     vessel_id: str,
-    emitter_id: str,
+    trip: _ReplayedTripBuilder,
     *,
-    depart_h: int,
-    active: tuple[str, int, list[float]] | None,
+    return_start_h: int,
 ) -> _TripOption | None:
-    if active is None:
+    if trip.arrival_h is None or return_start_h < trip.arrival_h:
         return None
-    active_emitter_id, load_start_h, load_profile = active
-    if active_emitter_id != emitter_id:
-        return None
-    load_profile = [max(0.0, float(amount)) for amount in load_profile]
+    load_profile = [max(0.0, float(amount)) for amount in trip.load_profile_t]
     amount_t = sum(load_profile)
-    if amount_t <= 1e-9 or depart_h != load_start_h + len(load_profile):
-        return None
-    if depart_h <= load_start_h or depart_h >= horizon_h:
+    if amount_t <= 1e-9 or trip.depart_h != trip.load_start_h + len(load_profile):
         return None
     vessel = env.network.entities[vessel_id]
-    emitter = env.network.entities[emitter_id]
+    emitter = env.network.entities[trip.emitter_id]
     load_rate = min(float(vessel.loading_rate_tph), float(emitter.loading_rate_tph))
-    terminal_id = str(env._routes[vessel_id]["destination"])
-    outbound_h = _sail_hours_between(
-        env,
-        emitter_id,
-        terminal_id,
-        vessel_id,
-        scenario=scenario,
-        start_step=start_step + depart_h,
-        max_horizon_h=horizon_h - depart_h,
-    )
-    arrival_h = depart_h + outbound_h
-    unload_hours = max(1, math.ceil(amount_t / max(1e-9, float(vessel.unloading_rate_tph))))
-    return_start_h = arrival_h + unload_hours
-    if arrival_h >= horizon_h or return_start_h > horizon_h:
-        return None
     return _TripOption(
         vessel_id=vessel_id,
-        emitter_id=emitter_id,
-        load_start_h=load_start_h,
-        depart_h=depart_h,
-        arrival_h=arrival_h,
+        emitter_id=trip.emitter_id,
+        load_start_h=trip.load_start_h,
+        depart_h=trip.depart_h,
+        arrival_h=trip.arrival_h,
         return_start_h=return_start_h,
         end_h=return_start_h,
         capacity_t=float(vessel.capacity_t),
         load_rate_tph=load_rate,
         unload_rate_tph=float(vessel.unloading_rate_tph),
-        outbound_sail_h=outbound_h,
+        outbound_sail_h=trip.arrival_h - trip.depart_h,
         return_sail_h=0,
         load_profile_t=tuple(load_profile),
-        unload_profile_t=tuple(_bounded_profile(amount_t, float(vessel.unloading_rate_tph), unload_hours)),
+        unload_profile_t=tuple(max(0.0, float(amount)) for amount in trip.unload_profile_t),
     )
-
-
-def _native_action_trip_keys(
-    env,
-    scenario: Scenario,
-    start_step: int,
-    horizon_h: int,
-    native_actions_by_hour: list[dict[str, list[int]]],
-) -> list[tuple[str, str, int, int]]:
-    keys: list[tuple[str, str, int, int]] = []
-    for vessel_index, vessel_id in enumerate(env.vessel_ids):
-        start = _path_start(env, scenario, start_step, vessel_id, horizon_h)
-        if start.node_id is None or start.start_h >= horizon_h:
-            continue
-        terminal_id = str(env._routes[vessel_id]["destination"])
-        current_node = str(start.node_id)
-        loading_start_h: int | None = None
-        t = int(start.start_h)
-        while t < horizon_h:
-            action = _warm_start_vessel_action(native_actions_by_hour, vessel_index, t)
-            destination = _native_action_destination(env, vessel_id, action)
-            if destination is None or destination == current_node:
-                if current_node in env.emitter_ids and loading_start_h is None:
-                    loading_start_h = t
-                t += 1
-                continue
-            if current_node in env.emitter_ids and destination == terminal_id and loading_start_h is not None:
-                keys.append((vessel_id, current_node, loading_start_h, t))
-            loading_start_h = None
-            sail_h = _sail_hours_between(
-                env,
-                current_node,
-                destination,
-                vessel_id,
-                scenario=scenario,
-                start_step=start_step + t,
-                max_horizon_h=max(1, horizon_h - t),
-            )
-            current_node = destination
-            t = max(t + 1, t + sail_h)
-    return keys
 
 
 def _warm_start_vessel_action(native_actions_by_hour: list[dict[str, list[int]]], vessel_index: int, t: int) -> int:
@@ -1722,15 +1918,6 @@ def _warm_start_vessel_action(native_actions_by_hour: list[dict[str, list[int]]]
         return int(native_actions_by_hour[t]["vessels"][vessel_index])
     except (IndexError, KeyError, TypeError, ValueError):
         return VESSEL_WAIT
-
-
-def _warm_start_well_rate_index(native_actions_by_hour: list[dict[str, list[int]]], well_index: int, t: int) -> int:
-    try:
-        return int(native_actions_by_hour[t]["wells"][well_index])
-    except (IndexError, KeyError, TypeError, ValueError):
-        return 0
-
-
 def _native_action_destination(env, vessel_id: str, action: int) -> str | None:
     if action == VESSEL_WAIT:
         return None
@@ -1779,6 +1966,8 @@ def _result(
     binary_count: int,
     variable_count: int,
     constraint_count: int,
+    objective_value: float | None = None,
+    overflow_risk_t: float = 0.0,
 ) -> TripMilpResult:
     return TripMilpResult(
         level=level,
@@ -1801,12 +1990,14 @@ def _result(
         total_cost_per_stored_t=total_cost / stored_t if stored_t > 0.0 else float("nan"),
         storage_reward_eur_per_t=storage_reward_eur_per_t,
         net_reward=net_reward,
-        objective_value=-net_reward,
+        objective_value=-net_reward if objective_value is None else objective_value,
         vessel_fuel=cost["vessel_fuel"],
         conditioning=cost["conditioning"],
         reconditioning=cost["reconditioning"],
         loading=cost["loading"],
         unloading=cost["unloading"],
+        captured_from_operations_t=captured_from_operations_t,
+        overflow_risk_t=overflow_risk_t,
         is_valid=validation.is_valid,
         validation_error=validation.validation_error,
         max_binary_integrality_violation=validation.max_binary_integrality_violation,
@@ -1943,6 +2134,34 @@ def _captured_from_operations(env, scenario: Scenario, start_step: int, horizon_
         for emitter_id in env.emitter_ids
         for t in range(horizon_h)
     )
+
+
+def _add_overflow_risk_constraints(
+    prob,
+    env,
+    scenario: Scenario,
+    start_step: int,
+    horizon_h: int,
+    source_stock,
+    lookahead_h: float,
+):
+    if lookahead_h <= 0.0:
+        return {}
+    risk = {
+        (emitter_id, t): pulp.LpVariable(f"overflow_risk_{emitter_id}_{t}", lowBound=0.0)
+        for emitter_id in env.emitter_ids
+        for t in range(horizon_h)
+    }
+    for emitter_id in env.emitter_ids:
+        emitter = env.network.entities[emitter_id]
+        for t in range(horizon_h):
+            capture_tph = _capture_tonnes(env, scenario, emitter_id, start_step + t)
+            prob += risk[(emitter_id, t)] >= (
+                capture_tph * lookahead_h
+                - emitter.buffer_capacity_t
+                + source_stock[(emitter_id, t + 1)]
+            )
+    return risk
 
 
 def _storage_shortfall_t(env, captured_from_operations_t: float, stored_t: float) -> float:

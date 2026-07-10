@@ -18,6 +18,8 @@ from sim.control.rolling_milp import (
     _plan_explicit_actions,
     _sail_hours_between,
 )
+from sim.control.native_mpc import RollingNativeMpcController, _NativeMpcCandidate
+from sim.control.trip_milp import materialize_native_action_trace
 from sim.economics import EconomicParameters
 from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, SubseaManifold, Terminal, Vessel
 from sim.environment import (
@@ -71,7 +73,14 @@ def _no_capture_env(cap_hours: int = 24) -> CCSEnv:
         ),
         config=CCSEnvConfig(episode_hours=cap_hours),
         routes={
-            "ship": {"origin": "source", "destination": "terminal", "distance_km": 1.852, "speed_knots": 1.0},
+            "ship": {
+                "origin": "source",
+                "destination": "terminal",
+                "distance_km": 1.852,
+                "speed_knots": 1.0,
+                "coordinates": [(0.0, 0.0), (0.0, 1.0)],
+                "return_coordinates": [(0.0, 1.0), (0.0, 0.0)],
+            },
         },
     )
 
@@ -168,7 +177,7 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         self.assertIsNotNone(defaults)
         self.assertEqual(defaults[-1], 30.0)
 
-    def test_invalid_plan_uses_fallback_policy_and_logs_reason(self):
+    def test_invalid_plan_raises_instead_of_executing_a_fallback_policy(self):
         env = _cold_env(cap_hours=24)
         env.reset(seed=1)
         messages: list[str] = []
@@ -195,13 +204,13 @@ class RollingMilpInterfaceTests(unittest.TestCase):
                 progress=messages.append,
                 fallback_policy=lambda _env: fallback_action,
             )
-            action = controller.policy(env)
+            with self.assertRaisesRegex(RuntimeError, "solver status Not Solved"):
+                controller.policy(env)
 
-        self.assertEqual(action, fallback_action)
         self.assertEqual(controller.last_plan_status, "Not Solved")
         self.assertFalse(controller.last_plan_valid)
-        self.assertEqual(controller.fallback_count, 1)
-        self.assertTrue(any("fallback" in message and "Not Solved" in message for message in messages))
+        self.assertEqual(controller.fallback_count, 0)
+        self.assertTrue(any("invalid" in message and "Not Solved" in message for message in messages))
 
     def test_controller_executes_planned_hourly_action_directly(self):
         env = _cold_env(cap_hours=24)
@@ -239,6 +248,32 @@ class RollingMilpInterfaceTests(unittest.TestCase):
             action = RollingMilpController(env, replan_every=12).policy(env)
 
         self.assertEqual(action["vessels"][env.vessel_ids.index(vessel_id)], planned_action)
+
+    def test_controller_uses_the_replayed_native_well_action(self):
+        env = _cold_env(cap_hours=24)
+        env.reset(seed=1)
+        planned_wells = [env.highest_feasible_well_rate_index(well_id) for well_id in env.well_ids]
+        plan = SimpleNamespace(
+            vessel_actions_by_hour={vessel_id: [VESSEL_WAIT] for vessel_id in env.vessel_ids},
+            injection_tph=[0.0],
+            native_actions_by_hour=[
+                {
+                    "vessels": [VESSEL_WAIT] * len(env.vessel_ids),
+                    "wells": planned_wells,
+                }
+            ],
+            vented_t=0.0,
+            shortfall_t=0.0,
+            total_cost=0.0,
+            status="Optimal",
+            is_valid=True,
+            validation_error="",
+        )
+
+        with patch("sim.control.rolling_milp._plan_explicit_actions", return_value=plan):
+            action = RollingMilpController(env, replan_every=12).policy(env)
+
+        self.assertEqual(action["wells"], planned_wells)
 
     def test_planner_sailing_hours_between_emitters_uses_maritime_route(self):
         env = _cold_env(cap_hours=24)
@@ -299,9 +334,56 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         self.assertEqual(sail_at_t1.duration_h, 2)
 
 
+class NativeMpcTests(unittest.TestCase):
+    def test_native_mpc_objective_is_fixed_to_vent_inventory_then_operating_cost(self):
+        low_inventory = _NativeMpcCandidate(
+            name="low_inventory",
+            native_actions_by_hour=[],
+            vented_t=0.0,
+            end_unstored_t=10.0,
+            operating_cost=100.0,
+            total_cost=120.0,
+            is_valid=True,
+        )
+        low_cost = _NativeMpcCandidate(
+            name="low_cost",
+            native_actions_by_hour=[],
+            vented_t=0.0,
+            end_unstored_t=100.0,
+            operating_cost=10.0,
+            total_cost=20.0,
+            is_valid=True,
+        )
+
+        best = min([low_inventory, low_cost], key=RollingNativeMpcController._candidate_key)
+
+        self.assertEqual(best.name, "low_inventory")
+
+    def test_native_mpc_constructor_rejects_alternate_objective_mode(self):
+        env = _cold_env(cap_hours=24)
+
+        with self.assertRaises(TypeError):
+            RollingNativeMpcController(env, objective_mode="vent_then_total_cost")
+
+    def test_native_mpc_runs_a_replayable_episode_without_a_milp_solver(self):
+        env = _cold_env(cap_hours=48)
+        controller = RollingNativeMpcController(
+            env,
+            replan_every=24,
+            planning_horizon_h=48,
+        )
+
+        metrics = run_episode(env, controller, seed=1)
+
+        self.assertEqual(metrics.elapsed_hours, 48)
+        self.assertTrue(controller.last_trace_replay_is_valid)
+        self.assertTrue(controller.last_trace_replay_is_exact)
+        self.assertGreaterEqual(controller.candidate_evaluations, 2)
+
+
 @unittest.skipUnless(HAVE_PULP, "pulp/CBC not installed")
 class RollingMilpTests(unittest.TestCase):
-    def test_controller_runs_to_horizon_and_stores_co2(self):
+    def test_controller_rejects_an_inexact_plan(self):
         env = _cold_env(cap_hours=96)
         controller = RollingMilpController(
             env,
@@ -310,27 +392,28 @@ class RollingMilpTests(unittest.TestCase):
             time_limit_s=1.0,
             economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
         )
-        metrics = run_episode(env, controller, seed=1)
-        self.assertEqual(metrics.elapsed_hours, 96)
-        self.assertGreater(metrics.stored_t, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            run_episode(env, controller, seed=1)
+        self.assertFalse(controller.last_plan_valid)
+        self.assertTrue(controller.last_validation_error)
 
-    def test_controller_resets_between_episodes(self):
+    def test_controller_consistently_rejects_inexact_plans_after_reset(self):
         env = _cold_env(cap_hours=96)
         controller = RollingMilpController(env, replan_every=48, planning_horizon_h=48, time_limit_s=3.0)
-        a = run_episode(env, controller, seed=1).stored_t
-        b = run_episode(env, controller, seed=1).stored_t  # reused controller
-        self.assertEqual(a, b)  # stale plan would make the second run differ
+        for _ in range(2):
+            with self.assertRaisesRegex(RuntimeError, "expected"):
+                run_episode(env, controller, seed=1)
+            self.assertFalse(controller.last_plan_valid)
 
-    def test_controller_uses_fixed_horizon_plan_without_storage_goal(self):
+    def test_controller_rejects_inexact_fixed_horizon_plan_without_storage_goal(self):
         env = _cold_env(cap_hours=96)
         env.reset(seed=1)
         controller = RollingMilpController(env, replan_every=12, planning_horizon_h=48)
-        action = controller.policy(env)
-        self.assertEqual(len(action["vessels"]), len(env.vessel_ids))
-        self.assertEqual(len(action["wells"]), len(env.well_ids))
-        self.assertTrue(all(0 <= index < len(WELL_RATE_LEVELS_MTPA) for index in action["wells"]))
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            controller.policy(env)
+        self.assertFalse(controller.last_plan_valid)
 
-    def test_empty_vessel_returns_to_best_available_emitter_not_fixed_home(self):
+    def test_unusual_state_does_not_silently_fallback_to_greedy(self):
         env = _cold_env(cap_hours=96)
         env.reset(seed=1)
         vessel_id = env.vessel_ids[0]
@@ -350,9 +433,11 @@ class RollingMilpTests(unittest.TestCase):
         other_vessel = next(vid for vid in env.vessel_ids if vid != vessel_id)
         env._routes[other_vessel]["speed_knots"] = 0.001
 
-        action = RollingMilpController(env, replan_every=12, planning_horizon_h=96).policy(env)
+        controller = RollingMilpController(env, replan_every=12, planning_horizon_h=96, time_limit_s=1.0)
 
-        self.assertEqual(action["vessels"][0], env.vessel_go_emitter_action(other))
+        with self.assertRaises(RuntimeError):
+            controller.policy(env)
+        self.assertFalse(controller.last_plan_valid)
 
     def test_no_capture_plan_does_not_fallback_to_unplanned_greedy_sailing(self):
         env = _no_capture_env(cap_hours=24)
@@ -386,6 +471,25 @@ class RollingMilpTests(unittest.TestCase):
         for actions in plan.vessel_actions_by_hour.values():
             self.assertTrue(all(0 <= action < env.vessel_action_count for action in actions))
 
+    def test_plan_exposes_an_exact_replay_of_its_native_action_trace(self):
+        env = _two_berth_parallel_env()
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 2_000.0
+
+        plan = _plan_explicit_actions(env, planning_horizon_h=3, economics=EconomicParameters())
+        replay = materialize_native_action_trace(
+            env,
+            plan.native_actions_by_hour,
+            horizon_h=3,
+            economics=EconomicParameters(),
+        )
+
+        self.assertTrue(plan.replay_is_valid)
+        self.assertTrue(replay.is_valid, replay.validation_error)
+        self.assertAlmostEqual(plan.replay_vented_t, replay.vented_t)
+        self.assertAlmostEqual(plan.replay_stored_t, replay.stored_t)
+        self.assertAlmostEqual(plan.replay_total_cost, replay.total_cost)
+
     def test_explicit_plan_can_depart_one_emitter_for_another(self):
         env = _two_source_one_ship_fast_env()
         env.reset(seed=1)
@@ -399,8 +503,44 @@ class RollingMilpTests(unittest.TestCase):
             economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
         )
 
-        self.assertTrue(plan.is_valid, plan.validation_error)
+        self.assertTrue(plan.replay_is_valid)
+        self.assertFalse(plan.replay_is_exact)
+        self.assertFalse(plan.is_valid)
         self.assertIn(env.vessel_go_emitter_action("source_b"), plan.vessel_actions_by_hour["ship"])
+
+    def test_vent_first_plan_minimizes_vent_before_operating_cost(self):
+        economics = EconomicParameters(carbon_price_eur_per_t=0.0)
+        economic_env = _cold_env(cap_hours=24)
+        economic_env.reset(seed=1)
+        vent_first_env = _cold_env(cap_hours=24)
+        vent_first_env.config.reward_mode = "vent_first"
+        vent_first_env.reset(seed=1)
+        for env in (economic_env, vent_first_env):
+            for emitter_id in env.emitter_ids:
+                emitter = env.network.entities[emitter_id]
+                env.simulator.state.entity_inventory_t[emitter_id] = emitter.buffer_capacity_t
+
+        economic = _plan_explicit_actions(economic_env, planning_horizon_h=24, economics=economics)
+        vent_first = _plan_explicit_actions(vent_first_env, planning_horizon_h=24, economics=economics)
+
+        self.assertTrue(vent_first.replay_is_valid)
+        self.assertFalse(vent_first.replay_is_exact)
+        self.assertFalse(vent_first.is_valid)
+        self.assertLess(vent_first.vented_t, economic.vented_t)
+
+    def test_vent_first_tie_breaker_clears_terminal_inventory_before_cost(self):
+        env = _no_capture_env(cap_hours=3)
+        env.reset(seed=1)
+        env.config.reward_mode = "vent_first"
+        env.simulator.state.entity_inventory_t["terminal"] = 1_000.0
+        env.cumulative_captured_t = 1_000.0
+
+        plan = _plan_explicit_actions(env, planning_horizon_h=3, economics=EconomicParameters())
+
+        self.assertTrue(plan.replay_is_valid)
+        self.assertFalse(plan.replay_is_exact)
+        self.assertFalse(plan.is_valid)
+        self.assertGreater(plan.replay_stored_t, 0.0)
 
     def test_explicit_plan_can_start_voyage_that_finishes_after_lookahead(self):
         env = _no_capture_env(cap_hours=2)
@@ -449,7 +589,9 @@ class RollingMilpTests(unittest.TestCase):
             economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
         )
 
-        self.assertTrue(plan.is_valid, plan.validation_error)
+        self.assertTrue(plan.replay_is_valid)
+        self.assertFalse(plan.replay_is_exact)
+        self.assertFalse(plan.is_valid)
         self.assertGreater(plan.injection_tph[0], 400.0)
         self.assertLessEqual(plan.injection_tph[1], 100.0 + 1e-6)
         self.assertAlmostEqual(plan.injection_tph[2], 0.0)
@@ -467,7 +609,9 @@ class RollingMilpTests(unittest.TestCase):
             economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
         )
 
-        self.assertTrue(plan.is_valid, plan.validation_error)
+        self.assertTrue(plan.replay_is_valid)
+        self.assertFalse(plan.replay_is_exact)
+        self.assertFalse(plan.is_valid)
         self.assertGreater(plan.injection_tph[0], 400.0)
 
 

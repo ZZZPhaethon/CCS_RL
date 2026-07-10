@@ -19,12 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import product
 import math
+from pathlib import Path
 import time
 from typing import Callable
 
 from ..economics import EconomicParameters
 from ..entities.storage import InjectionWell
-from ..entities.terminal import Terminal
 from ..environment import (
     WELL_RATE_LEVELS_MTPA,
     VESSEL_GO_TERMINAL,
@@ -32,8 +32,9 @@ from ..environment import (
     CCSEnv,
 )
 from ..routes import route_distance_km, sea_route
-from .baselines import greedy_shuttle_policy
 from .milp import KNOTS_TO_KMH, _validate_static_solution, extract_params
+from .objective import control_objective_value, control_objective_weights
+from .replay import ReplayExpectation, replay_native_actions
 
 _MTPA_TO_TPH = 1_000_000.0 / (365.25 * 24.0)
 _DOWNSTREAM_INVENTORY_CREDIT = 0.5
@@ -44,13 +45,22 @@ Policy = Callable[[CCSEnv], dict[str, list]]
 class RollingMilpPlan:
     vessel_actions_by_hour: dict[str, list[int]]
     injection_tph: list[float]
+    native_actions_by_hour: list[dict[str, list[int]]]
     vented_t: float
     shortfall_t: float
     total_cost: float
+    replay_vented_t: float
+    replay_stored_t: float
+    replay_total_cost: float
+    replay_is_valid: bool
+    replay_validation_error: str
     status: str
     is_valid: bool
     validation_error: str = ""
     max_binary_integrality_violation: float = 0.0
+    replay_is_exact: bool = False
+    replay_mismatches: tuple[str, ...] = ()
+    replay_compared_fields: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -207,19 +217,17 @@ def _plan_explicit_actions(
     prob += terminal_stock[0] == initial_terminal_t
     for t in hours:
         prob += terminal_stock[t + 1] == terminal_stock[t] + pulp.lpSum(unload[(vessel_id, t)] for vessel_id in env.vessel_ids) - inj[t]
-        for terminal_id, berth_count in _terminal_berth_counts(env).items():
+        for terminal_id in env.terminal_ids:
             vessels_for_terminal = [
                 vessel_id
                 for vessel_id in env.vessel_ids
                 if str(env._routes[vessel_id]["destination"]) == terminal_id
             ]
-            prob += (
-                pulp.lpSum(
-                    _wait_expr(arc_vars, wait_arc, vessel_id, terminal_id, t)
-                    for vessel_id in vessels_for_terminal
-                )
-                <= berth_count
+            max_unload_tph = max(
+                (env.network.entities[vessel_id].unloading_rate_tph for vessel_id in vessels_for_terminal),
+                default=0.0,
             )
+            prob += pulp.lpSum(unload[(vessel_id, t)] for vessel_id in vessels_for_terminal) <= max_unload_tph
 
     final_downstream_cargo = {}
     for vessel_id in env.vessel_ids:
@@ -253,18 +261,68 @@ def _plan_explicit_actions(
         float(env.cumulative_captured_t) + captured_from_operations_t
     )
     prob += shortfall >= required_storage_t - storage_progress_expr
-    prob += (
+    operating_cost_expr = (
         _sailing_cost_expression(arcs, arc_vars, economics)
         + _loading_cost_expression(env, load, economics)
         + _unloading_cost_expression(env, unload, economics)
         + stored_expr * economics.reconditioning_eur_per_t
-        + pulp.lpSum(vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours)
-        * economics.carbon_price_eur_per_t
-        + shortfall * economics.storage_shortfall_eur_per_t
     )
-    prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=time_limit_s))
+    vent_expr = pulp.lpSum(vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours)
+    end_unstored_inventory_expr = (
+        pulp.lpSum(source_stock[(emitter_id, H)] for emitter_id in env.emitter_ids)
+        + terminal_stock[H]
+        + pulp.lpSum(cargo[(vessel_id, H)] for vessel_id in env.vessel_ids)
+    )
+    _seed_idle_mip_start(
+        env,
+        H,
+        arcs,
+        starts,
+        arc_vars,
+        wait_arc,
+        cargo,
+        load,
+        unload,
+        source_stock,
+        terminal_stock,
+        inj,
+        vent,
+        shortfall,
+        final_downstream_cargo,
+    )
+    objective_weights = control_objective_weights(env, economics)
+    if objective_weights.mode == "vent_first":
+        stage_start = time.perf_counter()
+        prob.setObjective(vent_expr)
+        _solve_cbc(prob, time_limit_s)
+        stage_one_status = pulp.LpStatus[prob.status]
+        if stage_one_status not in {"Optimal", "Integer Feasible"}:
+            status = stage_one_status
+        else:
+            optimal_vent_t = max(0.0, _value(vent_expr))
+            prob += vent_expr <= optimal_vent_t + 1e-3
+            elapsed_s = time.perf_counter() - stage_start
+            prob.setObjective(end_unstored_inventory_expr)
+            _solve_cbc(prob, max(1.0, (time_limit_s - elapsed_s) / 2.0))
+            stage_two_status = pulp.LpStatus[prob.status]
+            if stage_two_status not in {"Optimal", "Integer Feasible"}:
+                status = stage_two_status
+            else:
+                optimal_end_unstored_t = max(0.0, _value(end_unstored_inventory_expr))
+                prob += end_unstored_inventory_expr <= optimal_end_unstored_t + 1e-3
+                remaining_s = max(1.0, time_limit_s - (time.perf_counter() - stage_start))
+                prob.setObjective(operating_cost_expr)
+                _solve_cbc(prob, remaining_s)
+                status = pulp.LpStatus[prob.status]
+    else:
+        prob.setObjective(
+            operating_cost_expr
+            + vent_expr * economics.carbon_price_eur_per_t
+            + shortfall * economics.storage_shortfall_eur_per_t
+        )
+        _solve_cbc(prob, time_limit_s)
+        status = pulp.LpStatus[prob.status]
 
-    status = pulp.LpStatus[prob.status]
     vessel_actions_by_hour = _extract_actions(env, H, arcs, arc_vars)
     injection_tph = [max(0.0, _value(inj[t])) for t in hours]
     vented_t = sum(_value(vent[(emitter_id, t)]) for emitter_id in env.emitter_ids for t in hours)
@@ -287,17 +345,180 @@ def _plan_explicit_actions(
         initial_in_transit_t=initial_in_transit_t,
         max_storable_from_deliveries_t=initial_terminal_t + unloaded_t,
     )
+    well_rate_indices_by_hour = [
+        _well_rate_indices_for_total_tph(env, target_tph)
+        for target_tph in injection_tph
+    ]
+    native_actions_by_hour = [
+        {
+            "vessels": [vessel_actions_by_hour[vessel_id][t] for vessel_id in env.vessel_ids],
+            "wells": well_rate_indices_by_hour[t],
+        }
+        for t in hours
+    ]
+    predicted_operating_cost = _value(operating_cost_expr)
+    predicted_total_cost = _value(
+        operating_cost_expr + vent_expr * economics.carbon_price_eur_per_t
+    )
+    predicted_objective = control_objective_value(
+        objective_weights,
+        operating_cost=predicted_operating_cost,
+        vented_t=vented_t,
+        stored_t=stored_t,
+    )
+    replay = replay_native_actions(
+        env,
+        native_actions_by_hour,
+        horizon_h=H,
+        expected=ReplayExpectation(
+            required_fields=frozenset(
+                {
+                    "elapsed_hours",
+                    "stored_t",
+                    "vented_t",
+                    "captured_t",
+                    "in_transit_t",
+                    "operating_cost",
+                    "total_cost",
+                    "objective_value",
+                    "overflow_risk_t",
+                    "injection_tph",
+                }
+            ),
+            elapsed_hours=H,
+            stored_t=stored_t,
+            vented_t=vented_t,
+            captured_t=captured_from_operations_t,
+            in_transit_t=in_transit_t,
+            operating_cost=predicted_operating_cost,
+            total_cost=predicted_total_cost,
+            objective_value=predicted_objective,
+            overflow_risk_t=0.0,
+            injection_tph=tuple(injection_tph),
+        ),
+    )
+    replay_error = ""
+    if not replay.is_exact:
+        replay_error = ";".join(
+            dict.fromkeys((*replay.violations, *replay.mismatches))
+        )
+    validation_error = ";".join(
+        error for error in (validation.validation_error, replay_error) if error
+    )
+    actual = replay.actual
     return RollingMilpPlan(
         vessel_actions_by_hour=vessel_actions_by_hour,
         injection_tph=injection_tph,
+        native_actions_by_hour=native_actions_by_hour,
         vented_t=vented_t,
         shortfall_t=shortfall_t,
-        total_cost=_value(prob.objective),
+        total_cost=predicted_total_cost,
+        replay_vented_t=actual.vented_t,
+        replay_stored_t=actual.stored_t,
+        replay_total_cost=actual.total_cost,
+        replay_is_valid=replay.is_executable,
+        replay_validation_error=replay_error,
         status=status,
-        is_valid=validation.is_valid,
-        validation_error=validation.validation_error,
+        is_valid=validation.is_valid and replay.is_exact,
+        validation_error=validation_error,
         max_binary_integrality_violation=validation.max_binary_integrality_violation,
+        replay_is_exact=replay.is_exact,
+        replay_mismatches=replay.mismatches,
+        replay_compared_fields=replay.compared_fields,
     )
+
+
+def _well_rate_indices_for_total_tph(env: CCSEnv, target_tph: float) -> list[int]:
+    feasible_by_well = [
+        [index for index, allowed in enumerate(mask) if allowed]
+        for mask in env.well_rate_action_mask()
+    ]
+    if not feasible_by_well:
+        return []
+    best: tuple[tuple[float, int], tuple[int, ...]] | None = None
+    for indices in product(*feasible_by_well):
+        total_tph = sum(WELL_RATE_LEVELS_MTPA[index] * _MTPA_TO_TPH for index in indices)
+        over_target = 1 if total_tph > float(target_tph) + 1e-9 else 0
+        score = (over_target, abs(total_tph - float(target_tph)))
+        if best is None or score < best[0]:
+            best = (score, tuple(int(index) for index in indices))
+    return list(best[1]) if best is not None else []
+
+
+def _seed_idle_mip_start(
+    env: CCSEnv,
+    horizon_h: int,
+    arcs: list[_ActionArc],
+    starts: dict[str, _PathStart],
+    arc_vars,
+    wait_arc,
+    cargo,
+    load,
+    unload,
+    source_stock,
+    terminal_stock,
+    inj,
+    vent,
+    shortfall,
+    final_downstream_cargo,
+) -> None:
+    """Seed CBC with a feasible native no-dispatch trajectory."""
+    state = env.simulator.state
+    for var in arc_vars.values():
+        var.setInitialValue(0.0)
+    for vessel_id in env.vessel_ids:
+        start = starts[vessel_id]
+        if start.node_id is not None:
+            for t in range(start.start_h, horizon_h):
+                index = wait_arc.get((vessel_id, start.node_id, t))
+                if index is not None:
+                    arc_vars[index].setInitialValue(1.0)
+        initial_cargo_t = float(state.entity_inventory_t.get(vessel_id, 0.0))
+        for t in range(horizon_h + 1):
+            cargo[(vessel_id, t)].setInitialValue(initial_cargo_t)
+        terminal_id = str(env._routes[vessel_id]["destination"])
+        final_downstream_cargo[vessel_id].setInitialValue(
+            initial_cargo_t if start.node_id == terminal_id else 0.0
+        )
+    for var in load.values():
+        var.setInitialValue(0.0)
+    for var in unload.values():
+        var.setInitialValue(0.0)
+    for emitter_id in env.emitter_ids:
+        emitter = env.network.entities[emitter_id]
+        inventory_t = min(
+            emitter.buffer_capacity_t,
+            max(0.0, float(state.entity_inventory_t.get(emitter_id, 0.0))),
+        )
+        source_stock[(emitter_id, 0)].setInitialValue(inventory_t)
+        for t in range(horizon_h):
+            available_t = inventory_t + _capture_tonnes(env, emitter_id, t)
+            next_inventory_t = min(emitter.buffer_capacity_t, available_t)
+            vent[(emitter_id, t)].setInitialValue(max(0.0, available_t - next_inventory_t))
+            source_stock[(emitter_id, t + 1)].setInitialValue(next_inventory_t)
+            inventory_t = next_inventory_t
+    initial_terminal_t = sum(float(state.entity_inventory_t.get(tid, 0.0)) for tid in env.terminal_ids)
+    for t in range(horizon_h + 1):
+        terminal_stock[t].setInitialValue(initial_terminal_t)
+    for var in inj.values():
+        var.setInitialValue(0.0)
+    shortfall.setInitialValue(1_000_000_000.0)
+
+
+def _solve_cbc(prob, time_limit_s: float) -> None:
+    import pulp
+
+    solver = pulp.PULP_CBC_CMD(
+        msg=0,
+        timeLimit=float(time_limit_s),
+        warmStart=True,
+        keepFiles=True,
+    )
+    try:
+        prob.solve(solver)
+    finally:
+        for suffix in (".mps", ".mst", ".sol"):
+            Path(f"{prob.name}-pulp{suffix}").unlink(missing_ok=True)
 
 
 class RollingMilpController:
@@ -318,10 +539,10 @@ class RollingMilpController:
         self.progress = progress
         self.planning_horizon_h = int(planning_horizon_h)
         self.time_limit_s = float(time_limit_s)
-        self.fallback_policy = fallback_policy or greedy_shuttle_policy
-        self.fallback_policy_name = getattr(self.fallback_policy, "__name__", "fallback_policy")
+        self.fallback_policy = fallback_policy
         self._vessel_actions_by_hour: dict[str, list[int]] = {}
         self._planned_injection_tph: list[float] = []
+        self._native_actions_by_hour: list[dict[str, list[int]]] = []
         self._plan_origin_h: float = -1e9
         self._has_active_plan = False
         self._using_fallback = False
@@ -338,9 +559,6 @@ class RollingMilpController:
         new_episode = now < self._plan_origin_h
         if new_episode or now - self._plan_origin_h >= self.replan_every or not self._has_active_plan:
             self._replan(env, now)
-
-        if self._using_fallback:
-            return self.fallback_policy(env)
 
         masks = env.vessel_action_mask()
         vessel_actions = [
@@ -372,19 +590,21 @@ class RollingMilpController:
         self._plan_origin_h = now
         self._has_active_plan = True
         if not plan.is_valid:
+            self._has_active_plan = False
             self._vessel_actions_by_hour = {}
             self._planned_injection_tph = []
-            self._using_fallback = True
-            self.fallback_count += 1
+            self._native_actions_by_hour = []
+            self._using_fallback = False
             if self.progress is not None:
                 self.progress(
                     f"  rolling_milp plan invalid in {time.perf_counter() - start:.1f}s; "
-                    f"status={plan.status}; fallback={self.fallback_policy_name}; reason={plan.validation_error}"
+                    f"status={plan.status}; reason={plan.validation_error}"
                 )
-            return
+            raise RuntimeError(plan.validation_error or f"rolling_milp solver status {plan.status}")
 
         self._vessel_actions_by_hour = plan.vessel_actions_by_hour
         self._planned_injection_tph = plan.injection_tph
+        self._native_actions_by_hour = list(getattr(plan, "native_actions_by_hour", []))
         self._using_fallback = False
         planned_departures = sum(
             1
@@ -402,40 +622,40 @@ class RollingMilpController:
     def _planned_vessel_action(self, env: CCSEnv, vessel_id: str, now: float, mask: list[bool]) -> int:
         actions = self._vessel_actions_by_hour.get(vessel_id)
         if not actions:
-            return VESSEL_WAIT
+            raise RuntimeError(f"rolling_milp has no planned vessel trace for {vessel_id}")
         elapsed = int(max(0.0, math.floor(now - self._plan_origin_h)))
         if elapsed >= len(actions):
-            return VESSEL_WAIT
+            raise RuntimeError(f"rolling_milp vessel trace expired for {vessel_id} at hour {elapsed}")
         choice = int(actions[elapsed])
         if 0 <= choice < len(mask) and mask[choice]:
             return choice
-        return VESSEL_WAIT
+        raise RuntimeError(
+            f"rolling_milp planned vessel action is infeasible for {vessel_id}: {choice}"
+        )
 
     def _well_rate_indices_for_plan(self, env: CCSEnv, now: float) -> list[int]:
+        elapsed = int(max(0.0, math.floor(now - self._plan_origin_h)))
+        if elapsed < len(self._native_actions_by_hour):
+            planned = self._native_actions_by_hour[elapsed].get("wells", [])
+            masks = env.well_rate_action_mask()
+            if len(planned) != len(masks):
+                raise RuntimeError("rolling_milp native well trace has the wrong action dimension")
+            for well_id, rate_index, mask in zip(env.well_ids, planned, masks):
+                if not (0 <= int(rate_index) < len(mask) and mask[int(rate_index)]):
+                    raise RuntimeError(
+                        f"rolling_milp replayed well action is infeasible for {well_id}: {rate_index}"
+                    )
+            return [int(rate_index) for rate_index in planned]
         if not self._planned_injection_tph:
             return [
                 env.highest_feasible_well_rate_index(well_id)
                 for well_id in env.well_ids
             ]
-        elapsed = int(max(0.0, math.floor(now - self._plan_origin_h)))
         index = min(elapsed, len(self._planned_injection_tph) - 1)
         return self._well_rate_indices_from_total_tph(env, self._planned_injection_tph[index])
 
     def _well_rate_indices_from_total_tph(self, env: CCSEnv, target_tph: float) -> list[int]:
-        feasible_by_well = [
-            [index for index, allowed in enumerate(mask) if allowed]
-            for mask in env.well_rate_action_mask()
-        ]
-        if not feasible_by_well:
-            return []
-        best: tuple[tuple[float, int], tuple[int, ...]] | None = None
-        for indices in product(*feasible_by_well):
-            total_tph = sum(WELL_RATE_LEVELS_MTPA[index] * _MTPA_TO_TPH for index in indices)
-            over_target = 1 if total_tph > float(target_tph) + 1e-9 else 0
-            score = (over_target, abs(total_tph - float(target_tph)))
-            if best is None or score < best[0]:
-                best = (score, tuple(int(index) for index in indices))
-        return list(best[1]) if best is not None else []
+        return _well_rate_indices_for_total_tph(env, target_tph)
 
 
 def _build_action_arcs(env: CCSEnv, horizon_h: int) -> tuple[list[_ActionArc], dict[str, _PathStart]]:
@@ -634,13 +854,6 @@ def _capture_tonnes(env: CCSEnv, emitter_id: str, offset_h: int) -> float:
 
 def _terminal_capacity_t(env: CCSEnv) -> float:
     return sum(env.network.entities[terminal_id].storage_capacity_t for terminal_id in env.terminal_ids)
-
-
-def _terminal_berth_counts(env: CCSEnv) -> dict[str, int]:
-    return {
-        terminal_id: max(0, int(terminal.berth_count))
-        for terminal_id, terminal in env.network._entities_of_type(Terminal).items()
-    }
 
 
 def _current_injection_cap_tph(env: CCSEnv, offset_h: int = 0) -> float:

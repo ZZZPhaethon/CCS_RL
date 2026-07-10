@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 import copy
 from dataclasses import dataclass, fields
 import math
+from numbers import Integral
 
 from ..environment import CCSEnv
 
@@ -104,8 +105,23 @@ def compare_replay_snapshots(
     actual: ReplaySnapshot,
     *,
     tolerances: ReplayTolerances | None = None,
-) -> tuple[bool, tuple[str, ...], frozenset[str]]:
+) -> tuple[bool, tuple[str, ...]]:
     """Compare every supplied expectation and reject missing required fields."""
+
+    exact, mismatches, _compared = _compare_replay_snapshots_detailed(
+        expected,
+        actual,
+        tolerances=tolerances,
+    )
+    return exact, mismatches
+
+
+def _compare_replay_snapshots_detailed(
+    expected: ReplayExpectation,
+    actual: ReplaySnapshot,
+    *,
+    tolerances: ReplayTolerances | None = None,
+) -> tuple[bool, tuple[str, ...], frozenset[str]]:
 
     tolerances = tolerances or ReplayTolerances()
     unknown_required = expected.required_fields - _EXPECTATION_FIELDS
@@ -205,7 +221,7 @@ def replay_native_actions(
     comparison_mismatches: tuple[str, ...] = ()
     comparison_exact = False
     if expected is not None:
-        comparison_exact, comparison_mismatches, compared_fields = compare_replay_snapshots(
+        comparison_exact, comparison_mismatches, compared_fields = _compare_replay_snapshots_detailed(
             expected,
             snapshot,
             tolerances=tolerances,
@@ -245,14 +261,18 @@ def _native_action_error(env: CCSEnv, action, step: int) -> str:
         vessel_actions,
         env.vessel_action_mask(),
     ):
-        if not isinstance(choice, int) or not (0 <= choice < len(mask) and mask[choice]):
+        if not isinstance(choice, Integral) or not (
+            0 <= int(choice) < len(mask) and mask[int(choice)]
+        ):
             return f"action[{step}] is not executable for {vessel_id}: {choice}"
     for well_id, choice, mask in zip(
         env.well_ids,
         well_actions,
         env.well_rate_action_mask(),
     ):
-        if not isinstance(choice, int) or not (0 <= choice < len(mask) and mask[choice]):
+        if not isinstance(choice, Integral) or not (
+            0 <= int(choice) < len(mask) and mask[int(choice)]
+        ):
             return f"action[{step}] is not executable for {well_id}: {choice}"
     return ""
 
