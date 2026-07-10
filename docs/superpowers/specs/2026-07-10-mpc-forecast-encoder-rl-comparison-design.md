@@ -47,15 +47,17 @@ For the three-vessel scenario this is expected to be approximately 51 dimensions
 
 ### Forecast branch
 
-The forecast covers offsets `0..167` relative to the current simulation hour and has shape `[168, 9]`:
+The forecast covers future hours `t+1..t+168` and has shape `[168, 9]`. The current hour `t` is already represented by the current-state branch, so it is not duplicated in the forecast:
 
 1. three normalized emitter capture-rate channels;
 2. three binary emitter-availability channels;
 3. one binary well-availability channel;
 4. one normalized well-injectivity channel;
-5. one global vessel-speed-factor channel.
+5. one global vessel-speed-factor channel, stored at channel index 8 (the ninth channel).
 
-Emitter capture is normalized by the corresponding emitter maximum production rate. Binary availability is retained even though outages also reduce capture, because it distinguishes an outage from ordinary low capture. Weather is global and is therefore not duplicated per vessel; current travel times remain in the state branch.
+Emitter capture is normalized by the corresponding emitter maximum production rate. Binary availability is retained even though outages also reduce capture, because it distinguishes an outage from ordinary low capture. Weather is global and is therefore not duplicated per vessel; current travel times remain in the state branch. In 24 h block-weather mode, channel 8 is piecewise constant across each physical weather block and exposes the remaining current block followed by future blocks.
+
+The environment returns forecast tensors in time-major order `[168, 9]`. The TCN extractor transposes each batch to PyTorch `Conv1d` order `[batch, 9, 168]` without changing the underlying data.
 
 All values must be finite and have stable channel order. The forecast metadata records channel names, horizon, scenario configuration, and normalization constants.
 

@@ -49,17 +49,19 @@ MPC 教师和使用 forecast 的 RL 学生必须接收同一条 disturbance traj
 
 ### Forecast 分支
 
-Forecast 覆盖相对于当前仿真时刻的 offset `0..167`，形状为 `[168, 9]`：
+Forecast 覆盖未来 `t+1..t+168` 小时，形状为 `[168, 9]`。当前时刻 `t` 已由当前状态分支表示，因此不在 forecast 中重复：
 
 1. 三个归一化 emitter capture-rate 通道；
 2. 三个二值 emitter-availability 通道；
 3. 一个二值 well-availability 通道；
 4. 一个归一化 well-injectivity 通道；
-5. 一个全域 vessel-speed-factor 通道。
+5. 一个全域 vessel-speed-factor 通道，位于通道索引 8，也就是第 9 个通道。
 
 Emitter capture 使用对应 emitter 的最大生产率归一化。即使 outage 会令 capture 下降，仍保留独立的二值 availability 通道，以区分真正 outage 与普通低产状态。
 
-天气是全域共享量，因此不按船舶重复复制未来 168 h 天气。各船当前到不同目的地的 travel time 继续保留在当前状态分支中。
+天气是全域共享量，因此不按船舶重复复制未来 168 h 天气。各船当前到不同目的地的 travel time 继续保留在当前状态分支中。在 24 h block 天气模式下，第 9 个通道在每个物理天气 block 内保持分段常数，依次表示当前 block 的剩余部分及后续天气 blocks。
+
+环境以 time-major 顺序输出 `[168, 9]` forecast。TCN extractor 在 batch 内将其转置为 PyTorch `Conv1d` 所需的 `[batch, 9, 168]`，底层 forecast 数据不发生变化。
 
 所有 forecast 值必须为有限数，并使用稳定、可验证的通道顺序。Forecast metadata 需要记录通道名称、horizon、scenario 配置和归一化常数。
 
