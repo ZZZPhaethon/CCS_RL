@@ -23,7 +23,6 @@ from .scenario_generation import ScenarioConfig
 
 def make_native_env(
     episode_hours: int = 168,
-    scenario_context_hours: int = 0,
     storage_target_rate: float = 0.9,
     warm_start: bool = True,
     storage_shortfall_penalty: float = 0.0,
@@ -48,6 +47,7 @@ def make_native_env(
     weather_window_rate_per_week: float = 1.0,
     wave_height_nc_paths: str | Path | list[str | Path] | None = None,
     lstm_prediction_csv: str | Path | None = None,
+    scenario_context_hours: int = 0,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 

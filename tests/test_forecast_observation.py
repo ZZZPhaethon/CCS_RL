@@ -26,7 +26,17 @@ def test_three_vessel_forecast_is_168_by_9_and_starts_next_hour():
     forecast = np.asarray(future_forecast_observation(env), dtype=np.float32)
     assert FORECAST_HORIZON_H == 168
     assert forecast.shape == (168, 9)
-    assert forecast_channel_names(env)[8] == "weather.global_speed_factor"
+    assert forecast_channel_names(env) == (
+        "capture.brevik",
+        "capture.celsio",
+        "capture.yara_sluiskil",
+        "emitter_available.brevik",
+        "emitter_available.celsio",
+        "emitter_available.yara_sluiskil",
+        "well_available.aurora_well_a7_ah",
+        "injectivity.aurora_well_a7_ah",
+        "weather.global_speed_factor",
+    )
     vessel_id = env.vessel_ids[0]
     assert forecast[0, 8] == env.scenario.vessel_speed_factor[vessel_id][1]
 
