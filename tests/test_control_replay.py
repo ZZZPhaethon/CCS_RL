@@ -5,6 +5,13 @@ from sim.control.replay import (
     ReplaySnapshot,
     ReplayTolerances,
     compare_replay_snapshots,
+    replay_native_actions,
+)
+from sim.environment import CCSEnv, CCSEnvConfig, VESSEL_WAIT
+from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
+from tests.fixtures.toy_networks import (
+    TOY_TWO_SOURCE_LOCATIONS,
+    make_toy_two_source_network,
 )
 
 
@@ -31,6 +38,21 @@ def _snapshot(**overrides) -> ReplaySnapshot:
     }
     values.update(overrides)
     return ReplaySnapshot(**values)
+
+
+def _replay_env(hours: int = 2) -> CCSEnv:
+    return CCSEnv(
+        make_toy_two_source_network(),
+        TOY_TWO_SOURCE_LOCATIONS,
+        scenario_generator=ScenarioGenerator(
+            config=ScenarioConfig(episode_hours=hours, randomize_initial_inventory=False)
+        ),
+        config=CCSEnvConfig(episode_hours=hours),
+    )
+
+
+def _wait_action() -> dict[str, list[int]]:
+    return {"vessels": [VESSEL_WAIT, VESSEL_WAIT], "wells": [0, 0]}
 
 
 def test_exact_requires_every_required_field_to_be_present_and_equal():
@@ -92,3 +114,73 @@ def test_supplied_final_state_is_compared_even_when_not_required():
     assert not exact
     assert compared == frozenset({"stored_t", "entity_inventory_t"})
     assert any("entity_inventory_t[source]" in mismatch for mismatch in mismatches)
+
+
+def test_replay_runs_full_horizon_without_mutating_source_env():
+    env = _replay_env(hours=2)
+    env.reset(seed=1)
+    before = env.simulator.state.as_dict()
+
+    result = replay_native_actions(
+        env,
+        [_wait_action(), _wait_action()],
+        horizon_h=2,
+    )
+
+    assert result.is_executable
+    assert not result.is_exact
+    assert result.actual.elapsed_hours == 2
+    assert len(result.actual.injection_tph) == 2
+    assert env.simulator.state.as_dict() == before
+    assert env.t == 0
+
+
+def test_wrong_action_dimension_is_non_executable_without_stepping():
+    env = _replay_env(hours=1)
+    env.reset(seed=1)
+
+    result = replay_native_actions(
+        env,
+        [{"vessels": [], "wells": [0, 0]}],
+        horizon_h=1,
+    )
+
+    assert not result.is_executable
+    assert result.actual.elapsed_hours == 0
+    assert any("dimension" in mismatch for mismatch in result.mismatches)
+
+
+def test_mask_invalid_action_is_non_executable():
+    env = _replay_env(hours=1)
+    env.reset(seed=1)
+    action = _wait_action()
+    action["vessels"][0] = 999
+
+    result = replay_native_actions(env, [action], horizon_h=1)
+
+    assert not result.is_executable
+    assert result.actual.elapsed_hours == 0
+    assert any("vessel_a" in mismatch and "not executable" in mismatch for mismatch in result.mismatches)
+
+
+def test_short_trace_is_non_executable():
+    env = _replay_env(hours=1)
+    env.reset(seed=1)
+
+    result = replay_native_actions(env, [], horizon_h=1)
+
+    assert not result.is_executable
+    assert result.actual.elapsed_hours == 0
+    assert any("horizon" in mismatch for mismatch in result.mismatches)
+
+
+def test_replay_rejects_non_positive_horizon():
+    env = _replay_env(hours=1)
+    env.reset(seed=1)
+
+    try:
+        replay_native_actions(env, [], horizon_h=0)
+    except ValueError as error:
+        assert "positive" in str(error)
+    else:
+        raise AssertionError("expected ValueError")

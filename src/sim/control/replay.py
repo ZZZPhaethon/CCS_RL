@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import copy
 from dataclasses import dataclass, fields
 import math
+
+from ..environment import CCSEnv
+
+
+NativeAction = dict[str, list[int]]
 
 
 @dataclass(frozen=True)
@@ -124,6 +130,178 @@ def compare_replay_snapshots(
         )
 
     return not mismatches, tuple(mismatches), frozenset(compared)
+
+
+def replay_native_actions(
+    env: CCSEnv,
+    native_actions: Sequence[NativeAction],
+    *,
+    horizon_h: int,
+    expected: ReplayExpectation | None = None,
+    tolerances: ReplayTolerances | None = None,
+    copy_env: bool = True,
+) -> ReplayValidationResult:
+    """Replay native actions from the current state and validate the result."""
+
+    if horizon_h <= 0:
+        raise ValueError("horizon_h must be positive")
+    replay_env = copy.deepcopy(env) if copy_env else env
+    start_stored_t = float(replay_env.cumulative_stored_t)
+    start_vented_t = float(replay_env.ledger.vented_t)
+    start_captured_t = float(replay_env.cumulative_captured_t)
+    start_ledger = copy.deepcopy(replay_env.ledger)
+
+    violations: list[str] = []
+    execution_mismatches: list[str] = []
+    injection_tph: list[float] = []
+    total_reward = 0.0
+    overflow_risk_t = 0.0
+    elapsed_hours = 0
+
+    if len(native_actions) != horizon_h:
+        execution_mismatches.append(
+            f"horizon: expected {horizon_h} actions, actual {len(native_actions)}"
+        )
+
+    for step in range(min(horizon_h, len(native_actions))):
+        action = native_actions[step]
+        action_error = _native_action_error(replay_env, action, step)
+        if action_error:
+            execution_mismatches.append(action_error)
+            break
+        before_stored_t = float(replay_env.cumulative_stored_t)
+        _obs, reward, terminated, truncated, info = replay_env.step(action)
+        elapsed_hours += 1
+        injection_tph.append(float(replay_env.cumulative_stored_t) - before_stored_t)
+        total_reward += float(reward)
+        overflow_risk_t += float(info.get("overflow_risk_t", 0.0))
+        violations.extend(str(value) for value in info.get("violations", []))
+        if terminated or truncated:
+            if elapsed_hours < horizon_h:
+                execution_mismatches.append(
+                    f"horizon: replay ended after {elapsed_hours} of {horizon_h} hours"
+                )
+            break
+
+    snapshot = _replay_snapshot(
+        replay_env,
+        elapsed_hours=elapsed_hours,
+        total_reward=total_reward,
+        overflow_risk_t=overflow_risk_t,
+        injection_tph=tuple(injection_tph),
+        start_stored_t=start_stored_t,
+        start_vented_t=start_vented_t,
+        start_captured_t=start_captured_t,
+        start_ledger=start_ledger,
+    )
+    fatal_violations = {"berth_required", "bottomhole_pressure_clipped"}
+    is_executable = (
+        not execution_mismatches
+        and elapsed_hours == horizon_h
+        and not (set(violations) & fatal_violations)
+    )
+
+    compared_fields: frozenset[str] = frozenset()
+    comparison_mismatches: tuple[str, ...] = ()
+    comparison_exact = False
+    if expected is not None:
+        comparison_exact, comparison_mismatches, compared_fields = compare_replay_snapshots(
+            expected,
+            snapshot,
+            tolerances=tolerances,
+        )
+    mismatches = tuple(execution_mismatches) + comparison_mismatches
+    return ReplayValidationResult(
+        actual=snapshot,
+        is_executable=is_executable,
+        is_exact=is_executable and expected is not None and comparison_exact,
+        violations=tuple(violations),
+        mismatches=mismatches,
+        compared_fields=compared_fields,
+    )
+
+
+def _native_action_error(env: CCSEnv, action, step: int) -> str:
+    if not isinstance(action, Mapping):
+        return f"action[{step}]: expected mapping, actual {type(action).__name__}"
+    vessel_actions = action.get("vessels")
+    well_actions = action.get("wells")
+    if not isinstance(vessel_actions, Sequence) or isinstance(vessel_actions, (str, bytes)):
+        return f"action[{step}].vessels: expected sequence"
+    if not isinstance(well_actions, Sequence) or isinstance(well_actions, (str, bytes)):
+        return f"action[{step}].wells: expected sequence"
+    if len(vessel_actions) != len(env.vessel_ids):
+        return (
+            f"action[{step}].vessels dimension: expected {len(env.vessel_ids)}, "
+            f"actual {len(vessel_actions)}"
+        )
+    if len(well_actions) != len(env.well_ids):
+        return (
+            f"action[{step}].wells dimension: expected {len(env.well_ids)}, "
+            f"actual {len(well_actions)}"
+        )
+    for vessel_id, choice, mask in zip(
+        env.vessel_ids,
+        vessel_actions,
+        env.vessel_action_mask(),
+    ):
+        if not isinstance(choice, int) or not (0 <= choice < len(mask) and mask[choice]):
+            return f"action[{step}] is not executable for {vessel_id}: {choice}"
+    for well_id, choice, mask in zip(
+        env.well_ids,
+        well_actions,
+        env.well_rate_action_mask(),
+    ):
+        if not isinstance(choice, int) or not (0 <= choice < len(mask) and mask[choice]):
+            return f"action[{step}] is not executable for {well_id}: {choice}"
+    return ""
+
+
+def _replay_snapshot(
+    env: CCSEnv,
+    *,
+    elapsed_hours: int,
+    total_reward: float,
+    overflow_risk_t: float,
+    injection_tph: tuple[float, ...],
+    start_stored_t: float,
+    start_vented_t: float,
+    start_captured_t: float,
+    start_ledger,
+) -> ReplaySnapshot:
+    state = env.simulator.state
+    vessel_fuel = float(env.ledger.vessel_fuel) - float(start_ledger.vessel_fuel)
+    conditioning = float(env.ledger.conditioning) - float(start_ledger.conditioning)
+    reconditioning = float(env.ledger.reconditioning) - float(start_ledger.reconditioning)
+    loading = float(env.ledger.loading) - float(start_ledger.loading)
+    unloading = float(env.ledger.unloading) - float(start_ledger.unloading)
+    operating_cost = vessel_fuel + conditioning + reconditioning + loading + unloading
+    return ReplaySnapshot(
+        elapsed_hours=elapsed_hours,
+        stored_t=float(env.cumulative_stored_t) - start_stored_t,
+        vented_t=float(env.ledger.vented_t) - start_vented_t,
+        captured_t=float(env.cumulative_captured_t) - start_captured_t,
+        in_transit_t=float(env._in_transit_inventory()),
+        vessel_fuel=vessel_fuel,
+        conditioning=conditioning,
+        reconditioning=reconditioning,
+        loading=loading,
+        unloading=unloading,
+        operating_cost=operating_cost,
+        total_cost=float(env.ledger.total_cost) - float(start_ledger.total_cost),
+        total_reward=total_reward,
+        objective_value=-total_reward / float(env.config.reward_scale),
+        overflow_risk_t=overflow_risk_t,
+        injection_tph=injection_tph,
+        entity_inventory_t={
+            entity_id: float(state.entity_inventory_t.get(entity_id, 0.0))
+            for entity_id in env.network.entities
+        },
+        vessel_berths={
+            vessel_id: state.vessel_berths.get(vessel_id)
+            for vessel_id in env.vessel_ids
+        },
+    )
 
 
 def _value_mismatches(
