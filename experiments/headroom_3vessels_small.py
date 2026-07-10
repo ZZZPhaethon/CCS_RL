@@ -33,8 +33,6 @@ def quiet_config(hours: int, *, random_initial_inventory: bool) -> ScenarioConfi
         capture_noise_std=0.0,
         capture_outage_rate_per_week=0.0,
         well_maintenance_rate_per_week=0.0,
-        injectivity_max_decline=0.0,
-        injectivity_noise_std=0.0,
     )
 
 
@@ -58,8 +56,6 @@ def case_config(case: str, hours: int, *, random_initial_inventory: bool) -> Sce
         return ScenarioConfig(
             episode_hours=hours,
             randomize_initial_inventory=random_initial_inventory,
-            injectivity_max_decline=0.0,
-            injectivity_noise_std=0.0,
         )
     raise ValueError(f"Unknown case: {case}")
 

@@ -148,8 +148,6 @@ def make_config(
         ),
         well_maintenance_rate_per_week=args.well_maintenance_rate_per_week,
         well_maintenance_mean_hours=args.well_maintenance_mean_hours,
-        injectivity_max_decline=0.0,
-        injectivity_noise_std=0.0,
     )
 
 

@@ -561,8 +561,6 @@ def main() -> None:
     config = ScenarioConfig(
         episode_hours=args.cap_hours,
         randomize_initial_inventory=True,
-        injectivity_max_decline=0.0,
-        injectivity_noise_std=0.0,
     )
     economics = EconomicParameters(storage_shortfall_eur_per_t=args.shortfall_penalty_eur_per_t)
     factories = controller_factories(

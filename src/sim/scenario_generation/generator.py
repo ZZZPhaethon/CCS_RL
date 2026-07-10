@@ -2,7 +2,7 @@
 
 A :class:`Scenario` is the exogenous part of an episode: randomized initial
 conditions plus per-hour trajectories for capture availability, weather speed
-factors, well maintenance and optional injectivity factors. It writes the
+factors, well maintenance and nominal injectivity factors. It writes the
 current step's values into :class:`PhysicalState`; it never chooses actions.
 
 Runtime operations read those values through
@@ -55,12 +55,6 @@ class ScenarioConfig:
     well_maintenance_rate_per_week: float = 0.3
     well_maintenance_mean_hours: float = 24.0
 
-    # Injectivity decline over the episode (time proxy for cumulative injection).
-    # Disabled by default; set these above zero for explicit injectivity stress tests.
-    injectivity_max_decline: float = 0.0
-    injectivity_floor: float = 0.3
-    injectivity_noise_std: float = 0.0
-
     # Initial-condition randomization (fraction-of-capacity ranges).
     randomize_initial_inventory: bool = True
     emitter_initial_fill_range: tuple[float, float] = (0.0, 0.5)
@@ -70,7 +64,6 @@ class ScenarioConfig:
     # default. Turning it on lets short episodes start from mid-life reservoir
     # pressure states during long (e.g. one-year) evaluation rollouts.
     warm_start: bool = False
-    injectivity_warmstart_min: float = 1.0
     reservoir_initial_pressure_fill_range: tuple[float, float] = (0.0, 0.5)
 
 
@@ -123,7 +116,7 @@ class ScenarioGenerator:
         capture_rng = random.Random(master.random())
         weather_rng = random.Random(master.random())
         maintenance_rng = random.Random(master.random())
-        injectivity_rng = random.Random(master.random())
+        master.random()  # Preserve existing initial-inventory samples for fixed seeds.
         init_rng = random.Random(master.random())
 
         dt = config.time_step_hours
@@ -150,16 +143,7 @@ class ScenarioGenerator:
             )
             for well_id in wells
         }
-        injectivity_factor = {}
-        for well_id in wells:
-            start_level = (
-                injectivity_rng.uniform(config.injectivity_warmstart_min, 1.0)
-                if config.warm_start
-                else 1.0
-            )
-            injectivity_factor[well_id] = _injectivity_series(
-                injectivity_rng, n_steps, config, start_level=start_level
-            )
+        injectivity_factor = {well_id: [1.0] * n_steps for well_id in wells}
         initial_inventory_t = self._initial_inventory(
             network, init_rng, emitters, terminals, reservoirs
         )
@@ -311,18 +295,6 @@ def _factor_window_series(
             series.append(active_value)
         else:
             series.append(inactive_value)
-    return series
-
-
-def _injectivity_series(
-    rng, n_steps: int, config: ScenarioConfig, start_level: float = 1.0
-) -> list[float]:
-    slope = rng.uniform(0.0, config.injectivity_max_decline)
-    series: list[float] = []
-    for step in range(n_steps):
-        progress = step / (n_steps - 1) if n_steps > 1 else 0.0
-        noise = rng.gauss(0.0, config.injectivity_noise_std) if config.injectivity_noise_std > 0.0 else 0.0
-        series.append(_clamp(start_level - slope * progress + noise, config.injectivity_floor, start_level))
     return series
 
 

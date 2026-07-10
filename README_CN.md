@@ -19,7 +19,7 @@ Emitter -> Vessel -> Terminal -> Pipeline -> SubseaManifold -> InjectionWell -> 
 - **动作协议与物理层解耦：** `sim.actions` 定义动作表达和解析，`sim.control` 只负责产生控制决策。
 - **多类控制器对比：** 支持 idle/greedy baseline、规则控制器、静态 MILP benchmark、rolling MILP/MPC 和 RL policy。
 - **可复现实验场景：** `scenarios/` 保存 Northern Lights Phase 1/Phase 2 等 JSON 场景，`data/capture_rates/` 保存 capture-rate profile。
-- **扰动与天气建模：** 包含 capture outage、injectivity decline、maintenance、wave-height 场景和船速影响模块。
+- **扰动与天气建模：** 包含 capture outage、maintenance、wave-height 场景和船速影响模块。
 - **训练和评估闭环：** 提供 Gymnasium/SB3 适配器、PPO/BC 训练脚本、controller comparison 实验和 HTML dashboard 产物。
 
 ## Roadmap

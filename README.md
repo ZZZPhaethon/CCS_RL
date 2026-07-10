@@ -37,7 +37,7 @@ High-level controllers, MILP solvers, RL policies, or experiment scripts submit 
 - **Decoupled action protocol and physics layer:** `sim.actions` defines action representation and resolution, while `sim.control` focuses on control decisions.
 - **Multiple controller families:** Includes idle/greedy baselines, rule-based controllers, static MILP benchmarks, rolling MILP/MPC, and RL policies.
 - **Reproducible scenarios:** `scenarios/` stores Northern Lights Phase 1/Phase 2 JSON scenarios, and `data/capture_rates/` stores capture-rate profiles.
-- **Disturbance and weather modeling:** Includes capture outages, injectivity decline, maintenance, wave-height scenarios, and vessel-speed effects.
+- **Disturbance and weather modeling:** Includes capture outages, maintenance, wave-height scenarios, and vessel-speed effects.
 - **Training and evaluation loop:** Provides a Gymnasium/SB3 adapter, PPO/BC training scripts, controller comparison experiments, and HTML dashboard outputs.
 
 ## Roadmap

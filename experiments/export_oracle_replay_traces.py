@@ -114,8 +114,6 @@ def make_env(args: argparse.Namespace, economics: EconomicParameters) -> CCSEnv:
     config = ScenarioConfig(
         episode_hours=args.hours,
         randomize_initial_inventory=True,
-        injectivity_max_decline=0.0,
-        injectivity_noise_std=0.0,
     )
     return CCSEnv(
         network,
