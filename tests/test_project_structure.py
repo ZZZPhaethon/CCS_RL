@@ -66,6 +66,16 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertFalse((ROOT / "src" / "sim" / "env_scenarios.py").exists())
         self.assertFalse((ROOT / "src" / "sim" / "gym_env.py").exists())
 
+    def test_forecast_encoder_comparison_runner_is_a_script(self):
+        path = ROOT / "scripts" / "compare_forecast_encoders_rl.py"
+
+        self.assertTrue(path.exists())
+        source = path.read_text(encoding="utf-8")
+        self.assertIn('if __name__ == "__main__":', source)
+        self.assertIn("generate-demos", source)
+        self.assertIn("train", source)
+        self.assertIn("report", source)
+
     def test_reward_modes_hpc_script_defaults_to_probability_window_weather(self):
         script = (ROOT / "hpc" / "submit_reward_modes_bc.sh").read_text(encoding="utf-8")
 
