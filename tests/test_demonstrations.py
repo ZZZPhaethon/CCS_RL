@@ -1,0 +1,292 @@
+from __future__ import annotations
+
+from dataclasses import fields
+import importlib
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import numpy as np
+import pytest
+
+from sim.control.replay import ReplaySnapshot
+from sim.train import make_native_env
+
+
+def _demonstrations():
+    return importlib.import_module("sim.control.demonstrations")
+
+
+def _batch():
+    demonstrations = _demonstrations()
+    return demonstrations.MpcDemonstrationBatch(
+        state=np.arange(6, dtype=np.float32).reshape(2, 3),
+        forecast=np.arange(2 * 168 * 9, dtype=np.float32).reshape(2, 168, 9),
+        actions=np.array([[0, 2], [1, 3]], dtype=np.int64),
+        masks=np.array(
+            [[True, False, True, False], [False, True, False, True]],
+            dtype=bool,
+        ),
+        seeds=np.array([11, 12], dtype=np.int64),
+        hours=np.array([0, 1], dtype=np.int64),
+        metadata={"schema": "demo-v1", "nested": {"b": 2, "a": 1}},
+    )
+
+
+def _write_corrupt_cache(path, **overrides):
+    demonstrations = _demonstrations()
+    demonstrations.save_demonstrations(_batch(), path)
+    with np.load(path, allow_pickle=False) as cache:
+        payload = {name: cache[name] for name in cache.files}
+    payload.update(overrides)
+    np.savez_compressed(path, **payload)
+
+
+class _DemoFactory:
+    def __init__(self, env_hours: int = 1):
+        self.env_hours = env_hours
+        self.calls = 0
+
+    def __call__(self, *, demonstration: bool):
+        assert demonstration is True
+        self.calls += 1
+        return make_native_env(
+            episode_hours=self.env_hours,
+            scenario_context_hours=169,
+            scenario="northern_lights_phase1_3vessels",
+            weather_mode="block",
+            warm_start=False,
+            capture_noise_std=0.0,
+            initial_inventory_fill_max=0.0,
+            include_weather_obs=False,
+        )
+
+    def metadata(self):
+        return {"schema": "short-real-demo", "episode_hours": self.env_hours}
+
+
+class _ExactController:
+    def __init__(self, env, replan_every: int, planning_horizon_h: int):
+        assert replan_every == 24
+        assert planning_horizon_h == 168
+        self.last_trace_replay_is_exact = True
+        self.last_trace_replay_mismatches = ()
+
+    def __call__(self, env):
+        return {
+            "vessels": [0] * len(env.vessel_ids),
+            "wells": [0] * len(env.well_ids),
+        }
+
+
+class _InexactController(_ExactController):
+    def __init__(self, env, replan_every: int, planning_horizon_h: int):
+        super().__init__(env, replan_every, planning_horizon_h)
+        self.last_trace_replay_is_exact = False
+        self.last_trace_replay_mismatches = ("candidate replay mismatch",)
+
+
+def _snapshot() -> ReplaySnapshot:
+    return ReplaySnapshot(
+        elapsed_hours=1,
+        stored_t=1.0,
+        vented_t=2.0,
+        captured_t=3.0,
+        in_transit_t=4.0,
+        vessel_fuel=5.0,
+        conditioning=6.0,
+        reconditioning=7.0,
+        loading=8.0,
+        unloading=9.0,
+        operating_cost=35.0,
+        total_cost=36.0,
+        total_reward=-37.0,
+        objective_value=38.0,
+        overflow_risk_t=39.0,
+        injection_tph=(1.0,),
+        entity_inventory_t={"entity": 40.0},
+        vessel_berths={"vessel": "terminal"},
+    )
+
+
+def test_cache_round_trip_preserves_arrays_metadata_and_canonical_dtypes(tmp_path):
+    demonstrations = _demonstrations()
+    batch = _batch()
+    path = tmp_path / "nested" / "demo.npz"
+
+    demonstrations.save_demonstrations(batch, path)
+    loaded = demonstrations.load_demonstrations(path, batch.metadata)
+
+    assert path.exists()
+    for name in ("state", "forecast", "actions", "masks", "seeds", "hours"):
+        np.testing.assert_array_equal(getattr(loaded, name), getattr(batch, name))
+    assert loaded.metadata == batch.metadata
+    assert loaded.state.dtype == np.float32
+    assert loaded.forecast.dtype == np.float32
+    assert loaded.actions.dtype == np.int64
+    assert loaded.masks.dtype == np.bool_
+    assert loaded.seeds.dtype == np.int64
+    assert loaded.hours.dtype == np.int64
+
+
+def test_observation_variants_have_expected_shapes_and_flatten_time_major():
+    batch = _batch()
+
+    assert batch.observations("state") is batch.state
+    flat = batch.observations("flat")
+    assert flat.shape == (2, 3 + 168 * 9)
+    assert flat.dtype == np.float32
+    np.testing.assert_array_equal(flat[:, :3], batch.state)
+    np.testing.assert_array_equal(flat[:, 3:], batch.forecast.reshape(2, -1))
+    tcn = batch.observations("tcn")
+    assert set(tcn) == {"state", "forecast"}
+    assert tcn["state"] is batch.state
+    assert tcn["forecast"] is batch.forecast
+    with pytest.raises(ValueError, match="variant"):
+        batch.observations("unknown")
+
+
+def test_metadata_mismatch_is_rejected(tmp_path):
+    demonstrations = _demonstrations()
+    path = tmp_path / "demo.npz"
+    demonstrations.save_demonstrations(_batch(), path)
+
+    with pytest.raises(ValueError, match="metadata.*schema"):
+        demonstrations.load_demonstrations(path, {"schema": "different"})
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"forecast": np.zeros((2, 167, 9), dtype=np.float32)}, "forecast"),
+        ({"state": np.array([[np.nan], [0.0]], dtype=np.float32)}, "finite"),
+        ({"actions": np.zeros((1, 2), dtype=np.int64)}, "leading"),
+        ({"state": np.array([["bad"], ["dtype"]])}, "dtype"),
+    ],
+)
+def test_invalid_cache_schema_is_rejected(tmp_path, override, message):
+    demonstrations = _demonstrations()
+    path = tmp_path / "invalid.npz"
+    _write_corrupt_cache(path, **override)
+
+    with pytest.raises(ValueError, match=message):
+        demonstrations.load_demonstrations(path, {"schema": "demo-v1"})
+
+
+def test_short_real_collection_returns_feasible_rows_and_exact_forecasts():
+    demonstrations = _demonstrations()
+    factory = _DemoFactory(env_hours=1)
+
+    batch = demonstrations.collect_mpc_demonstrations(
+        factory,
+        seeds=[3, 4],
+        episode_hours=1,
+    )
+
+    assert factory.calls == 2
+    assert batch.state.shape[0] == 2
+    assert batch.forecast.shape == (2, 168, 9)
+    assert batch.actions.shape[0] == batch.masks.shape[0] == 2
+    assert batch.seeds.tolist() == [3, 4]
+    assert batch.hours.tolist() == [0, 0]
+    assert batch.metadata == factory.metadata()
+    action_dims = [5, 5, 5, 11]
+    offsets = np.cumsum([0, *action_dims])
+    for row in range(2):
+        for dimension, choice in enumerate(batch.actions[row]):
+            assert batch.masks[row, offsets[dimension] + choice]
+
+
+def test_candidate_replay_mismatch_fails_with_seed_and_hour_context():
+    demonstrations = _demonstrations()
+    factory = _DemoFactory(env_hours=1)
+
+    with patch.object(
+        demonstrations,
+        "RollingNativeMpcController",
+        _InexactController,
+    ), pytest.raises(RuntimeError, match=r"seed=7.*hour=0.*candidate replay mismatch"):
+        demonstrations.collect_mpc_demonstrations(factory, seeds=[7], episode_hours=1)
+
+
+def test_non_executable_full_trace_replay_fails_loudly():
+    demonstrations = _demonstrations()
+    replay_result = SimpleNamespace(
+        actual=_snapshot(),
+        is_executable=False,
+        is_exact=False,
+        mismatches=("broken trace",),
+    )
+
+    with patch.object(
+        demonstrations,
+        "RollingNativeMpcController",
+        _ExactController,
+    ), patch.object(
+        demonstrations,
+        "replay_native_actions",
+        return_value=replay_result,
+    ), pytest.raises(RuntimeError, match=r"seed=8.*broken trace"):
+        demonstrations.collect_mpc_demonstrations(
+            _DemoFactory(env_hours=1),
+            seeds=[8],
+            episode_hours=1,
+        )
+
+
+def test_inexact_full_trace_replay_uses_every_snapshot_field_and_fails_loudly():
+    demonstrations = _demonstrations()
+    snapshot = _snapshot()
+    calls = 0
+
+    def fake_replay(env, actions, *, horizon_h, expected=None):
+        nonlocal calls
+        calls += 1
+        assert horizon_h == 1
+        if expected is None:
+            return SimpleNamespace(
+                actual=snapshot,
+                is_executable=True,
+                is_exact=False,
+                mismatches=(),
+            )
+        snapshot_fields = {field.name for field in fields(ReplaySnapshot)}
+        assert expected.required_fields == snapshot_fields
+        for name in snapshot_fields:
+            assert getattr(expected, name) == getattr(snapshot, name)
+        return SimpleNamespace(
+            actual=snapshot,
+            is_executable=True,
+            is_exact=False,
+            mismatches=("stored_t mismatch",),
+        )
+
+    with patch.object(
+        demonstrations,
+        "RollingNativeMpcController",
+        _ExactController,
+    ), patch.object(
+        demonstrations,
+        "replay_native_actions",
+        side_effect=fake_replay,
+    ), pytest.raises(RuntimeError, match=r"seed=9.*stored_t mismatch"):
+        demonstrations.collect_mpc_demonstrations(
+            _DemoFactory(env_hours=1),
+            seeds=[9],
+            episode_hours=1,
+        )
+    assert calls == 2
+
+
+def test_premature_episode_completion_is_rejected():
+    demonstrations = _demonstrations()
+
+    with patch.object(
+        demonstrations,
+        "RollingNativeMpcController",
+        _ExactController,
+    ), pytest.raises(RuntimeError, match=r"seed=10.*hour=0.*premature"):
+        demonstrations.collect_mpc_demonstrations(
+            _DemoFactory(env_hours=1),
+            seeds=[10],
+            episode_hours=2,
+        )
