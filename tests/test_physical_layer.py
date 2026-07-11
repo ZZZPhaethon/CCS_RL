@@ -706,6 +706,83 @@ class PhysicalLayerTests(unittest.TestCase):
         self.assertAlmostEqual(result.state.entity_inventory_t["ship_2"], 100.0)
         self.assertAlmostEqual(result.flows_t[("ship_2", "oygarden")], 200.0)
 
+    def test_terminal_fifo_queue_survives_state_copy_and_serialization(self):
+        state = PhysicalState(terminal_unload_queues={"oygarden": ["ship_b", "ship_a"]})
+
+        copied = state.copy()
+
+        self.assertEqual(copied.terminal_unload_queues, {"oygarden": ["ship_b", "ship_a"]})
+        self.assertIsNot(copied.terminal_unload_queues["oygarden"], state.terminal_unload_queues["oygarden"])
+        self.assertEqual(
+            state.as_dict()["terminal_unload_queues"],
+            {"oygarden": ["ship_b", "ship_a"]},
+        )
+
+    def test_terminal_fifo_uses_arrival_order_and_requeues_returning_vessel(self):
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(Vessel("ship_a", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=200.0))
+        network.add_entity(Vessel("ship_b", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=200.0))
+        network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
+        network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
+        network.connect("ship_a", "oygarden")
+        network.connect("ship_b", "oygarden")
+        network.connect("oygarden", "pipeline")
+        network.connect("pipeline", "well_1")
+        state = PhysicalState(
+            entity_inventory_t={"ship_a": 300.0, "ship_b": 300.0},
+            vessel_berths={"ship_b": "oygarden"},
+        )
+
+        first_arrival = network.step(state)
+        first_arrival.state.vessel_berths["ship_a"] = "oygarden"
+        rejected = network.step(
+            first_arrival.state,
+            actions={
+                "oygarden": {"unload_vessel": "ship_a"},
+                "pipeline": {"flow_tph": 200.0},
+            },
+        )
+
+        self.assertEqual(rejected.state.terminal_unload_queues["oygarden"], ["ship_b", "ship_a"])
+        self.assertNotIn(("ship_a", "oygarden"), rejected.flows_t)
+        self.assertTrue(
+            any(
+                violation.violation_type == "fifo_unload_required"
+                and violation.entity_id == "ship_a"
+                for violation in rejected.violations
+            )
+        )
+
+        head_unloads = network.step(
+            rejected.state,
+            actions={
+                "oygarden": {"unload_vessel": "ship_b"},
+                "pipeline": {"flow_tph": 200.0},
+            },
+        )
+
+        self.assertAlmostEqual(head_unloads.flows_t[("ship_b", "oygarden")], 200.0)
+        self.assertNotIn(("ship_a", "oygarden"), head_unloads.flows_t)
+        self.assertEqual(head_unloads.state.terminal_unload_queues["oygarden"], ["ship_b", "ship_a"])
+
+        head_unloads.state.vessel_berths.pop("ship_b")
+        next_unloads = network.step(
+            head_unloads.state,
+            actions={
+                "oygarden": {"unload_vessel": "ship_a"},
+                "pipeline": {"flow_tph": 200.0},
+            },
+        )
+
+        self.assertAlmostEqual(next_unloads.flows_t[("ship_a", "oygarden")], 200.0)
+        self.assertEqual(next_unloads.state.terminal_unload_queues["oygarden"], ["ship_a"])
+
+        next_unloads.state.vessel_berths["ship_b"] = "oygarden"
+        returned = network.step(next_unloads.state)
+
+        self.assertEqual(returned.state.terminal_unload_queues["oygarden"], ["ship_a", "ship_b"])
+
     def test_unload_vessel_action_uses_max_feasible_unloading_rate(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=300.0))

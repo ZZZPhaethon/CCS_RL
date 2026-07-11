@@ -18,6 +18,7 @@
 ## 当前简化
 
 - 船舶轨迹不再使用内置操作阶段表。上层调度器或多代理模型通过每步 `action_frames` 显式传入动作，例如排放端 `load_vessel`、终端 `unload_vessel`、管道 `flow_tph`，以及船舶 `sail_to`；物理层只执行并裁剪这些外部动作，不会因为仿真时间到达某个小时而自动装卸。船舶只有在 `vessel_berths[vessel_id]` 指向对应排放端或终端时才允许 loading/unloading，在航行中请求装卸会产生 `berth_required` 违规并被裁剪为 0。`load_vessel` / `unload_vessel` 不需要指定速度，默认按最大可行装卸速率执行。
+- 终端允许多艘船同时停靠或等待，但所有控制器共享 `PhysicalState.terminal_unload_queues` 中的 FIFO 卸载顺序。每个终端每步最多卸载一艘队首船；部分卸载不会改变队首，半载离港会立即出队，返回后重新加入队尾。同一时步首次观测到达的船以 vessel ID 打破平局。显式请求非队首船会被物理层裁剪为 0，并记录 `fifo_unload_required`；`berth_count=0` 时暂停卸载，任何正值仍只开放一个卸载服务位。
 - 储层作为 `Reservoir` 物理组件接在注入井之后，snapshot 会根据储层库存派生 `pressure_bar`、`pressure_margin_bar` 和 `fill_fraction`。
 - Aurora demo 的 `Reservoir` 现在额外携带 line-source 参数。每步注入后，snapshot 会在注入井上输出 `bottomhole_pressure_bar`、`bottomhole_pressure_delta_bar` 和 `line_source_rate_tph`，并在储层上输出 `line_source_pressure_bar_by_radius_m` / `line_source_delta_bar_by_radius_m`。这些是无限径向流解析解给出的井底压力和指定半径点压力，不是封闭储层平均压力；当前按上一时间步注入速率和当前仿真时间做 constant-rate diagnostic，尚未实现变速率历史的 rate superposition。
 - line-source 参数中，`well_radius_m=0.10795` 由 Concept report 的 `8 1/2'' Open Hole` 直接换算；`total_compressibility_1_pa`、`viscosity_pa_s`、`co2_density_kg_m3` 和 `skin` 仍是工程假设，已在 `line_source_parameter_status` 中标注为 `assumed`。当前压力诊断还没有反向限制注入量，后续需要最大允许井底压力、caprock fracture pressure 或 fault reactivation limit 后再接入裁剪逻辑。

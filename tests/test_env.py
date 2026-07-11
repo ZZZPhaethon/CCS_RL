@@ -105,6 +105,30 @@ class EnvSpaceTests(unittest.TestCase):
 
 
 class EnvDynamicsTests(unittest.TestCase):
+    def test_terminal_fifo_head_uses_arrival_order_and_requeues_returning_vessel(self):
+        env = _env()
+        env.reset(seed=0)
+        terminal_id = env.terminal_ids[0]
+        state = env.simulator.state
+        state.entity_inventory_t["vessel_b"] = 300.0
+        state.vessel_berths["vessel_b"] = terminal_id
+
+        self.assertEqual(env._terminal_unload_head(terminal_id, set()), "vessel_b")
+
+        state.entity_inventory_t["vessel_a"] = 300.0
+        state.vessel_berths["vessel_a"] = terminal_id
+
+        self.assertEqual(env._terminal_unload_head(terminal_id, set()), "vessel_b")
+        self.assertEqual(state.terminal_unload_queues[terminal_id], ["vessel_b", "vessel_a"])
+        self.assertEqual(env._terminal_unload_head(terminal_id, {"vessel_b"}), "vessel_a")
+
+        state.vessel_berths.pop("vessel_b")
+        self.assertEqual(env._terminal_unload_head(terminal_id, set()), "vessel_a")
+
+        state.vessel_berths["vessel_b"] = terminal_id
+        self.assertEqual(env._terminal_unload_head(terminal_id, set()), "vessel_a")
+        self.assertEqual(state.terminal_unload_queues[terminal_id], ["vessel_a", "vessel_b"])
+
     def test_partially_loaded_vessel_can_sail_to_terminal_by_default(self):
         env = _env()
         env.reset(seed=0)

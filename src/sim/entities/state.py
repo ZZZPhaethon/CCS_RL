@@ -16,6 +16,7 @@ class PhysicalState:
     last_injection_flow_tph: dict[str, float] = field(default_factory=dict)
     injection_rate_history_tph: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     vessel_berths: dict[str, str] = field(default_factory=dict)
+    terminal_unload_queues: dict[str, list[str]] = field(default_factory=dict)
 
     # Time-varying disturbance overrides (the "ξ_t" channel).
     # Each maps entity_id -> a runtime override that takes precedence over the
@@ -44,6 +45,10 @@ class PhysicalState:
                 for well_id, history in self.injection_rate_history_tph.items()
             },
             vessel_berths=dict(self.vessel_berths),
+            terminal_unload_queues={
+                terminal_id: list(queue)
+                for terminal_id, queue in self.terminal_unload_queues.items()
+            },
             emitter_availability=dict(self.emitter_availability),
             well_available=dict(self.well_available),
             injectivity_factor=dict(self.injectivity_factor),
@@ -66,6 +71,10 @@ class PhysicalState:
                 for well_id, history in self.injection_rate_history_tph.items()
             },
             "vessel_berths": dict(self.vessel_berths),
+            "terminal_unload_queues": {
+                terminal_id: list(queue)
+                for terminal_id, queue in self.terminal_unload_queues.items()
+            },
             "emitter_availability": dict(self.emitter_availability),
             "well_available": dict(self.well_available),
             "injectivity_factor": dict(self.injectivity_factor),

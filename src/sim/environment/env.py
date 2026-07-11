@@ -49,6 +49,7 @@ from ..operations.pressure_limits import (
     mtpa_to_tph,
     pressure_limited_rate_level_mask,
 )
+from ..operations.unloading import sync_terminal_unload_queue
 
 # Vessel action ids. Emitter actions are dynamic:
 # VESSEL_GO_EMITTER_BASE + env.emitter_ids.index(emitter_id).
@@ -594,15 +595,15 @@ class CCSEnv:
                 proposals.append(self._proposal(terminal_id, "unload_vessel", {"vessel_id": head}))
 
     def _terminal_unload_head(self, terminal_id: str, departing) -> str | None:
-        candidates = []
-        for vessel_id in self.vessel_ids:
-            if vessel_id in departing:
-                continue
-            if self.simulator.state.vessel_berths.get(vessel_id) != terminal_id:
-                continue
-            if self.simulator.state.entity_inventory_t.get(vessel_id, 0.0) > 1e-9:
-                candidates.append(vessel_id)
-        return sorted(candidates)[0] if candidates else None
+        terminal = self.network.entities[terminal_id]
+        assert isinstance(terminal, Terminal)
+        queue = sync_terminal_unload_queue(
+            self.network,
+            terminal,
+            self.simulator.state,
+            excluded_vessel_ids=set(departing),
+        )
+        return queue[0] if queue else None
 
     def _injection_proposals(self, well_rate_indices, proposals) -> None:
         desired: dict[str, float] = {}

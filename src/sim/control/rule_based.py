@@ -12,6 +12,7 @@ from ..entities.storage import InjectionWell
 from ..entities.terminal import Terminal
 from ..entities.vessel import Vessel
 from ..network import PhysicalNetwork
+from ..operations.unloading import sync_terminal_unload_queue
 
 
 class RuleBasedActionGenerator:
@@ -38,7 +39,6 @@ class RuleBasedActionGenerator:
         self.routes = routes
         self.agent_id = agent_id
         self.selected_well_id = selected_well_id or self._first_injection_well_id()
-        self._terminal_unload_queues: dict[str, list[str]] = {}
 
     def next_action_frame(self, state: PhysicalState) -> ActionFrame:
         self._update_terminal_unload_queues(state)
@@ -82,7 +82,7 @@ class RuleBasedActionGenerator:
                     emitter_id = self._best_emitter_id(state)
                     if emitter_id is not None:
                         proposals.append(self._proposal(vessel_id, "sail_to", {"destination_id": emitter_id}))
-                elif self._is_fifo_unload_head(terminal_id, vessel_id):
+                elif self._is_fifo_unload_head(state, terminal_id, vessel_id):
                     proposals.append(self._proposal(terminal_id, "unload_vessel", {"vessel_id": vessel_id}))
                 continue
 
@@ -120,25 +120,12 @@ class RuleBasedActionGenerator:
             if isinstance(entity, Terminal)
         ]
         for terminal_id in terminal_ids:
-            queue = self._terminal_unload_queues.setdefault(terminal_id, [])
-            queue[:] = [
-                vessel_id
-                for vessel_id in queue
-                if (
-                    state.vessel_berths.get(vessel_id) == terminal_id
-                    and state.entity_inventory_t.get(vessel_id, 0.0) > 1e-9
-                )
-            ]
-            for vessel_id in self.network._upstream_of_type(terminal_id, Vessel):
-                if (
-                    state.vessel_berths.get(vessel_id) == terminal_id
-                    and state.entity_inventory_t.get(vessel_id, 0.0) > 1e-9
-                    and vessel_id not in queue
-                ):
-                    queue.append(vessel_id)
+            terminal = self.network.entities[terminal_id]
+            assert isinstance(terminal, Terminal)
+            sync_terminal_unload_queue(self.network, terminal, state)
 
-    def _is_fifo_unload_head(self, terminal_id: str, vessel_id: str) -> bool:
-        queue = self._terminal_unload_queues.get(terminal_id, [])
+    def _is_fifo_unload_head(self, state: PhysicalState, terminal_id: str, vessel_id: str) -> bool:
+        queue = state.terminal_unload_queues.get(terminal_id, [])
         return bool(queue) and queue[0] == vessel_id
 
     def _single_well_actions(self) -> list[ActionProposal]:
@@ -194,21 +181,14 @@ class RuleBasedActionGenerator:
         terminal = self.network.entities[terminal_id]
         if not isinstance(terminal, Terminal):
             return 0.0
-        amount_t = 0.0
-        berth_slots = terminal_berth_count(state, terminal)
-        for vessel_id in self.network._upstream_of_type(terminal_id, Vessel):
-            if berth_slots <= 0:
-                break
-            if state.vessel_berths.get(vessel_id) != terminal_id:
-                continue
-            vessel = self.network.entities[vessel_id]
-            assert isinstance(vessel, Vessel)
-            cargo_t = state.entity_inventory_t.get(vessel_id, 0.0)
-            if cargo_t <= 1e-9:
-                continue
-            amount_t += min(cargo_t, vessel.unloading_rate_tph * self.network.time_step_hours)
-            berth_slots -= 1
-        return amount_t
+        queue = sync_terminal_unload_queue(self.network, terminal, state)
+        if terminal_berth_count(state, terminal) <= 0 or not queue:
+            return 0.0
+        vessel_id = queue[0]
+        vessel = self.network.entities[vessel_id]
+        assert isinstance(vessel, Vessel)
+        cargo_t = state.entity_inventory_t.get(vessel_id, 0.0)
+        return min(cargo_t, vessel.unloading_rate_tph * self.network.time_step_hours)
 
     def _upstream_terminal_id(self, pipeline_id: str) -> str | None:
         for upstream_id in self.network.upstream_of(pipeline_id):

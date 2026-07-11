@@ -6,6 +6,26 @@ from ..entities.terminal import Terminal
 from ..entities.vessel import Vessel
 
 
+def sync_terminal_unload_queue(
+    network,
+    terminal: Terminal,
+    state: PhysicalState,
+    excluded_vessel_ids: set[str] | None = None,
+) -> list[str]:
+    excluded = excluded_vessel_ids or set()
+    queue = state.terminal_unload_queues.setdefault(terminal.entity_id, [])
+    eligible = {
+        vessel_id
+        for vessel_id in network._entities_of_type(Vessel)
+        if vessel_id not in excluded
+        and state.vessel_berths.get(vessel_id) == terminal.entity_id
+        and state.entity_inventory_t.get(vessel_id, 0.0) > 1e-9
+    }
+    queue[:] = [vessel_id for vessel_id in queue if vessel_id in eligible]
+    queue.extend(sorted(eligible.difference(queue)))
+    return queue
+
+
 def terminal_unload_request_capacity(
     network,
     terminal: Terminal,
@@ -44,21 +64,40 @@ def project_terminal_unload(
     if not vessel_ids and requested_t > 0:
         upstream_vessels = list(network._entities_of_type(Vessel))
         requested_vessel_id = _requested_unload_vessel_id(terminal.entity_id, actions)
-        violation_entity_id = (
-            requested_vessel_id
-            if requested_vessel_id in upstream_vessels
-            else upstream_vessels[0] if upstream_vessels else terminal.entity_id
-        )
-        violations.append(
-            Violation(
-                "berth_required",
-                violation_entity_id,
-                requested_t,
-                0.0,
-                requested_t,
-                "Unload request requires the vessel to be at the terminal berth.",
+        queue = sync_terminal_unload_queue(network, terminal, state)
+        if (
+            requested_vessel_id in upstream_vessels
+            and state.vessel_berths.get(str(requested_vessel_id)) == terminal.entity_id
+            and state.entity_inventory_t.get(str(requested_vessel_id), 0.0) > 1e-9
+            and queue
+            and requested_vessel_id != queue[0]
+        ):
+            violations.append(
+                Violation(
+                    "fifo_unload_required",
+                    str(requested_vessel_id),
+                    requested_t,
+                    0.0,
+                    requested_t,
+                    "Unload request rejected because another vessel is first in the terminal FIFO queue.",
+                )
             )
-        )
+        else:
+            violation_entity_id = (
+                requested_vessel_id
+                if requested_vessel_id in upstream_vessels
+                else upstream_vessels[0] if upstream_vessels else terminal.entity_id
+            )
+            violations.append(
+                Violation(
+                    "berth_required",
+                    str(violation_entity_id),
+                    requested_t,
+                    0.0,
+                    requested_t,
+                    "Unload request requires the vessel to be at the terminal berth.",
+                )
+            )
     if not vessel_ids:
         return {}
     terminal_inventory_t = state.entity_inventory_t.get(terminal.entity_id, 0.0)
@@ -96,13 +135,15 @@ def _terminal_vessels_for_action(
     state: PhysicalState,
     actions: dict[str, dict[str, object]],
 ) -> list[str]:
-    vessel_ids = list(network._entities_of_type(Vessel))
-    berthed_vessel_ids = _vessels_berthed_at(vessel_ids, state, terminal.entity_id)
+    queue = sync_terminal_unload_queue(network, terminal, state)
     requested_vessel_id = _requested_unload_vessel_id(terminal.entity_id, actions)
     berth_count = terminal_berth_count(state, terminal)
-    if requested_vessel_id in berthed_vessel_ids:
-        return [requested_vessel_id] if berth_count > 0 else []
-    return berthed_vessel_ids[:berth_count]
+    if berth_count <= 0 or not queue:
+        return []
+    head = queue[0]
+    if requested_vessel_id is None:
+        return [head]
+    return [head] if requested_vessel_id == head else []
 
 
 def _requested_unload_vessel_id(
@@ -132,15 +173,3 @@ def _terminal_unload_requested_t(
         state.entity_inventory_t.get(str(requested_vessel_id), 0.0),
         vessel.unloading_rate_tph * network.time_step_hours,
     )
-
-
-def _vessels_berthed_at(
-    vessel_ids: list[str],
-    state: PhysicalState,
-    location_id: str,
-) -> list[str]:
-    return [
-        vessel_id
-        for vessel_id in vessel_ids
-        if state.vessel_berths.get(vessel_id) == location_id
-    ]
