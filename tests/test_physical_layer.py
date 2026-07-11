@@ -263,6 +263,61 @@ class PhysicalLayerTests(unittest.TestCase):
             pressure_limit_bar + 1e-9,
         )
 
+    def test_supply_clip_is_not_attributed_to_bottomhole_pressure(self):
+        parameters = LineSourceParameters(
+            initial_pressure_bar=300.0,
+            permeability_md=10.0,
+            thickness_m=100.0,
+            porosity_fraction=0.22,
+            total_compressibility_1_pa=7e-10,
+            viscosity_pa_s=6e-5,
+            co2_density_kg_m3=630.0,
+            well_radius_m=0.10795,
+            skin=0.0,
+        )
+        pressure_capacity_mtpa = 1.0
+        hours_per_year = 365.25 * 24.0
+        pressure_capacity_tph = pressure_capacity_mtpa * 1_000_000.0 / hours_per_year
+        pressure_limit_bar = bottomhole_pressure_bar(
+            parameters,
+            pressure_capacity_mtpa,
+            elapsed_days=1.0 / 24.0,
+        ) + pressure_capacity_tph / 1_000_000.0 * 50.0
+
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=600.0))
+        network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
+        network.add_entity(
+            Reservoir(
+                "reservoir_1",
+                storage_capacity_t=1_000_000.0,
+                initial_pressure_bar=300.0,
+                pressure_at_capacity_bar=350.0,
+                max_pressure_bar=350.0,
+                well_bottomhole_pressure_limit_bar=pressure_limit_bar,
+                line_source_parameters=parameters,
+            )
+        )
+        network.connect("oygarden", "pipeline")
+        network.connect("pipeline", "well_1")
+        network.connect("well_1", "reservoir_1")
+        supply_t = 75.0
+        requested_tph = 100.0
+        state = PhysicalState(entity_inventory_t={"oygarden": supply_t})
+
+        result = network.step(state, actions={"pipeline": {"flow_tph": requested_tph}})
+
+        self.assertLess(supply_t, requested_tph)
+        self.assertLess(requested_tph, pressure_capacity_tph)
+        self.assertLess(pressure_capacity_tph, 500.0)
+        self.assertLess(500.0, 600.0)
+        self.assertAlmostEqual(result.flows_t[("oygarden", "pipeline")], supply_t)
+        self.assertTrue(any(v.violation_type == "flow_clipped" for v in result.violations))
+        self.assertFalse(
+            any(v.violation_type == "bottomhole_pressure_clipped" for v in result.violations)
+        )
+
     def test_snapshot_reports_next_step_pressure_feasible_rate_levels(self):
         parameters = LineSourceParameters(
             initial_pressure_bar=300.0,
