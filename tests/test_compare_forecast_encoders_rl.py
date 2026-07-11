@@ -1,4 +1,5 @@
 import csv
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -440,23 +441,82 @@ def test_generate_demos_normalizes_npz_path_before_collision_check(tmp_path):
     assert actual.read_bytes() == b"do-not-overwrite"
 
 
-def test_report_rejects_runs_from_different_cache_manifests(tmp_path):
-    for variant, vented in (("state", 10.0), ("flat", 7.0), ("tcn", 12.0)):
-        result_path = tmp_path / f"results_{variant}_seed0.csv"
-        with result_path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(_paired_row(variant, vented)))
-            writer.writeheader()
-            writer.writerow(_paired_row(variant, vented))
-        manifest = {
-            "demo_cache_path": "shared.npz",
-            "demo_cache_sha256": "same" if variant != "tcn" else "different",
-            "git_commit": "abc123",
-            "environment": {"schema": 1},
-        }
-        (tmp_path / f"run_{variant}_seed0.manifest.json").write_text(
-            json.dumps(manifest),
-            encoding="utf-8",
-        )
+def _complete_run_manifest():
+    return {
+        "kind": "forecast_encoder_training_run",
+        "demo_cache_path": "shared.npz",
+        "demo_cache_sha256": "same-cache-sha",
+        "git_commit": "abc123",
+        "environment": {"schema": 1},
+        "demo_seeds": [1, 2],
+        "eval_seeds": [101],
+        "bc": {"epochs": 20, "batch_size": 256, "learning_rate": 1e-3},
+        "ppo": {"timesteps": 100_000, "n_steps": 512, "batch_size": 64},
+        "kickstart": {"coefficient": 1.0, "decay": "linear"},
+        "device_request": "auto",
+    }
 
-    with pytest.raises(ValueError, match="demo_cache_sha256"):
+
+def _write_report_run(tmp_path, variant, vented, manifest):
+    result_path = tmp_path / f"results_{variant}_seed0.csv"
+    with result_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(_paired_row(variant, vented)))
+        writer.writeheader()
+        writer.writerow(_paired_row(variant, vented))
+    (tmp_path / f"run_{variant}_seed0.manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    return result_path
+
+
+@pytest.mark.parametrize(
+    "field, changed_value",
+    [
+        ("kind", "different_run_kind"),
+        ("demo_cache_path", "other.npz"),
+        ("demo_cache_sha256", "different-cache-sha"),
+        ("git_commit", "different-commit"),
+        ("environment", {"schema": 2}),
+        ("demo_seeds", [3, 4]),
+        ("eval_seeds", [102]),
+        ("bc", {"epochs": 10, "batch_size": 256, "learning_rate": 1e-3}),
+        ("ppo", {"timesteps": 200_000, "n_steps": 512, "batch_size": 64}),
+        ("kickstart", {"coefficient": 0.5, "decay": "linear"}),
+        ("device_request", "cpu"),
+    ],
+)
+def test_report_rejects_scientifically_incompatible_run_manifests(
+    tmp_path, field, changed_value
+):
+    baseline = _complete_run_manifest()
+    for variant, vented in (("state", 10.0), ("flat", 7.0), ("tcn", 12.0)):
+        manifest = copy.deepcopy(baseline)
+        if variant == "tcn":
+            manifest[field] = changed_value
+        _write_report_run(tmp_path, variant, vented, manifest)
+
+    with pytest.raises(ValueError, match=field):
         compare.report(SimpleNamespace(out_dir=str(tmp_path)))
+
+
+def test_report_manifest_validation_allows_run_identity_and_diagnostics_to_differ(tmp_path):
+    paths = []
+    for index, variant in enumerate(("state", "flat", "tcn")):
+        manifest = _complete_run_manifest()
+        manifest.update(
+            {
+                "variant": variant,
+                "model_seed": index,
+                "policy": {"name": f"policy-{variant}"},
+                "checkpoints": {"bc": f"bc-{variant}", "ppo": f"ppo-{variant}"},
+                "results_csv": f"results-{variant}",
+                "trainable_parameters": index + 1,
+                "demonstration_accuracy": {"exact": index / 10},
+                "verbose": index,
+                "progress_bar": bool(index % 2),
+            }
+        )
+        paths.append(_write_report_run(tmp_path, variant, 10.0 + index, manifest))
+
+    compare._validate_report_manifests(paths)

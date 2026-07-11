@@ -873,10 +873,17 @@ def report(args):
 
 def _validate_report_manifests(result_paths: list[Path]) -> None:
     required_equal = (
+        "kind",
         "demo_cache_path",
         "demo_cache_sha256",
         "git_commit",
         "environment",
+        "demo_seeds",
+        "eval_seeds",
+        "bc",
+        "ppo",
+        "kickstart",
+        "device_request",
     )
     manifests = []
     for result_path in result_paths:
