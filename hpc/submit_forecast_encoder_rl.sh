@@ -12,6 +12,10 @@
 #SBATCH -o logs/forecast_rl-%A_%a.out
 #SBATCH -e logs/forecast_rl-%A_%a.err
 
+# LOGIN-NODE SUBMISSION PREREQUISITE (run from project root):
+# SLURM opens log paths before the script body, so create logs before submission.
+# mkdir -p logs && sbatch hpc/submit_forecast_encoder_rl.sh
+
 set -euo pipefail
 
 source /scratch_root/hx721/miniconda3/etc/profile.d/conda.sh
@@ -104,6 +108,6 @@ python -u scripts/compare_forecast_encoders_rl.py train \
 echo "Job finished at $(date)"
 
 # Smoke (after the one-seed cache exists):
-# sbatch --qos=short --time=01:00:00 --array=0-2 --export=ALL,TIMESTEPS=2048,BC_EPOCHS=1,DEMO_CACHE=output/rl_forecast/demos/mpc_smoke.npz,OUT_DIR=output/rl_forecast/smoke hpc/submit_forecast_encoder_rl.sh
+# mkdir -p logs && sbatch --qos=short --time=01:00:00 --array=0-2 --export=ALL,TIMESTEPS=2048,BC_EPOCHS=1,DEMO_CACHE=output/rl_forecast/demos/mpc_smoke.npz,OUT_DIR=output/rl_forecast/smoke hpc/submit_forecast_encoder_rl.sh
 # Formal comparison (three variants by three model seeds):
-# sbatch --array=0-8 --export=ALL,OUT_DIR=output/rl_forecast/formal,EVAL_SEEDS='101 102 103 104 105 106 107 108 109 110' hpc/submit_forecast_encoder_rl.sh
+# mkdir -p logs && sbatch --array=0-8 --export=ALL,OUT_DIR=output/rl_forecast/formal,EVAL_SEEDS='101 102 103 104 105 106 107 108 109 110' hpc/submit_forecast_encoder_rl.sh

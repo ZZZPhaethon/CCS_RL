@@ -219,6 +219,33 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertIn('export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-12}"', source)
         self.assertIn('export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-12}"', source)
 
+    def test_forecast_hpc_submission_examples_create_logs_before_sbatch(self):
+        expected = {
+            "submit_forecast_mpc_demos.sh": "mkdir -p logs output/rl_forecast/demos",
+            "submit_forecast_encoder_rl.sh": 'mkdir -p logs "$OUT_DIR"',
+        }
+
+        for name, in_body_mkdir in expected.items():
+            with self.subTest(script=name):
+                source = (ROOT / "hpc" / name).read_text(encoding="utf-8")
+                self.assertIn(
+                    "# LOGIN-NODE SUBMISSION PREREQUISITE (run from project root):",
+                    source,
+                )
+                self.assertIn(in_body_mkdir, source)
+                examples = [
+                    line
+                    for line in source.splitlines()
+                    if re.match(r"^# .*\bsbatch\b", line)
+                ]
+                self.assertTrue(examples)
+                for line in examples:
+                    with self.subTest(script=name, example=line):
+                        self.assertTrue(
+                            line.startswith("# mkdir -p logs && sbatch "),
+                            msg=f"submission must create logs first: {line}",
+                        )
+
     def test_reward_modes_hpc_script_defaults_to_probability_window_weather(self):
         script = (ROOT / "hpc" / "submit_reward_modes_bc.sh").read_text(encoding="utf-8")
 

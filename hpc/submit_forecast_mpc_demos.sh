@@ -10,6 +10,10 @@
 #SBATCH -o logs/mpc_demos-%j.out
 #SBATCH -e logs/mpc_demos-%j.err
 
+# LOGIN-NODE SUBMISSION PREREQUISITE (run from project root):
+# SLURM opens log paths before the script body, so create logs before submission.
+# mkdir -p logs && sbatch hpc/submit_forecast_mpc_demos.sh
+
 set -euo pipefail
 
 source /scratch_root/hx721/miniconda3/etc/profile.d/conda.sh
@@ -63,4 +67,4 @@ python -u scripts/compare_forecast_encoders_rl.py generate-demos \
 echo "Job finished at $(date)"
 
 # Smoke example (creates the one-seed cache required by the training smoke run):
-# sbatch --qos=short --time=01:00:00 --export=ALL,DEMO_SEEDS=0,DEMO_CACHE=output/rl_forecast/demos/mpc_smoke.npz hpc/submit_forecast_mpc_demos.sh
+# mkdir -p logs && sbatch --qos=short --time=01:00:00 --export=ALL,DEMO_SEEDS=0,DEMO_CACHE=output/rl_forecast/demos/mpc_smoke.npz hpc/submit_forecast_mpc_demos.sh
