@@ -15,6 +15,40 @@ from ..environment.gym_adapter import CCSGymEnv, flat_action_from_native
 from ..metrics import Policy
 
 
+def _observation_count(observations) -> int:
+    """Return the common batch size for array or dictionary observations."""
+    if isinstance(observations, dict):
+        if not observations:
+            raise ValueError("Observation dictionary cannot be empty.")
+        counts = {key: value.shape[0] for key, value in observations.items()}
+        if len(set(counts.values())) != 1:
+            raise ValueError(
+                "Observation dictionary values must share a leading dimension; "
+                f"got {counts}."
+            )
+        return next(iter(counts.values()))
+    return observations.shape[0]
+
+
+def _tensor_observations(observations, device):
+    """Convert array or dictionary observations to float tensors on ``device``."""
+    import torch
+
+    if isinstance(observations, dict):
+        return {
+            key: torch.as_tensor(value, dtype=torch.float32, device=device)
+            for key, value in observations.items()
+        }
+    return torch.as_tensor(observations, dtype=torch.float32, device=device)
+
+
+def _index_observations(observations, idx):
+    """Apply one row index to every component of an observation batch."""
+    if isinstance(observations, dict):
+        return {key: value[idx] for key, value in observations.items()}
+    return observations[idx]
+
+
 def collect_demonstrations(
     gym_env: CCSGymEnv,
     demo_policy: Policy,
@@ -50,7 +84,7 @@ def collect_demonstrations(
 
 def behavior_clone(
     model,
-    observations: np.ndarray,
+    observations: np.ndarray | dict[str, np.ndarray],
     actions: np.ndarray,
     masks: np.ndarray | None = None,
     weights: np.ndarray | None = None,
@@ -72,7 +106,7 @@ def behavior_clone(
 
     policy = model.policy
     device = policy.device
-    obs_t = torch.as_tensor(np.asarray(observations, dtype=np.float32), device=device)
+    obs_t = _tensor_observations(observations, device)
     act_t = torch.as_tensor(np.asarray(actions, dtype=np.int64), device=device)
     mask_t = (
         torch.as_tensor(np.asarray(masks, dtype=bool), device=device)
@@ -84,7 +118,7 @@ def behavior_clone(
         if weights is not None
         else None
     )
-    n = obs_t.shape[0]
+    n = _observation_count(obs_t)
     optimizer = torch.optim.Adam(policy.parameters(), lr=lr)
 
     policy.set_training_mode(True)
@@ -93,13 +127,14 @@ def behavior_clone(
         running = 0.0
         for start in range(0, n, batch_size):
             idx = perm[start : start + batch_size]
+            batch_obs = _index_observations(obs_t, idx)
             batch_masks = mask_t[idx] if mask_t is not None else None
             if w_t is not None and w_t.ndim == 2:
-                log_prob = _masked_action_log_probs(policy, obs_t[idx], act_t[idx], batch_masks)
+                log_prob = _masked_action_log_probs(policy, batch_obs, act_t[idx], batch_masks)
                 nll = -log_prob
             else:
                 _values, log_prob, _entropy = policy.evaluate_actions(
-                    obs_t[idx], act_t[idx], action_masks=batch_masks
+                    batch_obs, act_t[idx], action_masks=batch_masks
                 )
                 nll = -log_prob
             if w_t is not None:
@@ -211,7 +246,7 @@ def bc_pretrain(
 
 
 def make_kickstart_callback(
-    observations: np.ndarray,
+    observations: np.ndarray | dict[str, np.ndarray],
     actions: np.ndarray,
     masks: np.ndarray | None,
     weights: np.ndarray | None,
@@ -229,7 +264,6 @@ def make_kickstart_callback(
     linearly to 0 over training. This anchors the policy to the teacher so RL
     refines it instead of drifting away (which degraded plain BC+PPO).
     """
-    import numpy as _np
     import torch
     from stable_baselines3.common.callbacks import BaseCallback
 
@@ -241,16 +275,17 @@ def make_kickstart_callback(
         def _on_training_start(self) -> None:
             policy = self.model.policy
             device = policy.device
-            self._obs = torch.as_tensor(_np.asarray(observations, dtype=_np.float32), device=device)
-            self._act = torch.as_tensor(_np.asarray(actions, dtype=_np.int64), device=device)
+            self._obs = _tensor_observations(observations, device)
+            self._act = torch.as_tensor(np.asarray(actions, dtype=np.int64), device=device)
             self._mask = (
-                torch.as_tensor(_np.asarray(masks, dtype=bool), device=device)
+                torch.as_tensor(np.asarray(masks, dtype=bool), device=device)
                 if masks is not None else None
             )
             self._w = (
-                torch.as_tensor(_np.asarray(weights, dtype=_np.float32), device=device)
+                torch.as_tensor(np.asarray(weights, dtype=np.float32), device=device)
                 if weights is not None else None
             )
+            _observation_count(self._obs)
             self._opt = torch.optim.Adam(policy.parameters(), lr=lr)
 
         def _on_step(self) -> bool:
@@ -263,16 +298,17 @@ def make_kickstart_callback(
                 return
             policy = self.model.policy
             policy.set_training_mode(True)
-            n = self._obs.shape[0]
+            n = _observation_count(self._obs)
             bc_val = 0.0
             for _ in range(n_batches):
-                idx = torch.randint(0, n, (batch_size,), device=self._obs.device)
+                idx = torch.randint(0, n, (batch_size,), device=policy.device)
+                batch_obs = _index_observations(self._obs, idx)
                 bm = self._mask[idx] if self._mask is not None else None
                 if self._w is not None and self._w.ndim == 2:
-                    log_prob = _masked_action_log_probs(policy, self._obs[idx], self._act[idx], bm)
+                    log_prob = _masked_action_log_probs(policy, batch_obs, self._act[idx], bm)
                     nll = -log_prob
                 else:
-                    _v, log_prob, _e = policy.evaluate_actions(self._obs[idx], self._act[idx], action_masks=bm)
+                    _v, log_prob, _e = policy.evaluate_actions(batch_obs, self._act[idx], action_masks=bm)
                     nll = -log_prob
                 if self._w is not None:
                     wb = self._w[idx]
