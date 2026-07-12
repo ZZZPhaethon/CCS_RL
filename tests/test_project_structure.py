@@ -146,28 +146,28 @@ class ProjectStructureTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
 
         self.assertIn("#SBATCH --job-name=ccs_forecast_rl", source)
-        self.assertIn("#SBATCH --array=0-2", source)
+        self.assertIn("#SBATCH --array=0-19%5", source)
         self.assertIn("#SBATCH --cpus-per-task=12", source)
         self.assertIn("#SBATCH --mem=100G", source)
         self.assertIn("#SBATCH --gres=gpu:1", source)
         self.assertIn("#SBATCH --time=24:00:00", source)
         self.assertIn("#SBATCH -o logs/forecast_rl-%A_%a.out", source)
         self.assertIn("#SBATCH -e logs/forecast_rl-%A_%a.err", source)
-        self.assertIn("VARIANTS=(state flat tcn)", source)
-        self.assertIn("MODEL_SEEDS=(0 1 2)", source)
-        self.assertIn("VARIANT_INDEX=$((TASK_ID % 3))", source)
-        self.assertIn("SEED_INDEX=$((TASK_ID / 3))", source)
+        self.assertIn("VARIANTS=(state state_mode tcn tcn_mode)", source)
+        self.assertIn("MODEL_SEEDS=(0 1 2 3 4)", source)
+        self.assertIn("VARIANT_INDEX=$((TASK_ID % 4))", source)
+        self.assertIn("SEED_INDEX=$((TASK_ID / 4))", source)
         self.assertIn("out of range", source)
-        self.assertIn("--array=0-8", source)
+        self.assertIn("--array=0-19%5", source)
 
     def test_forecast_encoder_rl_uses_shared_cache_and_supported_runner_flags(self):
-        demo_path = ROOT / "hpc" / "submit_forecast_mpc_demos.sh"
+        demo_path = ROOT / "hpc" / "submit_forecast_mpc_demo_merge.sh"
         train_path = ROOT / "hpc" / "submit_forecast_encoder_rl.sh"
         self.assertTrue(demo_path.exists())
         self.assertTrue(train_path.exists())
         demo_source = demo_path.read_text(encoding="utf-8")
         train_source = train_path.read_text(encoding="utf-8")
-        cache_default = "output/rl_forecast/demos/mpc_720h_30eps.npz"
+        cache_default = "output/rl_forecast/demos/mpc_720h_100seeds.npz"
 
         self.assertIn(cache_default, demo_source)
         self.assertIn(cache_default, train_source)
@@ -193,9 +193,12 @@ class ProjectStructureTests(unittest.TestCase):
             },
         )
         self.assertIn('TIMESTEPS="${TIMESTEPS:-100000}"', train_source)
-        self.assertIn('BC_EPOCHS="${BC_EPOCHS:-20}"', train_source)
+        self.assertIn('BC_EPOCHS="${BC_EPOCHS:-50}"', train_source)
         self.assertIn('EPISODE_HOURS="${EPISODE_HOURS:-720}"', train_source)
-        self.assertIn('EVAL_SEEDS="${EVAL_SEEDS:-101 102 103 104 105}"', train_source)
+        self.assertIn(
+            'EVAL_SEEDS="${EVAL_SEEDS:-101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120}"',
+            train_source,
+        )
         self.assertIn('DEVICE="${DEVICE:-cuda}"', train_source)
 
     def test_forecast_encoder_rl_guards_and_diagnostics(self):
@@ -213,9 +216,11 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertIn('echo "Model seed: $MODEL_SEED"', source)
         self.assertIn('echo "Demo cache: $DEMO_CACHE"', source)
         self.assertIn('echo "Output directory: $OUT_DIR"', source)
-        self.assertIn('OUT_DIR="${OUT_DIR:-output/rl_forecast/pilot}"', source)
-        self.assertIn("OUT_DIR=output/rl_forecast/smoke", source)
-        self.assertIn("OUT_DIR=output/rl_forecast/formal", source)
+        self.assertIn(
+            'OUT_DIR="${OUT_DIR:-output/rl_forecast/operation_mode_formal}"', source
+        )
+        self.assertIn("OUT_DIR=output/rl_forecast/operation_mode_smoke", source)
+        self.assertIn("output/rl_forecast/operation_mode_formal", source)
         self.assertIn('export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-12}"', source)
         self.assertIn('export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-12}"', source)
 

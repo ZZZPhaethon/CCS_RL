@@ -15,6 +15,7 @@ from ..environment.forecast import (
     future_forecast_observation,
 )
 from ..environment.gym_adapter import flat_action_from_native, flat_action_mask
+from ..environment.vessel_mode import vessel_operation_mode_observation
 from .native_mpc import RollingNativeMpcController
 from .replay import ReplayExpectation, ReplaySnapshot, replay_native_actions
 
@@ -28,8 +29,12 @@ class MpcDemonstrationBatch:
     seeds: np.ndarray
     hours: np.ndarray
     metadata: dict[str, object]
+    operation_modes: np.ndarray | None = None
 
-    def observations(self, variant: Literal["state", "flat", "tcn"]):
+    def observations(
+        self,
+        variant: Literal["state", "flat", "tcn", "state_mode", "tcn_mode"],
+    ):
         if variant == "state":
             return self.state
         if variant == "flat":
@@ -39,6 +44,18 @@ class MpcDemonstrationBatch:
             ).astype(np.float32, copy=False)
         if variant == "tcn":
             return {"state": self.state, "forecast": self.forecast}
+        if variant in {"state_mode", "tcn_mode"}:
+            if self.operation_modes is None:
+                raise ValueError(
+                    f"operation mode observations are required for variant {variant!r}"
+                )
+            enriched = np.concatenate(
+                (self.state, self.operation_modes.reshape(len(self.state), -1)),
+                axis=1,
+            ).astype(np.float32, copy=False)
+            if variant == "state_mode":
+                return enriched
+            return {"state": enriched, "forecast": self.forecast}
         raise ValueError(f"unknown demonstration observation variant: {variant}")
 
 
@@ -54,19 +71,27 @@ def save_demonstrations(batch: MpcDemonstrationBatch, path) -> None:
         ensure_ascii=True,
         allow_nan=False,
     )
+    payload = {
+        "state": batch.state,
+        "forecast": batch.forecast,
+        "actions": batch.actions,
+        "masks": batch.masks,
+        "seeds": batch.seeds,
+        "hours": batch.hours,
+        "metadata_json": np.asarray(metadata_json),
+    }
+    if batch.operation_modes is not None:
+        payload["operation_modes"] = batch.operation_modes
     np.savez_compressed(
         destination,
-        state=batch.state,
-        forecast=batch.forecast,
-        actions=batch.actions,
-        masks=batch.masks,
-        seeds=batch.seeds,
-        hours=batch.hours,
-        metadata_json=np.asarray(metadata_json),
+        **payload,
     )
 
 
-def load_demonstrations(path, expected_metadata: dict[str, object]) -> MpcDemonstrationBatch:
+def load_demonstrations(
+    path,
+    expected_metadata: dict[str, object] | None,
+) -> MpcDemonstrationBatch:
     """Load, schema-check, and canonicalize a demonstration cache."""
 
     required = {
@@ -87,6 +112,11 @@ def load_demonstrations(path, expected_metadata: dict[str, object]) -> MpcDemons
                 name: np.asarray(cache[name])
                 for name in required - {"metadata_json"}
             }
+            operation_modes_array = (
+                np.asarray(cache["operation_modes"])
+                if "operation_modes" in cache.files
+                else None
+            )
             metadata_array = np.asarray(cache["metadata_json"])
     except (OSError, TypeError, ValueError) as error:
         if isinstance(error, ValueError) and str(error).startswith("demonstration cache"):
@@ -101,14 +131,15 @@ def load_demonstrations(path, expected_metadata: dict[str, object]) -> MpcDemons
         raise ValueError(f"invalid demonstration cache metadata JSON: {error}") from error
     if not isinstance(metadata, dict):
         raise ValueError("invalid demonstration cache metadata: expected an object")
-    for name, expected_value in expected_metadata.items():
-        if name not in metadata:
-            raise ValueError(f"metadata mismatch for {name!r}: field is missing")
-        if metadata[name] != expected_value:
-            raise ValueError(
-                f"metadata mismatch for {name!r}: "
-                f"expected {expected_value!r}, actual {metadata[name]!r}"
-            )
+    if expected_metadata is not None:
+        for name, expected_value in expected_metadata.items():
+            if name not in metadata:
+                raise ValueError(f"metadata mismatch for {name!r}: field is missing")
+            if metadata[name] != expected_value:
+                raise ValueError(
+                    f"metadata mismatch for {name!r}: "
+                    f"expected {expected_value!r}, actual {metadata[name]!r}"
+                )
 
     state = _float_array("state", arrays["state"], rank=2)
     forecast = _float_array("forecast", arrays["forecast"], rank=3)
@@ -120,6 +151,7 @@ def load_demonstrations(path, expected_metadata: dict[str, object]) -> MpcDemons
     masks = _mask_array(arrays["masks"])
     seeds = _integer_array("seeds", arrays["seeds"], rank=1)
     hours = _integer_array("hours", arrays["hours"], rank=1)
+    operation_modes = _operation_mode_array(operation_modes_array)
 
     if not np.all(np.isfinite(state)) or not np.all(np.isfinite(forecast)):
         raise ValueError("state and forecast observations must contain only finite values")
@@ -131,6 +163,8 @@ def load_demonstrations(path, expected_metadata: dict[str, object]) -> MpcDemons
         "seeds": seeds.shape[0],
         "hours": hours.shape[0],
     }
+    if operation_modes is not None:
+        leading["operation_modes"] = operation_modes.shape[0]
     if len(set(leading.values())) != 1:
         raise ValueError(f"misaligned leading dimensions: {leading}")
 
@@ -142,6 +176,7 @@ def load_demonstrations(path, expected_metadata: dict[str, object]) -> MpcDemons
         seeds=seeds,
         hours=hours,
         metadata=metadata,
+        operation_modes=operation_modes,
     )
 
 
@@ -164,6 +199,7 @@ def collect_mpc_demonstrations(
     masks: list[np.ndarray] = []
     recorded_seeds: list[int] = []
     hours: list[int] = []
+    operation_modes: list[np.ndarray] = []
 
     for seed in seed_values:
         env = env_factory(demonstration=True)
@@ -178,6 +214,11 @@ def collect_mpc_demonstrations(
 
         for hour in range(int(episode_hours)):
             states.append(np.asarray(current_state_observation(env), dtype=np.float32))
+            operation_modes.append(
+                np.asarray(vessel_operation_mode_observation(env), dtype=np.float32).reshape(
+                    len(env.vessel_ids), 5
+                )
+            )
             forecasts.append(
                 np.asarray(future_forecast_observation(env), dtype=np.float32)
             )
@@ -237,6 +278,67 @@ def collect_mpc_demonstrations(
         seeds=np.asarray(recorded_seeds, dtype=np.int64),
         hours=np.asarray(hours, dtype=np.int64),
         metadata=env_factory.metadata(),
+        operation_modes=np.asarray(operation_modes, dtype=np.float32),
+    )
+
+
+def merge_demonstration_shards(
+    shards: list[MpcDemonstrationBatch],
+    *,
+    expected_seeds,
+    episode_hours: int,
+) -> MpcDemonstrationBatch:
+    """Validate and merge complete demonstration shards in seed/hour order."""
+
+    if not shards:
+        raise ValueError("at least one demonstration shard is required")
+    expected = {int(seed) for seed in expected_seeds}
+    if not expected:
+        raise ValueError("expected_seeds must not be empty")
+    if episode_hours <= 0:
+        raise ValueError("episode_hours must be positive")
+    metadata = shards[0].metadata
+    for shard in shards[1:]:
+        if shard.metadata != metadata:
+            raise ValueError("demonstration shard metadata mismatch")
+
+    seeds = np.concatenate([shard.seeds for shard in shards])
+    hours = np.concatenate([shard.hours for shard in shards])
+    pairs = list(zip(seeds.tolist(), hours.tolist()))
+    if len(set(pairs)) != len(pairs):
+        raise ValueError("duplicate demonstration seed/hour rows across shards")
+    actual = {int(seed) for seed in seeds.tolist()}
+    missing = sorted(expected - actual)
+    unexpected = sorted(actual - expected)
+    if missing or unexpected:
+        raise ValueError(
+            f"missing or unexpected demonstration seeds: missing={missing}, unexpected={unexpected}"
+        )
+    expected_hours = list(range(int(episode_hours)))
+    for seed in sorted(expected):
+        seed_hours = sorted(int(hour) for row_seed, hour in pairs if int(row_seed) == seed)
+        if seed_hours != expected_hours:
+            raise ValueError(
+                f"seed {seed} does not contain complete hours 0..{episode_hours - 1}: {seed_hours}"
+            )
+
+    operation_presence = [shard.operation_modes is not None for shard in shards]
+    if len(set(operation_presence)) != 1:
+        raise ValueError("demonstration shards disagree on operation mode schema")
+    order = np.lexsort((hours, seeds))
+
+    def merged(name: str):
+        return np.concatenate([getattr(shard, name) for shard in shards], axis=0)[order]
+
+    return MpcDemonstrationBatch(
+        state=merged("state"),
+        forecast=merged("forecast"),
+        actions=merged("actions"),
+        masks=merged("masks"),
+        seeds=seeds[order].astype(np.int64, copy=False),
+        hours=hours[order].astype(np.int64, copy=False),
+        metadata=metadata,
+        operation_modes=(merged("operation_modes") if operation_presence[0] else None),
     )
 
 
@@ -264,6 +366,23 @@ def _mask_array(value: np.ndarray) -> np.ndarray:
     if value.dtype.kind not in {"i", "u"} or not np.all((value == 0) | (value == 1)):
         raise ValueError(f"invalid masks dtype or values: {value.dtype}")
     return value.astype(bool)
+
+
+def _operation_mode_array(value: np.ndarray | None) -> np.ndarray | None:
+    if value is None:
+        return None
+    modes = _float_array("operation_modes", value, rank=3)
+    if modes.shape[2] != 5:
+        raise ValueError(
+            f"invalid operation_modes shape: expected final dimension 5, actual {modes.shape}"
+        )
+    if not np.all(np.isfinite(modes)):
+        raise ValueError("operation mode observations must contain only finite values")
+    if not np.all((modes == 0.0) | (modes == 1.0)) or not np.all(
+        modes.sum(axis=2) == 1.0
+    ):
+        raise ValueError("operation mode observations must be one-hot")
+    return modes
 
 
 def _expectation_from_snapshot(snapshot: ReplaySnapshot) -> ReplayExpectation:

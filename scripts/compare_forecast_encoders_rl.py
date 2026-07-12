@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import statistics
 import subprocess
+import tempfile
 import time
 
 import numpy as np
@@ -19,6 +20,7 @@ from sim.control.baselines import greedy_shuttle_policy, idle_policy
 from sim.control.demonstrations import (
     collect_mpc_demonstrations,
     load_demonstrations,
+    merge_demonstration_shards,
     save_demonstrations,
 )
 from sim.control.imitation import (
@@ -27,9 +29,24 @@ from sim.control.imitation import (
     make_kickstart_callback,
 )
 from sim.control.native_mpc import RollingNativeMpcController
+from sim.control.vessel_diagnostics import (
+    VesselRolloutDiagnostics,
+    demonstration_mode_diagnostics,
+    masked_vessel_action_probabilities,
+)
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
 from sim.environment.forecast_encoder import TCNForecastExtractor
-from sim.environment.forecast_gym import ForecastGymEnv, make_forecast_ppo_policy
+from sim.environment.forecast_gym import (
+    ForecastGymEnv,
+    forecast_policy_observation,
+    variant_base_encoder,
+    variant_uses_operation_modes,
+)
+from sim.environment.gym_adapter import flat_action_mask, native_action_from_flat
+from sim.environment.vessel_mode import (
+    VESSEL_OPERATION_MODES,
+    vessel_operation_mode_feature_names,
+)
 from sim.metrics import EpisodeMetrics, run_episode
 from sim.train import make_native_env
 
@@ -42,6 +59,7 @@ except ImportError:  # pragma: no cover - exercised only in incomplete installat
 FORMAL_SCENARIO = "northern_lights_phase1_3vessels"
 FORECAST_HORIZON_H = 168
 FORECAST_CHANNELS = 9
+FORMAL_VARIANTS = ("state", "state_mode", "tcn", "tcn_mode")
 
 RESULT_COLUMNS = (
     "vented_t",
@@ -108,6 +126,21 @@ SUMMARY_METRICS = (
 )
 
 
+def demonstration_task_seeds(task_id: int) -> tuple[int, ...]:
+    task_id = int(task_id)
+    if task_id < 0 or task_id > 9:
+        raise ValueError(f"demonstration task ID must be in 0..9, got {task_id}")
+    start = task_id * 10
+    return tuple(range(start, start + 10))
+
+
+def formal_training_task(task_id: int) -> tuple[str, int]:
+    task_id = int(task_id)
+    if task_id < 0 or task_id > 19:
+        raise ValueError(f"formal training task ID must be in 0..19, got {task_id}")
+    return FORMAL_VARIANTS[task_id % len(FORMAL_VARIANTS)], task_id // len(FORMAL_VARIANTS)
+
+
 def _nonnegative_int(value: str) -> int:
     parsed = int(value)
     if parsed < 0:
@@ -144,8 +177,18 @@ def parse_args(argv=None):
     demos.add_argument("--demo-seeds", type=int, nargs="+", required=True)
     _add_locked_protocol_defaults(demos)
 
+    merge = commands.add_parser("merge-demos")
+    merge.add_argument("--shards", nargs="+", required=True)
+    merge.add_argument("--demo-cache", required=True)
+    merge.add_argument("--expected-seeds", type=int, nargs="+", required=True)
+    merge.add_argument("--episode-hours", type=int, default=720)
+
     train = commands.add_parser("train")
-    train.add_argument("--variant", choices=("state", "flat", "tcn"), required=True)
+    train.add_argument(
+        "--variant",
+        choices=("state", "flat", "tcn", "state_mode", "tcn_mode"),
+        required=True,
+    )
     train.add_argument("--demo-cache", required=True)
     train.add_argument("--timesteps", type=_nonnegative_int, default=100_000)
     train.add_argument("--bc-epochs", type=int, default=20)
@@ -212,6 +255,8 @@ class ExperimentEnvFactory:
             "forecast_channels": channels,
             "state_feature_names": state_names,
             "state_size": len(state_names),
+            "operation_mode_feature_names": list(vessel_operation_mode_feature_names(env)),
+            "operation_mode_shape": [len(env.vessel_ids), len(VESSEL_OPERATION_MODES)],
             "action_dimensions": [*env.vessel_action_dims, *env.well_rate_action_dims],
             "vessel_action_dimensions": list(env.vessel_action_dims),
             "well_rate_action_dimensions": list(env.well_rate_action_dims),
@@ -243,7 +288,7 @@ class ExperimentEnvFactory:
 
 
 def model_policy_config(variant: str):
-    if variant == "tcn":
+    if variant_base_encoder(variant) == "tcn":
         return "MultiInputPolicy", {
             "features_extractor_class": TCNForecastExtractor,
             "features_extractor_kwargs": {
@@ -251,7 +296,7 @@ def model_policy_config(variant: str):
                 "forecast_features": 64,
             },
         }
-    if variant in {"state", "flat"}:
+    if variant_base_encoder(variant) in {"state", "flat"}:
         return "MlpPolicy", {}
     raise ValueError(f"unknown variant: {variant}")
 
@@ -268,6 +313,14 @@ def results_path(args) -> Path:
 
 def run_manifest_path(args) -> Path:
     return Path(args.out_dir) / f"run_{args.variant}_seed{args.model_seed}.manifest.json"
+
+
+def demo_diagnostics_path(args) -> Path:
+    return Path(args.out_dir) / f"demo_mode_diagnostics_{args.variant}_seed{args.model_seed}.csv"
+
+
+def rollout_diagnostics_path(args) -> Path:
+    return Path(args.out_dir) / f"rollout_mode_diagnostics_{args.variant}_seed{args.model_seed}.csv"
 
 
 def demo_manifest_path(cache_path: Path) -> Path:
@@ -332,6 +385,27 @@ def write_results_csv(path: Path, rows: list[dict[str, object]]) -> None:
     _write_bytes_immutable(path, buffer.getvalue().encode("utf-8"))
 
 
+def write_diagnostics_csv(path: Path, rows: list[dict[str, object]]) -> None:
+    if not rows:
+        raise ValueError(f"cannot write empty diagnostic CSV: {path}")
+    fields = list(rows[0])
+    if any(list(row) != fields for row in rows):
+        raise ValueError("diagnostic rows do not share a stable schema")
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                key: ""
+                if isinstance(value, (float, np.floating)) and not np.isfinite(value)
+                else value
+                for key, value in row.items()
+            }
+        )
+    _write_bytes_immutable(Path(path), buffer.getvalue().encode("utf-8"))
+
+
 def generate_demos(args) -> dict[str, object]:
     cache_path = normalize_demo_cache_path(args.demo_cache)
     if cache_path.exists():
@@ -363,6 +437,59 @@ def generate_demos(args) -> dict[str, object]:
         },
     }
     write_json_immutable(demo_manifest_path(cache_path), manifest)
+    return manifest
+
+
+def merge_demos(args) -> dict[str, object]:
+    cache_path = normalize_demo_cache_path(args.demo_cache)
+    manifest_path = demo_manifest_path(cache_path)
+    if cache_path.exists() or manifest_path.exists():
+        raise FileExistsError(
+            f"refusing to overwrite merged demonstration artifacts: {cache_path}"
+        )
+
+    shard_paths = [normalize_demo_cache_path(path) for path in args.shards]
+    shards = [load_demonstrations(path, None) for path in shard_paths]
+    merged = merge_demonstration_shards(
+        shards,
+        expected_seeds=args.expected_seeds,
+        episode_hours=args.episode_hours,
+    )
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{cache_path.stem}-",
+        suffix=".npz",
+        dir=cache_path.parent,
+    )
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    try:
+        save_demonstrations(merged, temporary_path)
+        load_demonstrations(temporary_path, merged.metadata)
+        temporary_path.replace(cache_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+    manifest = {
+        "kind": "merged_mpc_demonstration_cache",
+        "cache_path": str(cache_path.resolve()),
+        "cache_sha256": file_sha256(cache_path),
+        "git_commit": git_commit(),
+        "demo_seeds": sorted(int(seed) for seed in args.expected_seeds),
+        "row_count": int(len(merged.state)),
+        "episode_hours": int(args.episode_hours),
+        "environment": merged.metadata,
+        "shards": [
+            {
+                "path": str(path.resolve()),
+                "sha256": file_sha256(path),
+            }
+            for path in shard_paths
+        ],
+    }
+    write_json_immutable(manifest_path, manifest)
     return manifest
 
 
@@ -468,6 +595,7 @@ def evaluate_learned_stage(
     trainable_parameters: int,
     demonstration_exact_match: float,
     demonstration_action_accuracy: list[float],
+    rollout_diagnostic_rows: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     rows = []
     for deterministic in (False, True):
@@ -475,11 +603,37 @@ def evaluate_learned_stage(
             if hasattr(model, "set_random_seed"):
                 model.set_random_seed(int(eval_seed))
             env = ExperimentEnvFactory(args)()
-            policy = make_forecast_ppo_policy(
-                model,
-                args.variant,
-                deterministic=deterministic,
-            )
+            tracker = VesselRolloutDiagnostics()
+
+            def policy(native_env):
+                observation = forecast_policy_observation(native_env, args.variant)
+                masks = flat_action_mask(
+                    native_env.vessel_action_mask(), native_env.well_rate_action_mask()
+                )
+                observation_batch = (
+                    {key: np.asarray(value)[None, ...] for key, value in observation.items()}
+                    if isinstance(observation, dict)
+                    else np.asarray(observation)[None, ...]
+                )
+                probabilities = masked_vessel_action_probabilities(
+                    model,
+                    observation_batch,
+                    masks[None, ...],
+                    len(native_env.vessel_ids),
+                )
+                action, _state = model.predict(
+                    observation,
+                    deterministic=deterministic,
+                    action_masks=masks,
+                )
+                native_action = native_action_from_flat(native_env, action)
+                tracker.observe(
+                    native_env,
+                    native_action["vessels"],
+                    wait_probabilities=[float(values[0, 0]) for values in probabilities],
+                )
+                return native_action
+
             metrics, runtime, latency = _timed_episode(env, policy, int(eval_seed))
             rows.append(
                 metric_result_row(
@@ -498,6 +652,15 @@ def evaluate_learned_stage(
                     demonstration_action_accuracy=demonstration_action_accuracy,
                 )
             )
+            if rollout_diagnostic_rows is not None:
+                rollout_diagnostic_rows.extend(
+                    tracker.rows(
+                        stage=stage,
+                        deterministic=bool(deterministic),
+                        model_seed=int(args.model_seed),
+                        eval_seed=int(eval_seed),
+                    )
+                )
     return rows
 
 
@@ -545,6 +708,8 @@ def _ensure_new_run_outputs(args) -> None:
         checkpoint_path(args, "ppo"),
         results_path(args),
         run_manifest_path(args),
+        demo_diagnostics_path(args),
+        rollout_diagnostics_path(args),
     ]
     collisions = [str(path) for path in paths if path.exists()]
     if collisions:
@@ -619,6 +784,25 @@ def _train_loaded_batch(
     bc_accuracy, bc_dimension_accuracy = demonstration_accuracy(
         model, observations, batch.actions, batch.masks
     )
+    demo_diagnostic_rows = []
+    rollout_diagnostic_rows = []
+    operation_modes = getattr(batch, "operation_modes", None)
+    if operation_modes is not None:
+        demo_diagnostic_rows.extend(
+            {
+                "stage": "bc",
+                "model_seed": int(args.model_seed),
+                **row,
+            }
+            for row in demonstration_mode_diagnostics(
+                model,
+                observations,
+                batch.actions,
+                batch.masks,
+                operation_modes,
+                len(native_env.vessel_ids),
+            )
+        )
     bc_path = checkpoint_path(args, "bc")
     model.save(str(bc_path))
     rows = evaluate_learned_stage(
@@ -628,6 +812,7 @@ def _train_loaded_batch(
         trainable_parameters=parameter_count,
         demonstration_exact_match=bc_accuracy,
         demonstration_action_accuracy=bc_dimension_accuracy,
+        rollout_diagnostic_rows=rollout_diagnostic_rows,
     )
 
     if args.timesteps > 0:
@@ -652,6 +837,22 @@ def _train_loaded_batch(
     ppo_accuracy, ppo_dimension_accuracy = demonstration_accuracy(
         model, observations, batch.actions, batch.masks
     )
+    if operation_modes is not None:
+        demo_diagnostic_rows.extend(
+            {
+                "stage": "ppo",
+                "model_seed": int(args.model_seed),
+                **row,
+            }
+            for row in demonstration_mode_diagnostics(
+                model,
+                observations,
+                batch.actions,
+                batch.masks,
+                operation_modes,
+                len(native_env.vessel_ids),
+            )
+        )
     ppo_path = checkpoint_path(args, "ppo")
     model.save(str(ppo_path))
     rows.extend(
@@ -662,10 +863,15 @@ def _train_loaded_batch(
             trainable_parameters=parameter_count,
             demonstration_exact_match=ppo_accuracy,
             demonstration_action_accuracy=ppo_dimension_accuracy,
+            rollout_diagnostic_rows=rollout_diagnostic_rows,
         )
     )
     rows.extend(evaluate_reference_rows(args))
     write_results_csv(results_path(args), rows)
+    if demo_diagnostic_rows:
+        write_diagnostics_csv(demo_diagnostics_path(args), demo_diagnostic_rows)
+    if rollout_diagnostic_rows:
+        write_diagnostics_csv(rollout_diagnostics_path(args), rollout_diagnostic_rows)
 
     demo_seeds = sorted({int(seed) for seed in np.asarray(batch.seeds).tolist()})
     manifest = {
@@ -679,6 +885,14 @@ def _train_loaded_batch(
         "git_commit": commit,
         "checkpoints": {"bc": str(bc_path), "ppo": str(ppo_path)},
         "results_csv": str(results_path(args)),
+        "diagnostics": {
+            "demonstration_mode_csv": (
+                str(demo_diagnostics_path(args)) if demo_diagnostic_rows else None
+            ),
+            "rollout_mode_csv": (
+                str(rollout_diagnostics_path(args)) if rollout_diagnostic_rows else None
+            ),
+        },
         "environment": metadata,
         "policy": (
             {
@@ -687,7 +901,7 @@ def _train_loaded_batch(
                 "state_features": 64,
                 "forecast_features": 64,
             }
-            if args.variant == "tcn"
+            if variant_base_encoder(args.variant) == "tcn"
             else {"name": "MlpPolicy", "features_extractor": None}
         ),
         "bc": {
@@ -737,9 +951,12 @@ def _bool_value(value) -> bool:
     raise ValueError(f"invalid deterministic value: {value!r}")
 
 
+MODE_PAIRS = {"state_mode": "state", "tcn_mode": "tcn"}
+
+
 def _pairing_maps(rows):
     learned = [row for row in rows if row.get("family") == "learned"]
-    maps = {variant: {} for variant in ("state", "flat", "tcn")}
+    maps = {variant: {} for variant in FORMAL_VARIANTS}
     for row in learned:
         variant = row.get("variant")
         if variant not in maps:
@@ -753,16 +970,17 @@ def _pairing_maps(rows):
         if key in maps[variant]:
             raise ValueError(f"duplicate pairing key for {variant}: {key}")
         maps[variant][key] = float(row["vented_t"])
-    state_keys = set(maps["state"])
-    if not state_keys:
-        raise ValueError("missing paired keys: no state rows")
-    for variant in ("flat", "tcn"):
-        variant_keys = set(maps[variant])
-        if variant_keys != state_keys:
-            missing = sorted(state_keys - variant_keys)
-            extra = sorted(variant_keys - state_keys)
+    for mode_variant, baseline_variant in MODE_PAIRS.items():
+        baseline_keys = set(maps[baseline_variant])
+        variant_keys = set(maps[mode_variant])
+        if not baseline_keys:
+            raise ValueError(f"missing paired keys: no {baseline_variant} rows")
+        if variant_keys != baseline_keys:
+            missing = sorted(baseline_keys - variant_keys)
+            extra = sorted(variant_keys - baseline_keys)
             raise ValueError(
-                f"missing paired keys for {variant}: missing={missing}, unmatched={extra}"
+                f"missing paired keys for {mode_variant}: "
+                f"missing={missing}, unmatched={extra}"
             )
     return maps
 
@@ -776,11 +994,62 @@ def _numeric_values(rows, field: str) -> list[float]:
     return values
 
 
+_T_975 = {
+    1: 12.7062047364,
+    2: 4.30265272975,
+    3: 3.18244630528,
+    4: 2.77644510520,
+    5: 2.57058183564,
+    6: 2.44691184879,
+    7: 2.36462425101,
+    8: 2.30600413520,
+    9: 2.26215716285,
+    10: 2.22813885196,
+    11: 2.20098516008,
+    12: 2.17881282966,
+    13: 2.16036865646,
+    14: 2.14478668792,
+    15: 2.13144954556,
+    16: 2.11990529922,
+    17: 2.10981557783,
+    18: 2.10092204024,
+    19: 2.09302405441,
+    20: 2.08596344727,
+    21: 2.07961384473,
+    22: 2.07387306790,
+    23: 2.06865761042,
+    24: 2.06389856163,
+    25: 2.05953855275,
+    26: 2.05552943864,
+    27: 2.05183051648,
+    28: 2.04840714180,
+    29: 2.04522964213,
+    30: 2.04227245630,
+}
+
+
+def _model_uncertainty(values: list[float]) -> tuple[object, object]:
+    if len(values) < 2:
+        return "", ""
+    sample_sd = statistics.stdev(values)
+    critical = _T_975.get(len(values) - 1, 1.95996398454)
+    return sample_sd, critical * sample_sd / np.sqrt(len(values))
+
+
+def _write_dict_rows(path: Path, rows: list[dict[str, object]]) -> None:
+    fields = list(rows[0]) if rows else []
+    with Path(path).open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        if fields:
+            writer.writeheader()
+            writer.writerows(rows)
+
+
 def write_paired_report(rows: list[dict[str, object]], out_dir: Path):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     pairing = _pairing_maps(rows)
-    grouped = {}
+    episode_groups = {}
     for row in rows:
         key = (
             row.get("policy", ""),
@@ -788,55 +1057,101 @@ def write_paired_report(rows: list[dict[str, object]], out_dir: Path):
             row.get("variant", ""),
             row.get("stage", ""),
             _bool_value(row.get("deterministic", True)),
+            int(row.get("model_seed", 0)),
         )
-        grouped.setdefault(key, []).append(row)
+        episode_groups.setdefault(key, []).append(row)
 
-    summary_rows = []
-    for (policy, family, variant, stage, deterministic), group_rows in sorted(grouped.items()):
+    episode_rows = []
+    for (
+        policy,
+        family,
+        variant,
+        stage,
+        deterministic,
+        model_seed,
+    ), group_rows in sorted(episode_groups.items()):
         summary = {
             "policy": policy,
             "family": family,
             "variant": variant,
             "stage": stage,
             "deterministic": deterministic,
-            "episodes": len(group_rows),
+            "model_seed": model_seed,
+            "eval_episodes": len(group_rows),
         }
-        vented_values = _numeric_values(group_rows, "vented_t")
-        summary["vented_t_mean"] = statistics.fmean(vented_values) if vented_values else ""
-        summary["vented_t_std"] = (
-            statistics.pstdev(vented_values)
-            if len(vented_values) > 1
-            else (0.0 if vented_values else "")
-        )
-        summary["paired_episodes"] = ""
-        summary["paired_vented_delta_vs_state_mean"] = ""
-        summary["paired_vented_delta_vs_state_std"] = ""
-        if family == "learned":
-            keys = [
-                key for key in pairing[variant]
-                if key[0] == stage and key[1] == deterministic
-            ]
-            deltas = [pairing[variant][key] - pairing["state"][key] for key in keys]
-            summary["paired_episodes"] = len(deltas)
-            summary["paired_vented_delta_vs_state_mean"] = statistics.fmean(deltas)
-            summary["paired_vented_delta_vs_state_std"] = (
-                statistics.pstdev(deltas) if len(deltas) > 1 else 0.0
-            )
         for metric in SUMMARY_METRICS:
-            if metric == "vented_t":
-                continue
             values = _numeric_values(group_rows, metric)
             summary[f"{metric}_mean"] = statistics.fmean(values) if values else ""
-            summary[f"{metric}_std"] = statistics.pstdev(values) if len(values) > 1 else (0.0 if values else "")
+        episode_rows.append(summary)
+
+    model_groups = {}
+    for row in episode_rows:
+        key = tuple(
+            row[field]
+            for field in ("policy", "family", "variant", "stage", "deterministic")
+        )
+        model_groups.setdefault(key, []).append(row)
+
+    summary_rows = []
+    for (policy, family, variant, stage, deterministic), model_rows in sorted(
+        model_groups.items()
+    ):
+        summary = {
+            "policy": policy,
+            "family": family,
+            "variant": variant,
+            "stage": stage,
+            "deterministic": deterministic,
+            "model_seeds": len(model_rows),
+            "eval_episodes": sum(int(row["eval_episodes"]) for row in model_rows),
+        }
+        for metric in SUMMARY_METRICS:
+            values = _numeric_values(model_rows, f"{metric}_mean")
+            model_sd, interval = _model_uncertainty(values)
+            summary[f"{metric}_mean"] = statistics.fmean(values) if values else ""
+            summary[f"{metric}_model_sd"] = model_sd
+            summary[f"{metric}_ci95_half_width"] = interval
+        summary.update(
+            {
+                "paired_baseline_variant": "",
+                "paired_model_seeds": "",
+                "paired_vented_delta_mean": "",
+                "paired_vented_delta_model_sd": "",
+                "paired_vented_delta_ci95_half_width": "",
+            }
+        )
+        if family == "learned" and variant in MODE_PAIRS:
+            baseline = MODE_PAIRS[variant]
+            matching = [
+                key
+                for key in pairing[variant]
+                if key[0] == stage and key[1] == deterministic
+            ]
+            deltas_by_model = {}
+            for key in matching:
+                deltas_by_model.setdefault(key[2], []).append(
+                    pairing[variant][key] - pairing[baseline][key]
+                )
+            model_deltas = [
+                statistics.fmean(values)
+                for _model_seed, values in sorted(deltas_by_model.items())
+            ]
+            delta_sd, delta_interval = _model_uncertainty(model_deltas)
+            summary.update(
+                {
+                    "paired_baseline_variant": baseline,
+                    "paired_model_seeds": len(model_deltas),
+                    "paired_vented_delta_mean": statistics.fmean(model_deltas),
+                    "paired_vented_delta_model_sd": delta_sd,
+                    "paired_vented_delta_ci95_half_width": delta_interval,
+                }
+            )
         summary_rows.append(summary)
 
+    episode_path = out_dir / "forecast_encoder_episode_summary.csv"
+    _write_dict_rows(episode_path, episode_rows)
     summary_path = out_dir / "forecast_encoder_summary.csv"
-    fields = list(summary_rows[0]) if summary_rows else []
-    with summary_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
-        if fields:
-            writer.writeheader()
-            writer.writerows(summary_rows)
+    _write_dict_rows(summary_path, summary_rows)
 
     markdown_path = out_dir / "forecast_encoder_summary.md"
     lines = [
@@ -844,16 +1159,17 @@ def write_paired_report(rows: list[dict[str, object]], out_dir: Path):
         "",
         "Lower venting is the primary outcome. End inventory and operating cost are secondary diagnostics.",
         "",
-        "Paired deltas are variant minus state on exact stage, determinism, model-seed, and evaluation-seed keys.",
+        "Means and 95% intervals use evaluation-seed means within each model seed, then sample uncertainty across model seeds.",
+        "Paired deltas are mode variant minus its matched base encoder on exact stage, determinism, model-seed, and evaluation-seed keys.",
         "",
-        "| policy | stage | deterministic | episodes | vented t mean | paired delta vs state |",
+        "| policy | stage | deterministic | model seeds | vented t mean | paired mode delta |",
         "|---|---|---:|---:|---:|---:|",
     ]
     for summary in summary_rows:
         lines.append(
             f"| {summary['policy']} | {summary['stage']} | {summary['deterministic']} | "
-            f"{summary['episodes']} | {summary['vented_t_mean']} | "
-            f"{summary['paired_vented_delta_vs_state_mean']} |"
+            f"{summary['model_seeds']} | {summary['vented_t_mean']} | "
+            f"{summary['paired_vented_delta_mean']} |"
         )
     markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return summary_path, markdown_path
@@ -920,6 +1236,8 @@ def main(argv=None):
     args = parse_args(argv)
     if args.command == "generate-demos":
         return generate_demos(args)
+    if args.command == "merge-demos":
+        return merge_demos(args)
     if args.command == "train":
         return train_variant(args)
     if args.command == "report":

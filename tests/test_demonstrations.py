@@ -16,7 +16,7 @@ def _demonstrations():
     return importlib.import_module("sim.control.demonstrations")
 
 
-def _batch():
+def _batch(operation_modes=None):
     demonstrations = _demonstrations()
     return demonstrations.MpcDemonstrationBatch(
         state=np.arange(6, dtype=np.float32).reshape(2, 3),
@@ -29,6 +29,17 @@ def _batch():
         seeds=np.array([11, 12], dtype=np.int64),
         hours=np.array([0, 1], dtype=np.int64),
         metadata={"schema": "demo-v1", "nested": {"b": 2, "a": 1}},
+        operation_modes=operation_modes,
+    )
+
+
+def _operation_modes():
+    return np.asarray(
+        [
+            [[1, 0, 0, 0, 0], [0, 1, 0, 0, 0]],
+            [[0, 0, 1, 0, 0], [0, 0, 0, 1, 0]],
+        ],
+        dtype=np.float32,
     )
 
 
@@ -126,6 +137,19 @@ def test_cache_round_trip_preserves_arrays_metadata_and_canonical_dtypes(tmp_pat
     assert loaded.masks.dtype == np.bool_
     assert loaded.seeds.dtype == np.int64
     assert loaded.hours.dtype == np.int64
+    assert loaded.operation_modes is None
+
+
+def test_v2_cache_round_trip_preserves_operation_modes(tmp_path):
+    demonstrations = _demonstrations()
+    batch = _batch(operation_modes=_operation_modes())
+    path = tmp_path / "demo-v2.npz"
+
+    demonstrations.save_demonstrations(batch, path)
+    loaded = demonstrations.load_demonstrations(path, batch.metadata)
+
+    np.testing.assert_array_equal(loaded.operation_modes, batch.operation_modes)
+    assert loaded.operation_modes.dtype == np.float32
 
 
 def test_observation_variants_have_expected_shapes_and_flatten_time_major():
@@ -145,6 +169,21 @@ def test_observation_variants_have_expected_shapes_and_flatten_time_major():
         batch.observations("unknown")
 
 
+def test_mode_observation_variants_append_flattened_vessel_major_modes():
+    batch = _batch(operation_modes=_operation_modes())
+
+    state_mode = batch.observations("state_mode")
+    assert state_mode.shape == (2, 13)
+    np.testing.assert_array_equal(state_mode[:, :3], batch.state)
+    np.testing.assert_array_equal(state_mode[:, 3:], _operation_modes().reshape(2, 10))
+    tcn_mode = batch.observations("tcn_mode")
+    np.testing.assert_array_equal(tcn_mode["state"], state_mode)
+    assert tcn_mode["forecast"] is batch.forecast
+
+    with pytest.raises(ValueError, match="operation mode"):
+        _batch().observations("state_mode")
+
+
 def test_metadata_mismatch_is_rejected(tmp_path):
     demonstrations = _demonstrations()
     path = tmp_path / "demo.npz"
@@ -161,6 +200,10 @@ def test_metadata_mismatch_is_rejected(tmp_path):
         ({"state": np.array([[np.nan], [0.0]], dtype=np.float32)}, "finite"),
         ({"actions": np.zeros((1, 2), dtype=np.int64)}, "leading"),
         ({"state": np.array([["bad"], ["dtype"]])}, "dtype"),
+        (
+            {"operation_modes": np.full((2, 2, 5), 0.2, dtype=np.float32)},
+            "one-hot",
+        ),
     ],
 )
 def test_invalid_cache_schema_is_rejected(tmp_path, override, message):
@@ -186,6 +229,8 @@ def test_short_real_collection_returns_feasible_rows_and_exact_forecasts():
     assert batch.state.shape[0] == 2
     assert batch.forecast.shape == (2, 168, 9)
     assert batch.actions.shape[0] == batch.masks.shape[0] == 2
+    assert batch.operation_modes.shape == (2, 3, 5)
+    np.testing.assert_array_equal(batch.operation_modes.sum(axis=2), np.ones((2, 3)))
     assert batch.seeds.tolist() == [3, 4]
     assert batch.hours.tolist() == [0, 0]
     assert batch.metadata == factory.metadata()
@@ -288,5 +333,60 @@ def test_premature_episode_completion_is_rejected():
         demonstrations.collect_mpc_demonstrations(
             _DemoFactory(env_hours=1),
             seeds=[10],
+            episode_hours=2,
+        )
+
+
+def _merge_shard(seed: int, hours: list[int]):
+    demonstrations = _demonstrations()
+    rows = len(hours)
+    return demonstrations.MpcDemonstrationBatch(
+        state=np.full((rows, 3), seed, dtype=np.float32),
+        forecast=np.full((rows, 168, 9), seed, dtype=np.float32),
+        actions=np.zeros((rows, 2), dtype=np.int64),
+        masks=np.ones((rows, 4), dtype=bool),
+        seeds=np.full(rows, seed, dtype=np.int64),
+        hours=np.asarray(hours, dtype=np.int64),
+        metadata={"schema": "merge-v2"},
+        operation_modes=np.tile(
+            np.asarray([[[1, 0, 0, 0, 0], [0, 0, 0, 0, 1]]], dtype=np.float32),
+            (rows, 1, 1),
+        ),
+    )
+
+
+def test_merge_demonstration_shards_requires_complete_seeds_and_sorts_rows():
+    demonstrations = _demonstrations()
+    merged = demonstrations.merge_demonstration_shards(
+        [_merge_shard(1, [1, 0]), _merge_shard(0, [1, 0])],
+        expected_seeds=[0, 1],
+        episode_hours=2,
+    )
+
+    assert list(zip(merged.seeds.tolist(), merged.hours.tolist())) == [
+        (0, 0),
+        (0, 1),
+        (1, 0),
+        (1, 1),
+    ]
+    assert merged.operation_modes.shape == (4, 2, 5)
+
+
+@pytest.mark.parametrize(
+    ("shards", "message"),
+    [
+        ([_merge_shard(0, [0, 1])], "missing.*seed"),
+        ([_merge_shard(0, [0, 1]), _merge_shard(0, [0, 1])], "duplicate"),
+        ([_merge_shard(0, [0]), _merge_shard(1, [0, 1])], "complete.*hours"),
+    ],
+)
+def test_merge_demonstration_shards_rejects_missing_duplicate_or_incomplete_rows(
+    shards, message
+):
+    demonstrations = _demonstrations()
+    with pytest.raises(ValueError, match=message):
+        demonstrations.merge_demonstration_shards(
+            shards,
+            expected_seeds=[0, 1],
             episode_hours=2,
         )

@@ -12,8 +12,25 @@ def sync_terminal_unload_queue(
     state: PhysicalState,
     excluded_vessel_ids: set[str] | None = None,
 ) -> list[str]:
-    excluded = excluded_vessel_ids or set()
     queue = state.terminal_unload_queues.setdefault(terminal.entity_id, [])
+    queue[:] = terminal_unload_queue_snapshot(
+        network,
+        terminal,
+        state,
+        excluded_vessel_ids=excluded_vessel_ids,
+    )
+    return queue
+
+
+def terminal_unload_queue_snapshot(
+    network,
+    terminal: Terminal,
+    state: PhysicalState,
+    excluded_vessel_ids: set[str] | None = None,
+) -> list[str]:
+    """Return the current FIFO queue without mutating physical state."""
+
+    excluded = excluded_vessel_ids or set()
     eligible = {
         vessel_id
         for vessel_id in network._entities_of_type(Vessel)
@@ -21,7 +38,11 @@ def sync_terminal_unload_queue(
         and state.vessel_berths.get(vessel_id) == terminal.entity_id
         and state.entity_inventory_t.get(vessel_id, 0.0) > 1e-9
     }
-    queue[:] = [vessel_id for vessel_id in queue if vessel_id in eligible]
+    queue = [
+        vessel_id
+        for vessel_id in state.terminal_unload_queues.get(terminal.entity_id, [])
+        if vessel_id in eligible
+    ]
     queue.extend(sorted(eligible.difference(queue)))
     return queue
 

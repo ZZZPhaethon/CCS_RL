@@ -6,7 +6,7 @@ import sys
 import numpy as np
 import pytest
 
-from sim.environment.forecast_gym import ForecastGymEnv
+from sim.environment.forecast_gym import ForecastGymEnv, forecast_policy_observation
 from sim.environment.forecast import current_state_feature_names
 from sim.environment.gym_adapter import flat_action_mask
 from sim.train import make_native_env
@@ -38,7 +38,30 @@ def test_state_flat_and_tcn_observation_shapes():
     assert np.allclose(flat[51:].reshape(168, 9), structured["forecast"])
 
 
-@pytest.mark.parametrize("variant", ["state", "flat", "tcn"])
+def test_operation_mode_variants_append_modes_to_current_state_only():
+    native = _native()
+    native.reset(seed=4)
+    base_state = forecast_policy_observation(native, "state")
+    state_mode = forecast_policy_observation(native, "state_mode")
+    tcn_mode = forecast_policy_observation(native, "tcn_mode")
+    mode_size = len(native.vessel_ids) * 5
+
+    assert state_mode.shape == (len(base_state) + mode_size,)
+    np.testing.assert_array_equal(state_mode[: len(base_state)], base_state)
+    modes = state_mode[-mode_size:].reshape(len(native.vessel_ids), 5)
+    np.testing.assert_array_equal(modes.sum(axis=1), np.ones(len(native.vessel_ids)))
+    np.testing.assert_array_equal(tcn_mode["state"], state_mode)
+    assert tcn_mode["forecast"].shape == (168, 9)
+
+    state_env = ForecastGymEnv(_native(), "state_mode")
+    tcn_env = ForecastGymEnv(_native(), "tcn_mode")
+    state_obs, _ = state_env.reset(seed=4)
+    tcn_obs, _ = tcn_env.reset(seed=4)
+    assert state_env.observation_space.contains(state_obs)
+    assert tcn_env.observation_space.contains(tcn_obs)
+
+
+@pytest.mark.parametrize("variant", ["state", "flat", "tcn", "state_mode", "tcn_mode"])
 def test_terminal_observation_retains_declared_shape(variant):
     env = ForecastGymEnv(_native(), variant)
     observation, _ = env.reset(seed=4)
@@ -49,7 +72,7 @@ def test_terminal_observation_retains_declared_shape(variant):
     assert not truncated
     if variant == "flat":
         assert np.any(observation[51:] != 0.0)
-    elif variant == "tcn":
+    elif variant in {"tcn", "tcn_mode"}:
         assert np.any(observation["forecast"] != 0.0)
 
     observation, _, terminated, truncated, _ = env.step(action)
@@ -58,7 +81,7 @@ def test_terminal_observation_retains_declared_shape(variant):
     assert env.observation_space.contains(observation)
     if variant == "flat":
         assert np.any(observation[51:] != 0.0)
-    elif variant == "tcn":
+    elif variant in {"tcn", "tcn_mode"}:
         assert np.any(observation["forecast"] != 0.0)
 
 
@@ -121,7 +144,7 @@ def test_action_masks_preserve_native_multidiscrete_order():
     assert np.array_equal(env.action_masks(), expected)
 
 
-@pytest.mark.parametrize("variant", ["state", "flat", "tcn"])
+@pytest.mark.parametrize("variant", ["state", "flat", "tcn", "state_mode", "tcn_mode"])
 def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
     from sim.environment.forecast_gym import make_forecast_ppo_policy
 
@@ -146,10 +169,13 @@ def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
     )
     if variant == "state":
         assert captured["observation"].shape == (51,)
+    elif variant == "state_mode":
+        assert captured["observation"].shape == (66,)
     elif variant == "flat":
         assert captured["observation"].shape == (51 + 168 * 9,)
     else:
-        assert captured["observation"]["state"].shape == (51,)
+        expected_state = 66 if variant == "tcn_mode" else 51
+        assert captured["observation"]["state"].shape == (expected_state,)
         assert captured["observation"]["forecast"].shape == (168, 9)
 
 

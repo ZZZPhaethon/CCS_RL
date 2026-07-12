@@ -14,8 +14,23 @@ from .forecast import (
     future_forecast_observation,
 )
 from .gym_adapter import flat_action_mask, native_action_from_flat
+from .vessel_mode import vessel_operation_mode_observation
 
-ObservationVariant = Literal["state", "flat", "tcn"]
+ObservationVariant = Literal["state", "flat", "tcn", "state_mode", "tcn_mode"]
+
+
+def variant_uses_operation_modes(variant: str) -> bool:
+    return variant in {"state_mode", "tcn_mode"}
+
+
+def variant_base_encoder(variant: str) -> str:
+    if variant == "state_mode":
+        return "state"
+    if variant == "tcn_mode":
+        return "tcn"
+    if variant in {"state", "flat", "tcn"}:
+        return variant
+    raise ValueError(f"unknown forecast observation variant: {variant}")
 
 
 def forecast_policy_observation(
@@ -28,15 +43,19 @@ def forecast_policy_observation(
     state = np.asarray(current_state_observation(env), dtype=np.float32)
     if timeout:
         _apply_timeout_disturbances_to_observation(env, state)
-    if variant == "state":
+    if variant_uses_operation_modes(variant):
+        modes = np.asarray(vessel_operation_mode_observation(env), dtype=np.float32)
+        state = np.concatenate((state, modes)).astype(np.float32, copy=False)
+    base_variant = variant_base_encoder(variant)
+    if base_variant == "state":
         return state
 
     forecast = np.asarray(future_forecast_observation(env), dtype=np.float32)
-    if variant == "flat":
+    if base_variant == "flat":
         return np.concatenate((state, forecast.reshape(-1))).astype(np.float32)
-    if variant == "tcn":
+    if base_variant == "tcn":
         return {"state": state, "forecast": forecast}
-    raise ValueError(f"unknown forecast observation variant: {variant}")
+    raise AssertionError(f"unhandled forecast observation variant: {variant}")
 
 
 def _apply_timeout_disturbances_to_observation(
@@ -77,23 +96,24 @@ class ForecastGymEnv(Env):
             env.vessel_action_dims + env.well_rate_action_dims
         )
         state_size = len(current_state_feature_names(env))
-        if variant == "state":
+        if variant_uses_operation_modes(variant):
+            state_size += 5 * len(env.vessel_ids)
+        base_variant = variant_base_encoder(variant)
+        if base_variant == "state":
             self.observation_space = spaces.Box(
                 -10.0, 10.0, (state_size,), np.float32
             )
-        elif variant == "flat":
+        elif base_variant == "flat":
             self.observation_space = spaces.Box(
                 -10.0, 10.0, (state_size + 168 * 9,), np.float32
             )
-        elif variant == "tcn":
+        elif base_variant == "tcn":
             self.observation_space = spaces.Dict(
                 {
                     "state": spaces.Box(-10.0, 10.0, (state_size,), np.float32),
                     "forecast": spaces.Box(-10.0, 10.0, (168, 9), np.float32),
                 }
             )
-        else:
-            raise ValueError(f"unknown forecast observation variant: {variant}")
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)

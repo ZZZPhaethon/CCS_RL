@@ -1,5 +1,7 @@
 # 基于 MPC 示范的 Forecast-RL：720 h 初步结果
 
+> 船舶 `sailing/loading/unloading/queued/idle` 状态观测的 100-seed MPC、5-model-seed 后续实验见 [船舶运行状态观测对 MPC-BC/PPO 的影响：720 h 后续实验](forecast_rl_operation_mode_followup_zh.md)。
+
 ## 1. 报告范围
 
 本文汇总 720 h CCS 船运—终端—注入系统中以下控制器的初步比较：

@@ -12,6 +12,7 @@ from scripts import compare_forecast_encoders_rl as compare
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
 from sim.environment.forecast_encoder import TCNForecastExtractor
 from sim.metrics import EpisodeMetrics
+from sim.control.demonstrations import MpcDemonstrationBatch, save_demonstrations
 
 
 def _train_args(tmp_path: Path, variant: str = "state", *extra: str):
@@ -40,8 +41,26 @@ def test_cli_has_all_subcommands_and_locks_formal_defaults(tmp_path):
         ["generate-demos", "--demo-cache", str(cache), "--demo-seeds", "1", "2"]
     )
     report = compare.parse_args(["report"])
+    merge = compare.parse_args(
+        [
+            "merge-demos",
+            "--shards",
+            str(tmp_path / "a.npz"),
+            str(tmp_path / "b.npz"),
+            "--demo-cache",
+            str(tmp_path / "merged.npz"),
+            "--expected-seeds",
+            "0",
+            "1",
+        ]
+    )
 
-    assert {train.command, demos.command, report.command} == {"train", "generate-demos", "report"}
+    assert {train.command, demos.command, merge.command, report.command} == {
+        "train",
+        "generate-demos",
+        "merge-demos",
+        "report",
+    }
     assert train.scenario == "northern_lights_phase1_3vessels"
     assert train.episode_hours == 720
     assert train.forecast_horizon_h == 168
@@ -59,6 +78,53 @@ def test_cli_has_all_subcommands_and_locks_formal_defaults(tmp_path):
     assert train.kickstart_coef == 1.0
     assert train.eval_seeds == [101, 102, 103, 104, 105]
     assert train.model_seed == 0
+    assert merge.episode_hours == 720
+
+
+def _tiny_demo_shard(seed: int):
+    return MpcDemonstrationBatch(
+        state=np.full((2, 2), seed, dtype=np.float32),
+        forecast=np.full((2, 168, 9), seed, dtype=np.float32),
+        actions=np.zeros((2, 2), dtype=np.int64),
+        masks=np.ones((2, 4), dtype=bool),
+        seeds=np.full(2, seed, dtype=np.int64),
+        hours=np.asarray([0, 1], dtype=np.int64),
+        metadata={"schema": "merge-cli-v2"},
+        operation_modes=np.tile(
+            np.asarray([[[1, 0, 0, 0, 0]]], dtype=np.float32),
+            (2, 1, 1),
+        ),
+    )
+
+
+def test_merge_demos_writes_sorted_cache_and_hash_manifest(tmp_path):
+    shard_paths = [tmp_path / "seed1.npz", tmp_path / "seed0.npz"]
+    save_demonstrations(_tiny_demo_shard(1), shard_paths[0])
+    save_demonstrations(_tiny_demo_shard(0), shard_paths[1])
+    output = tmp_path / "merged.npz"
+    args = compare.parse_args(
+        [
+            "merge-demos",
+            "--shards",
+            *(str(path) for path in shard_paths),
+            "--demo-cache",
+            str(output),
+            "--expected-seeds",
+            "0",
+            "1",
+            "--episode-hours",
+            "2",
+        ]
+    )
+
+    result = compare.merge_demos(args)
+
+    assert output.exists()
+    assert result["row_count"] == 4
+    assert result["demo_seeds"] == [0, 1]
+    manifest = json.loads(compare.demo_manifest_path(output).read_text(encoding="utf-8"))
+    assert manifest["cache_sha256"] == compare.file_sha256(output)
+    assert len(manifest["shards"]) == 2
 
 
 def test_cli_rejects_negative_timesteps(tmp_path):
@@ -125,14 +191,57 @@ def test_metadata_is_derived_from_environment_helpers_without_schema_drift(tmp_p
 
 def test_policy_mapping_uses_custom_extractor_only_for_tcn():
     assert compare.model_policy_config("state") == ("MlpPolicy", {})
+    assert compare.model_policy_config("state_mode") == ("MlpPolicy", {})
     assert compare.model_policy_config("flat") == ("MlpPolicy", {})
-    policy, kwargs = compare.model_policy_config("tcn")
-    assert policy == "MultiInputPolicy"
-    assert kwargs["features_extractor_class"] is TCNForecastExtractor
-    assert kwargs["features_extractor_kwargs"] == {
-        "state_features": 64,
-        "forecast_features": 64,
+    for variant in ("tcn", "tcn_mode"):
+        policy, kwargs = compare.model_policy_config(variant)
+        assert policy == "MultiInputPolicy"
+        assert kwargs["features_extractor_class"] is TCNForecastExtractor
+        assert kwargs["features_extractor_kwargs"] == {
+            "state_features": 64,
+            "forecast_features": 64,
+        }
+
+
+@pytest.mark.parametrize("variant", ["state", "state_mode", "tcn", "tcn_mode"])
+def test_formal_cli_accepts_operation_mode_matrix(tmp_path, variant):
+    args = _train_args(tmp_path / variant, variant)
+    assert args.variant == variant
+
+
+def test_formal_hpc_task_mappings_cover_all_seeds_and_variants_once():
+    demonstration_seeds = [
+        seed for task_id in range(10) for seed in compare.demonstration_task_seeds(task_id)
+    ]
+    assert demonstration_seeds == list(range(100))
+
+    training_tasks = [compare.formal_training_task(task_id) for task_id in range(20)]
+    assert len(set(training_tasks)) == 20
+    assert set(training_tasks) == {
+        (variant, seed)
+        for seed in range(5)
+        for variant in ("state", "state_mode", "tcn", "tcn_mode")
     }
+    with pytest.raises(ValueError, match="0..9"):
+        compare.demonstration_task_seeds(10)
+    with pytest.raises(ValueError, match="0..19"):
+        compare.formal_training_task(20)
+
+
+def test_hpc_scripts_lock_formal_protocol_defaults():
+    root = Path(compare.__file__).resolve().parents[1]
+    training = (root / "hpc/submit_forecast_encoder_rl.sh").read_text(encoding="utf-8")
+    shards = (root / "hpc/submit_forecast_mpc_demo_shards.sh").read_text(encoding="utf-8")
+    merge = (root / "hpc/submit_forecast_mpc_demo_merge.sh").read_text(encoding="utf-8")
+
+    assert "#SBATCH --array=0-19%5" in training
+    assert "BC_EPOCHS=\"${BC_EPOCHS:-50}\"" in training
+    assert "EVAL_SEEDS=\"${EVAL_SEEDS:-101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120}\"" in training
+    assert "#SBATCH --array=0-9" in shards
+    assert "--cpus-per-task=4" in shards
+    assert "--mem=32G" in shards
+    assert "merge-demos" in merge
+    assert "seq 0 99" in merge
 
 
 def test_manifest_write_accepts_identical_bytes_and_rejects_different_content(tmp_path):
@@ -354,45 +463,75 @@ def test_canonical_reference_rows_are_per_seed_and_recreate_mpc(tmp_path):
     assert mpc.call_count == 2
 
 
-def _paired_row(variant: str, vented: float, *, seed: int = 101):
+def _paired_row(
+    variant: str,
+    vented: float,
+    *,
+    seed: int = 101,
+    model_seed: int = 0,
+    stage: str = "ppo",
+    deterministic: bool = True,
+):
     return {
         "policy": f"learned_{variant}",
         "family": "learned",
         "variant": variant,
-        "stage": "ppo",
-        "deterministic": "true",
-        "model_seed": "0",
+        "stage": stage,
+        "deterministic": str(deterministic).lower(),
+        "model_seed": str(model_seed),
         "eval_seed": str(seed),
         "vented_t": str(vented),
     }
 
 
-def test_paired_report_computes_flat_and_tcn_deltas(tmp_path):
-    rows = [_paired_row("state", 10.0), _paired_row("flat", 7.0), _paired_row("tcn", 12.0)]
+def test_paired_report_uses_model_seed_means_and_mode_matched_deltas(tmp_path):
+    rows = []
+    for model_seed in range(5):
+        for eval_seed in (101, 102):
+            rows.extend(
+                [
+                    _paired_row("state", 10 + model_seed, seed=eval_seed, model_seed=model_seed),
+                    _paired_row("state_mode", 8 + model_seed, seed=eval_seed, model_seed=model_seed),
+                    _paired_row("tcn", 20 + model_seed, seed=eval_seed, model_seed=model_seed),
+                    _paired_row("tcn_mode", 21 + model_seed, seed=eval_seed, model_seed=model_seed),
+                ]
+            )
     summary_path, markdown_path = compare.write_paired_report(rows, tmp_path)
 
     with summary_path.open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
-        assert reader.fieldnames.index("vented_t_mean") < reader.fieldnames.index(
-            "paired_vented_delta_vs_state_mean"
-        )
         summary = {row["variant"]: row for row in reader}
-    assert float(summary["flat"]["paired_vented_delta_vs_state_mean"]) == -3.0
-    assert float(summary["tcn"]["paired_vented_delta_vs_state_mean"]) == 2.0
+    assert summary["state_mode"]["paired_baseline_variant"] == "state"
+    assert float(summary["state_mode"]["paired_vented_delta_mean"]) == -2.0
+    assert summary["tcn_mode"]["paired_baseline_variant"] == "tcn"
+    assert float(summary["tcn_mode"]["paired_vented_delta_mean"]) == 1.0
+    assert int(summary["state"]["model_seeds"]) == 5
+    assert float(summary["state"]["vented_t_model_sd"]) == pytest.approx(
+        np.std([10, 11, 12, 13, 14], ddof=1)
+    )
+    assert float(summary["state"]["vented_t_ci95_half_width"]) == pytest.approx(
+        2.7764451051977987 * np.std([10, 11, 12, 13, 14], ddof=1) / np.sqrt(5)
+    )
+    episode_path = tmp_path / "forecast_encoder_episode_summary.csv"
+    with episode_path.open(encoding="utf-8", newline="") as handle:
+        episode_rows = list(csv.DictReader(handle))
+    assert len(episode_rows) == 20
+    assert all(int(row["eval_episodes"]) == 2 for row in episode_rows)
     assert "Lower venting is the primary outcome" in markdown_path.read_text(encoding="utf-8")
-    assert "statistical significance" not in markdown_path.read_text(encoding="utf-8").lower()
+    assert "model-seed" in markdown_path.read_text(encoding="utf-8").lower()
 
 
 @pytest.mark.parametrize(
     "rows, message",
     [
-        ([_paired_row("state", 10.0), _paired_row("flat", 7.0)], "missing paired keys"),
+        ([_paired_row("state", 10.0), _paired_row("state_mode", 7.0), _paired_row("tcn", 12.0)], "missing paired keys"),
         (
             [
                 _paired_row("state", 10.0),
                 _paired_row("state", 11.0),
-                _paired_row("flat", 7.0),
+                _paired_row("state_mode", 7.0),
                 _paired_row("tcn", 12.0),
+                _paired_row("tcn_mode", 13.0),
             ],
             "duplicate pairing key",
         ),
@@ -490,7 +629,7 @@ def test_report_rejects_scientifically_incompatible_run_manifests(
     tmp_path, field, changed_value
 ):
     baseline = _complete_run_manifest()
-    for variant, vented in (("state", 10.0), ("flat", 7.0), ("tcn", 12.0)):
+    for variant, vented in (("state", 10.0), ("state_mode", 7.0), ("tcn", 12.0), ("tcn_mode", 11.0)):
         manifest = copy.deepcopy(baseline)
         if variant == "tcn":
             manifest[field] = changed_value
@@ -502,7 +641,7 @@ def test_report_rejects_scientifically_incompatible_run_manifests(
 
 def test_report_manifest_validation_allows_run_identity_and_diagnostics_to_differ(tmp_path):
     paths = []
-    for index, variant in enumerate(("state", "flat", "tcn")):
+    for index, variant in enumerate(("state", "state_mode", "tcn", "tcn_mode")):
         manifest = _complete_run_manifest()
         manifest.update(
             {
