@@ -68,6 +68,78 @@ def _structured_demonstrations(n=4):
     return observations, actions, masks, weights
 
 
+def _imbalanced_decision_batch():
+    actions = np.asarray(
+        [
+            [0, 0, 0],
+            [1, 0, 1],
+            [0, 0, 0],
+            [0, 2, 1],
+            [0, 0, 0],
+        ],
+        dtype=np.int64,
+    )
+    masks = np.asarray(
+        [
+            [1, 1, 1, 1, 0, 0, 1, 1],
+            [1, 1, 1, 1, 0, 0, 1, 1],
+            [1, 0, 0, 1, 1, 1, 1, 1],
+            [1, 0, 0, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+        ],
+        dtype=bool,
+    )
+    return actions, masks
+
+
+def test_balanced_targets_equalize_decisions_and_keep_all_well_rows():
+    actions, masks = _imbalanced_decision_batch()
+
+    targets = imitation.balanced_decision_targets(
+        actions,
+        masks,
+        action_dims=[3, 3, 2],
+        vessel_count=2,
+        rng=np.random.default_rng(7),
+    )
+
+    assert targets.wait_pairs == 4
+    assert targets.dispatch_pairs == 2
+    assert targets.sampled_wait_pairs == targets.sampled_dispatch_pairs == 4
+    assert targets.well_pairs == len(actions)
+    well_rows = targets.row_indices[targets.dimension_indices == 2]
+    np.testing.assert_array_equal(np.sort(well_rows), np.arange(len(actions)))
+
+
+def test_balanced_targets_are_reproducible_for_the_same_seed():
+    actions, masks = _imbalanced_decision_batch()
+
+    first = imitation.balanced_decision_targets(
+        actions, masks, [3, 3, 2], 2, np.random.default_rng(11)
+    )
+    second = imitation.balanced_decision_targets(
+        actions, masks, [3, 3, 2], 2, np.random.default_rng(11)
+    )
+
+    np.testing.assert_array_equal(first.row_indices, second.row_indices)
+    np.testing.assert_array_equal(first.dimension_indices, second.dimension_indices)
+
+
+@pytest.mark.parametrize("dispatch_action, message", [(0, "dispatch"), (1, "WAIT")])
+def test_balanced_targets_require_both_decision_pools(dispatch_action, message):
+    actions = np.asarray([[dispatch_action, 0], [dispatch_action, 1]], dtype=np.int64)
+    masks = np.ones((2, 5), dtype=bool)
+
+    with pytest.raises(ValueError, match=message):
+        imitation.balanced_decision_targets(
+            actions,
+            masks,
+            action_dims=[3, 2],
+            vessel_count=1,
+            rng=np.random.default_rng(3),
+        )
+
+
 def _convolution_parameters(model):
     return [
         parameter
@@ -166,6 +238,40 @@ def test_structured_behavior_clone_updates_real_tcn_with_dimension_weights():
     assert all(torch.isfinite(parameter).all() for parameter in model.policy.parameters())
 
 
+def test_balanced_decision_training_updates_policy_and_returns_audit():
+    model = _tcn_model()
+    observations, actions, masks, _weights = _structured_demonstrations()
+    before = [parameter.detach().clone() for parameter in model.policy.parameters()]
+
+    audit = imitation.behavior_clone_balanced_decisions(
+        model,
+        observations,
+        actions,
+        masks,
+        action_dims=[2, 3],
+        vessel_count=1,
+        epochs=1,
+        row_batch_size=2,
+        lr=1e-3,
+        seed=13,
+        log=False,
+    )
+
+    assert audit == {
+        "wait_pairs": 2,
+        "dispatch_pairs": 2,
+        "sampled_wait_pairs": 2,
+        "sampled_dispatch_pairs": 2,
+        "well_pairs": 4,
+        "total_targets": 8,
+    }
+    assert any(
+        not torch.equal(old, new)
+        for old, new in zip(before, model.policy.parameters())
+    )
+    assert all(torch.isfinite(parameter).all() for parameter in model.policy.parameters())
+
+
 def test_structured_kickstart_lifecycle_keeps_alignment_and_updates_real_tcn():
     torch.manual_seed(7)
     model = _tcn_model()
@@ -229,6 +335,46 @@ class ImitationTests(unittest.TestCase):
                 [7.0, 1.0, 1.0, 1.0],
             ],
         )
+
+    def test_decision_only_weights_zero_forced_vessels_and_keep_well_targets(self):
+        actions = np.array([[0, 0, 1], [1, 0, 0]], dtype=np.int64)
+        masks = np.array(
+            [
+                [1, 0, 0, 1, 1, 1, 1, 1],
+                [1, 1, 1, 1, 0, 0, 1, 1],
+            ],
+            dtype=bool,
+        )
+
+        weights = imitation.decision_only_action_weights(
+            actions,
+            masks,
+            action_dims=[3, 3, 2],
+            vessel_count=2,
+            nonwait_weight=10.0,
+        )
+
+        self.assertEqual(weights.tolist(), [[0.0, 1.0, 1.0], [10.0, 0.0, 1.0]])
+
+    def test_decision_only_weights_validate_batch_shapes_and_dimensions(self):
+        actions = np.zeros((2, 3), dtype=np.int64)
+        masks = np.ones((2, 8), dtype=bool)
+
+        invalid = [
+            (actions[:, :2], masks, [3, 3, 2], 2, "action width"),
+            (actions, masks[:, :7], [3, 3, 2], 2, "mask width"),
+            (actions, masks, [3, 0, 5], 2, "positive"),
+            (actions, masks, [3, 3, 2], 4, "vessel_count"),
+        ]
+        for bad_actions, bad_masks, dims, vessel_count, message in invalid:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    imitation.decision_only_action_weights(
+                        bad_actions,
+                        bad_masks,
+                        action_dims=dims,
+                        vessel_count=vessel_count,
+                    )
 
     def test_bc_pretrain_passes_dimension_weights_to_behavior_clone(self):
         obs = np.zeros((2, 3), dtype=np.float32)

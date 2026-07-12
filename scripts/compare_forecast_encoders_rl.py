@@ -26,6 +26,8 @@ from sim.control.demonstrations import (
 from sim.control.imitation import (
     action_dimension_weights,
     behavior_clone,
+    behavior_clone_balanced_decisions,
+    decision_only_action_weights,
     make_kickstart_callback,
 )
 from sim.control.native_mpc import RollingNativeMpcController
@@ -141,6 +143,14 @@ def formal_training_task(task_id: int) -> tuple[str, int]:
     return FORMAL_VARIANTS[task_id % len(FORMAL_VARIANTS)], task_id // len(FORMAL_VARIANTS)
 
 
+def bc_objective_training_task(task_id: int) -> tuple[str, int]:
+    task_id = int(task_id)
+    variants = ("state_mode", "tcn_mode")
+    if task_id < 0 or task_id > 9:
+        raise ValueError(f"BC objective task ID must be in 0..9, got {task_id}")
+    return variants[task_id % len(variants)], task_id // len(variants)
+
+
 def _nonnegative_int(value: str) -> int:
     parsed = int(value)
     if parsed < 0:
@@ -192,6 +202,12 @@ def parse_args(argv=None):
     train.add_argument("--demo-cache", required=True)
     train.add_argument("--timesteps", type=_nonnegative_int, default=100_000)
     train.add_argument("--bc-epochs", type=int, default=20)
+    train.add_argument(
+        "--bc-objective",
+        choices=("current", "decision_only", "decision_balanced"),
+        default="current",
+    )
+    train.add_argument("--bc-only", action="store_true")
     train.add_argument("--n-steps", type=int, default=512)
     train.add_argument("--batch-size", type=int, default=64)
     train.add_argument("--bc-batch-size", type=int, default=256)
@@ -304,23 +320,40 @@ def model_policy_config(variant: str):
 def checkpoint_path(args, stage: str) -> Path:
     if stage not in {"bc", "ppo"}:
         raise ValueError(f"unknown checkpoint stage: {stage}")
-    return Path(args.out_dir) / f"{stage}_{args.variant}_seed{args.model_seed}.zip"
+    return Path(args.out_dir) / (
+        f"{stage}_{args.variant}{_bc_objective_suffix(args)}_seed{args.model_seed}.zip"
+    )
 
 
 def results_path(args) -> Path:
-    return Path(args.out_dir) / f"results_{args.variant}_seed{args.model_seed}.csv"
+    return Path(args.out_dir) / (
+        f"results_{args.variant}{_bc_objective_suffix(args)}_seed{args.model_seed}.csv"
+    )
 
 
 def run_manifest_path(args) -> Path:
-    return Path(args.out_dir) / f"run_{args.variant}_seed{args.model_seed}.manifest.json"
+    return Path(args.out_dir) / (
+        f"run_{args.variant}{_bc_objective_suffix(args)}_seed{args.model_seed}.manifest.json"
+    )
 
 
 def demo_diagnostics_path(args) -> Path:
-    return Path(args.out_dir) / f"demo_mode_diagnostics_{args.variant}_seed{args.model_seed}.csv"
+    return Path(args.out_dir) / (
+        f"demo_mode_diagnostics_{args.variant}{_bc_objective_suffix(args)}_seed"
+        f"{args.model_seed}.csv"
+    )
 
 
 def rollout_diagnostics_path(args) -> Path:
-    return Path(args.out_dir) / f"rollout_mode_diagnostics_{args.variant}_seed{args.model_seed}.csv"
+    return Path(args.out_dir) / (
+        f"rollout_mode_diagnostics_{args.variant}{_bc_objective_suffix(args)}_seed"
+        f"{args.model_seed}.csv"
+    )
+
+
+def _bc_objective_suffix(args) -> str:
+    objective = getattr(args, "bc_objective", "current")
+    return "" if objective == "current" else f"_{objective}"
 
 
 def demo_manifest_path(cache_path: Path) -> Path:
@@ -510,7 +543,11 @@ def demonstration_accuracy(model, observations, actions, masks) -> tuple[float, 
 
 
 def should_emit_baselines(args) -> bool:
-    return args.variant == "state" and int(args.model_seed) == 0
+    return (
+        args.variant == "state"
+        and int(args.model_seed) == 0
+        and getattr(args, "bc_objective", "current") == "current"
+    )
 
 
 def metric_result_row(
@@ -705,12 +742,13 @@ def evaluate_reference_rows(args) -> list[dict[str, object]]:
 def _ensure_new_run_outputs(args) -> None:
     paths = [
         checkpoint_path(args, "bc"),
-        checkpoint_path(args, "ppo"),
         results_path(args),
         run_manifest_path(args),
         demo_diagnostics_path(args),
         rollout_diagnostics_path(args),
     ]
+    if not args.bc_only:
+        paths.append(checkpoint_path(args, "ppo"))
     collisions = [str(path) for path in paths if path.exists()]
     if collisions:
         raise FileExistsError(f"refusing output collision: {', '.join(collisions)}")
@@ -746,6 +784,8 @@ def _train_loaded_batch(
 ) -> dict[str, object]:
     if MaskablePPO is None:
         raise ImportError("train requires sb3-contrib")
+    if args.bc_objective != "current" and not args.bc_only:
+        raise ValueError("decision-only BC objectives require --bc-only")
     _ensure_new_run_outputs(args)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -764,22 +804,62 @@ def _train_loaded_batch(
         device=args.device,
         verbose=args.verbose,
     )
-    weights = action_dimension_weights(
-        batch.actions,
-        vessel_count=len(native_env.vessel_ids),
-        nonwait_weight=args.nonwait_weight,
-    )
-    behavior_clone(
-        model,
-        observations,
-        batch.actions,
-        masks=batch.masks,
-        weights=weights,
-        epochs=args.bc_epochs,
-        batch_size=args.bc_batch_size,
-        lr=args.bc_lr,
-        log=bool(args.verbose),
-    )
+    action_dimensions = metadata.get("action_dimensions")
+    if args.bc_objective != "current" and not isinstance(action_dimensions, list):
+        raise ValueError("environment metadata must contain action_dimensions")
+    vessel_count = len(native_env.vessel_ids)
+    sampler_audit = None
+    if args.bc_objective == "current":
+        weights = action_dimension_weights(
+            batch.actions,
+            vessel_count=vessel_count,
+            nonwait_weight=args.nonwait_weight,
+        )
+        behavior_clone(
+            model,
+            observations,
+            batch.actions,
+            masks=batch.masks,
+            weights=weights,
+            epochs=args.bc_epochs,
+            batch_size=args.bc_batch_size,
+            lr=args.bc_lr,
+            log=bool(args.verbose),
+        )
+    elif args.bc_objective == "decision_only":
+        weights = decision_only_action_weights(
+            batch.actions,
+            batch.masks,
+            action_dimensions,
+            vessel_count,
+            nonwait_weight=args.nonwait_weight,
+        )
+        behavior_clone(
+            model,
+            observations,
+            batch.actions,
+            masks=batch.masks,
+            weights=weights,
+            epochs=args.bc_epochs,
+            batch_size=args.bc_batch_size,
+            lr=args.bc_lr,
+            log=bool(args.verbose),
+        )
+    else:
+        weights = None
+        sampler_audit = behavior_clone_balanced_decisions(
+            model,
+            observations,
+            batch.actions,
+            batch.masks,
+            action_dimensions,
+            vessel_count,
+            epochs=args.bc_epochs,
+            row_batch_size=args.bc_batch_size,
+            lr=args.bc_lr,
+            seed=args.model_seed,
+            log=bool(args.verbose),
+        )
     parameter_count = count_trainable_parameters(model)
     bc_accuracy, bc_dimension_accuracy = demonstration_accuracy(
         model, observations, batch.actions, batch.masks
@@ -815,7 +895,10 @@ def _train_loaded_batch(
         rollout_diagnostic_rows=rollout_diagnostic_rows,
     )
 
-    if args.timesteps > 0:
+    ppo_accuracy = None
+    ppo_dimension_accuracy = None
+    ppo_path = None
+    if not args.bc_only and args.timesteps > 0:
         model.set_random_seed(int(args.model_seed))
         callback = make_kickstart_callback(
             observations,
@@ -834,38 +917,39 @@ def _train_loaded_batch(
             callback=callback,
             progress_bar=args.progress_bar,
         )
-    ppo_accuracy, ppo_dimension_accuracy = demonstration_accuracy(
-        model, observations, batch.actions, batch.masks
-    )
-    if operation_modes is not None:
-        demo_diagnostic_rows.extend(
-            {
-                "stage": "ppo",
-                "model_seed": int(args.model_seed),
-                **row,
-            }
-            for row in demonstration_mode_diagnostics(
+    if not args.bc_only:
+        ppo_accuracy, ppo_dimension_accuracy = demonstration_accuracy(
+            model, observations, batch.actions, batch.masks
+        )
+        if operation_modes is not None:
+            demo_diagnostic_rows.extend(
+                {
+                    "stage": "ppo",
+                    "model_seed": int(args.model_seed),
+                    **row,
+                }
+                for row in demonstration_mode_diagnostics(
+                    model,
+                    observations,
+                    batch.actions,
+                    batch.masks,
+                    operation_modes,
+                    len(native_env.vessel_ids),
+                )
+            )
+        ppo_path = checkpoint_path(args, "ppo")
+        model.save(str(ppo_path))
+        rows.extend(
+            evaluate_learned_stage(
+                args,
                 model,
-                observations,
-                batch.actions,
-                batch.masks,
-                operation_modes,
-                len(native_env.vessel_ids),
+                stage="ppo",
+                trainable_parameters=parameter_count,
+                demonstration_exact_match=ppo_accuracy,
+                demonstration_action_accuracy=ppo_dimension_accuracy,
+                rollout_diagnostic_rows=rollout_diagnostic_rows,
             )
         )
-    ppo_path = checkpoint_path(args, "ppo")
-    model.save(str(ppo_path))
-    rows.extend(
-        evaluate_learned_stage(
-            args,
-            model,
-            stage="ppo",
-            trainable_parameters=parameter_count,
-            demonstration_exact_match=ppo_accuracy,
-            demonstration_action_accuracy=ppo_dimension_accuracy,
-            rollout_diagnostic_rows=rollout_diagnostic_rows,
-        )
-    )
     rows.extend(evaluate_reference_rows(args))
     write_results_csv(results_path(args), rows)
     if demo_diagnostic_rows:
@@ -883,7 +967,10 @@ def _train_loaded_batch(
         "demo_cache_path": str(normalize_demo_cache_path(args.demo_cache).resolve()),
         "demo_cache_sha256": cache_sha256,
         "git_commit": commit,
-        "checkpoints": {"bc": str(bc_path), "ppo": str(ppo_path)},
+        "checkpoints": {
+            "bc": str(bc_path),
+            "ppo": str(ppo_path) if ppo_path is not None else None,
+        },
         "results_csv": str(results_path(args)),
         "diagnostics": {
             "demonstration_mode_csv": (
@@ -905,10 +992,21 @@ def _train_loaded_batch(
             else {"name": "MlpPolicy", "features_extractor": None}
         ),
         "bc": {
+            "objective": args.bc_objective,
             "epochs": int(args.bc_epochs),
             "batch_size": int(args.bc_batch_size),
             "learning_rate": float(args.bc_lr),
-            "nonwait_action_dimension_weight": float(args.nonwait_weight),
+            "nonwait_action_dimension_weight": (
+                1.0 if args.bc_objective == "decision_balanced"
+                else float(args.nonwait_weight)
+            ),
+            "forced_vessel_weight": 1.0 if args.bc_objective == "current" else 0.0,
+            "decision_sampling": (
+                "balanced_wait_dispatch_pairs"
+                if args.bc_objective == "decision_balanced"
+                else "uniform_rows"
+            ),
+            "sampler_audit": sampler_audit,
         },
         "ppo": {
             "timesteps": int(args.timesteps),
@@ -916,7 +1014,8 @@ def _train_loaded_batch(
             "n_steps": int(args.n_steps),
             "batch_size": int(args.batch_size),
             "learning_rate": float(args.learning_rate),
-            "learn_skipped": bool(args.timesteps == 0),
+            "learn_skipped": bool(args.timesteps == 0 or args.bc_only),
+            "explicitly_skipped": bool(args.bc_only),
         },
         "kickstart": {
             "coefficient": float(args.kickstart_coef),

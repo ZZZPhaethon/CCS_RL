@@ -81,6 +81,29 @@ def test_cli_has_all_subcommands_and_locks_formal_defaults(tmp_path):
     assert merge.episode_hours == 720
 
 
+def test_bc_objective_cli_defaults_and_objective_specific_paths(tmp_path):
+    current = _train_args(tmp_path / "current", "state_mode")
+    assert current.bc_objective == "current"
+    assert not current.bc_only
+    assert compare.checkpoint_path(current, "bc").name == "bc_state_mode_seed0.zip"
+
+    decision = _train_args(
+        tmp_path / "decision",
+        "state_mode",
+        "--bc-objective",
+        "decision_only",
+        "--bc-only",
+    )
+    assert decision.bc_objective == "decision_only"
+    assert decision.bc_only
+    assert compare.checkpoint_path(decision, "bc").name == (
+        "bc_state_mode_decision_only_seed0.zip"
+    )
+    assert compare.results_path(decision).name == (
+        "results_state_mode_decision_only_seed0.csv"
+    )
+
+
 def _tiny_demo_shard(seed: int):
     return MpcDemonstrationBatch(
         state=np.full((2, 2), seed, dtype=np.float32),
@@ -226,6 +249,140 @@ def test_formal_hpc_task_mappings_cover_all_seeds_and_variants_once():
         compare.demonstration_task_seeds(10)
     with pytest.raises(ValueError, match="0..19"):
         compare.formal_training_task(20)
+
+
+def test_bc_objective_array_mapping_covers_two_variants_and_five_seeds():
+    tasks = [compare.bc_objective_training_task(task_id) for task_id in range(10)]
+    assert len(set(tasks)) == 10
+    assert set(tasks) == {
+        (variant, seed)
+        for seed in range(5)
+        for variant in ("state_mode", "tcn_mode")
+    }
+    with pytest.raises(ValueError, match="0..9"):
+        compare.bc_objective_training_task(10)
+
+
+def test_bc_objective_hpc_script_locks_bc_only_formal_protocol():
+    root = Path(compare.__file__).resolve().parents[1]
+    source = (root / "hpc/submit_bc_objective_ablation.sh").read_text(encoding="utf-8")
+    assert "#SBATCH --array=0-9%5" in source
+    assert "VARIANTS=(state_mode tcn_mode)" in source
+    assert "MODEL_SEEDS=(0 1 2 3 4)" in source
+    assert 'BC_EPOCHS="${BC_EPOCHS:-50}"' in source
+    assert "--bc-objective \"$BC_OBJECTIVE\"" in source
+    assert "--bc-only" in source
+    assert "--timesteps 0" in source
+    assert 'EVAL_SEEDS="${EVAL_SEEDS:-101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120}"' in source
+
+
+def _bc_ablation_rows(offset):
+    rows = []
+    for variant in ("state_mode", "tcn_mode"):
+        for model_seed in range(5):
+            for eval_seed in (101, 102):
+                rows.append(
+                    {
+                        "variant": variant,
+                        "stage": "bc",
+                        "deterministic": "true",
+                        "model_seed": str(model_seed),
+                        "eval_seed": str(eval_seed),
+                        "vented_t": str(10.0 + model_seed + offset),
+                        "stored_t": str(100.0 - offset),
+                        "total_cost": str(1000.0 + offset),
+                    }
+                )
+    return rows
+
+
+def test_bc_ablation_report_computes_exact_paired_objective_deltas():
+    from scripts import report_bc_objective_ablation as report
+
+    rows_by_objective = {
+        "current": _bc_ablation_rows(0.0),
+        "decision_only": _bc_ablation_rows(-2.0),
+        "decision_balanced": _bc_ablation_rows(-3.0),
+    }
+
+    paired = report.paired_metric_rows(rows_by_objective, "vented_t")
+    lookup = {
+        (row["comparison"], row["variant"]): row
+        for row in paired
+        if row["deterministic"] is True
+    }
+    assert lookup[("decision_only-current", "state_mode")]["mean_delta"] == -2.0
+    assert lookup[("decision_balanced-current", "tcn_mode")]["mean_delta"] == -3.0
+    assert lookup[("decision_balanced-decision_only", "state_mode")]["mean_delta"] == -1.0
+    assert lookup[("decision_only-current", "state_mode")]["model_sd"] == 0.0
+    assert lookup[("decision_only-current", "state_mode")]["ci95_half_width"] == 0.0
+
+
+def test_bc_ablation_report_rejects_missing_pair_keys():
+    from scripts import report_bc_objective_ablation as report
+
+    rows_by_objective = {
+        "current": _bc_ablation_rows(0.0),
+        "decision_only": _bc_ablation_rows(-2.0)[:-1],
+        "decision_balanced": _bc_ablation_rows(-3.0),
+    }
+    with pytest.raises(ValueError, match="missing paired keys"):
+        report.paired_metric_rows(rows_by_objective, "vented_t")
+
+
+def test_bc_ablation_report_summarizes_decision_and_rollout_diagnostics():
+    from scripts import report_bc_objective_ablation as report
+
+    demo = {}
+    rollout = {}
+    for objective_index, objective in enumerate(report.OBJECTIVES):
+        demo[objective] = [
+            {
+                "variant": "state_mode",
+                "stage": "bc",
+                "model_seed": str(seed),
+                "vessel": "all",
+                "mode": "loading",
+                "dispatch_recall": str(0.4 + 0.1 * objective_index),
+                "conditional_destination_accuracy": "0.5",
+                "voluntary_wait_accuracy": "0.9",
+                "mean_wait_probability": "0.8",
+            }
+            for seed in range(5)
+        ]
+        rollout[objective] = [
+            {
+                "variant": "state_mode",
+                "stage": "bc",
+                "deterministic": "true",
+                "model_seed": str(seed),
+                "eval_seed": str(eval_seed),
+                "vessel": "all",
+                "mode": "all",
+                "dispatch_count": str(30 + objective_index),
+                "partial_load_departure_count": "20",
+                "milk_run_departure_count": "5",
+                "longest_berthed_no_dispatch_streak": "100",
+                "mean_wait_probability": "0.95",
+            }
+            for seed in range(5)
+            for eval_seed in (101, 102)
+        ]
+
+    demo_rows = report.demo_summary_rows(demo)
+    rollout_rows = report.rollout_summary_rows(rollout)
+
+    balanced_demo = next(
+        row for row in demo_rows
+        if row["objective"] == "decision_balanced" and row["variant"] == "state_mode"
+    )
+    assert balanced_demo["dispatch_recall_mean"] == pytest.approx(0.6)
+    balanced_rollout = next(
+        row for row in rollout_rows
+        if row["objective"] == "decision_balanced" and row["variant"] == "state_mode"
+    )
+    assert balanced_rollout["dispatch_count_mean"] == 32.0
+    assert balanced_rollout["episodes"] == 10
 
 
 def test_hpc_scripts_lock_formal_protocol_defaults():
@@ -401,6 +558,94 @@ def test_zero_timesteps_skips_learn_but_still_saves_and_evaluates_ppo(tmp_path):
 
     model.learn.assert_not_called()
     assert model.save.call_count == 2
+
+
+@pytest.mark.parametrize("objective", ["decision_only", "decision_balanced"])
+def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, objective):
+    args = _train_args(
+        tmp_path / objective,
+        "state_mode",
+        "--bc-objective",
+        objective,
+        "--bc-only",
+        "--eval-seeds",
+        "9",
+    )
+    observations = np.zeros((2, 4), dtype=np.float32)
+    batch = SimpleNamespace(
+        actions=np.zeros((2, 4), dtype=np.int64),
+        masks=np.ones((2, 21), dtype=bool),
+        seeds=np.asarray([1, 1]),
+        operation_modes=None,
+    )
+    native_env = SimpleNamespace(vessel_ids=["a", "b", "c"])
+    model = Mock()
+    model.policy.parameters.return_value = []
+    decision_weights = np.ones((2, 4), dtype=np.float32)
+    sampler_audit = {
+        "wait_pairs": 3,
+        "dispatch_pairs": 1,
+        "sampled_wait_pairs": 3,
+        "sampled_dispatch_pairs": 3,
+        "well_pairs": 2,
+        "total_targets": 8,
+    }
+    evaluated = []
+
+    def fake_evaluate(_args, _model, *, stage, **_kwargs):
+        evaluated.append(stage)
+        return []
+
+    with (
+        patch.object(compare, "ForecastGymEnv", return_value=object()),
+        patch.object(compare, "MaskablePPO", return_value=model),
+        patch.object(
+            compare,
+            "decision_only_action_weights",
+            return_value=decision_weights,
+            create=True,
+        ) as decision_only,
+        patch.object(compare, "behavior_clone") as standard_clone,
+        patch.object(
+            compare,
+            "behavior_clone_balanced_decisions",
+            return_value=sampler_audit,
+            create=True,
+        ) as balanced_clone,
+        patch.object(compare, "demonstration_accuracy", return_value=(0.5, [0.5] * 4)),
+        patch.object(compare, "evaluate_learned_stage", side_effect=fake_evaluate),
+        patch.object(compare, "evaluate_reference_rows", return_value=[]),
+        patch.object(compare, "count_trainable_parameters", return_value=12),
+        patch.object(compare, "write_results_csv"),
+        patch.object(compare, "write_json_immutable") as write_manifest,
+        patch.object(compare, "git_commit", return_value="abc123"),
+    ):
+        manifest = compare._train_loaded_batch(
+            args,
+            batch=batch,
+            observations=observations,
+            native_env=native_env,
+            metadata={"action_dimensions": [5, 5, 5, 6]},
+            cache_sha256="cache-sha",
+        )
+
+    assert evaluated == ["bc"]
+    model.learn.assert_not_called()
+    model.save.assert_called_once_with(str(compare.checkpoint_path(args, "bc")))
+    assert manifest is write_manifest.call_args.args[1]
+    assert manifest["bc"]["objective"] == objective
+    assert manifest["ppo"]["explicitly_skipped"] is True
+    assert manifest["checkpoints"]["ppo"] is None
+    if objective == "decision_only":
+        decision_only.assert_called_once()
+        standard_clone.assert_called_once()
+        balanced_clone.assert_not_called()
+        assert manifest["bc"]["sampler_audit"] is None
+    else:
+        decision_only.assert_not_called()
+        standard_clone.assert_not_called()
+        balanced_clone.assert_called_once()
+        assert manifest["bc"]["sampler_audit"] == sampler_audit
 
 
 def test_result_schema_checkpoint_names_and_canonical_baseline_rule(tmp_path):

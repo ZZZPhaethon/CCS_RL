@@ -9,6 +9,8 @@ actions under that same masked distribution.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from ..environment.gym_adapter import CCSGymEnv, flat_action_from_native
@@ -208,6 +210,234 @@ def action_dimension_weights(
         1.0,
     )
     return weights
+
+
+def _validate_action_batch(actions, masks, action_dims, vessel_count: int) -> None:
+    if any(value <= 0 for value in action_dims):
+        raise ValueError("action dimensions must be positive")
+    if vessel_count < 0 or vessel_count > len(action_dims):
+        raise ValueError("vessel_count must not exceed the number of action dimensions")
+    if actions.ndim != 2 or actions.shape[1] != len(action_dims):
+        raise ValueError(
+            f"action width must equal {len(action_dims)}, got {actions.shape}"
+        )
+    expected_mask_width = sum(action_dims)
+    if masks.ndim != 2 or masks.shape[1] != expected_mask_width:
+        raise ValueError(
+            f"mask width must equal {expected_mask_width}, got {masks.shape}"
+        )
+    if len(actions) != len(masks):
+        raise ValueError("actions and masks must share a leading dimension")
+
+
+def decision_only_action_weights(
+    actions: np.ndarray,
+    masks: np.ndarray,
+    action_dims,
+    vessel_count: int,
+    nonwait_weight: float = 10.0,
+) -> np.ndarray:
+    """Exclude forced vessel dimensions while preserving active and well targets."""
+
+    actions = np.asarray(actions, dtype=np.int64)
+    masks = np.asarray(masks, dtype=bool)
+    dimensions = [int(value) for value in action_dims]
+    _validate_action_batch(actions, masks, dimensions, vessel_count)
+    weights = action_dimension_weights(
+        actions,
+        vessel_count=vessel_count,
+        nonwait_weight=nonwait_weight,
+    )
+    offset = 0
+    for dimension, action_count in enumerate(dimensions):
+        legal_count = masks[:, offset : offset + action_count].sum(axis=1)
+        if dimension < vessel_count:
+            weights[legal_count == 1, dimension] = 0.0
+        offset += action_count
+    return weights
+
+
+@dataclass(frozen=True)
+class BalancedDecisionTargets:
+    row_indices: np.ndarray
+    dimension_indices: np.ndarray
+    wait_pairs: int
+    dispatch_pairs: int
+    sampled_wait_pairs: int
+    sampled_dispatch_pairs: int
+    well_pairs: int
+
+
+def balanced_decision_targets(
+    actions: np.ndarray,
+    masks: np.ndarray,
+    action_dims,
+    vessel_count: int,
+    rng: np.random.Generator,
+) -> BalancedDecisionTargets:
+    """Build balanced active vessel targets plus uniform well targets."""
+
+    actions = np.asarray(actions, dtype=np.int64)
+    masks = np.asarray(masks, dtype=bool)
+    dimensions = [int(value) for value in action_dims]
+    _validate_action_batch(actions, masks, dimensions, vessel_count)
+
+    wait_rows: list[int] = []
+    wait_dimensions: list[int] = []
+    dispatch_rows: list[int] = []
+    dispatch_dimensions: list[int] = []
+    offset = 0
+    for dimension, action_count in enumerate(dimensions):
+        if dimension < vessel_count:
+            active_rows = np.flatnonzero(
+                masks[:, offset : offset + action_count].sum(axis=1) > 1
+            )
+            for row in active_rows.tolist():
+                if actions[row, dimension] == 0:
+                    wait_rows.append(row)
+                    wait_dimensions.append(dimension)
+                else:
+                    dispatch_rows.append(row)
+                    dispatch_dimensions.append(dimension)
+        offset += action_count
+
+    if not wait_rows:
+        raise ValueError("balanced decision sampling requires at least one active WAIT pair")
+    if not dispatch_rows:
+        raise ValueError("balanced decision sampling requires at least one dispatch pair")
+
+    sample_count = max(len(wait_rows), len(dispatch_rows))
+
+    def balanced_pool(rows, target_dimensions):
+        rows_array = np.asarray(rows, dtype=np.int64)
+        dimensions_array = np.asarray(target_dimensions, dtype=np.int64)
+        if len(rows_array) < sample_count:
+            selected = rng.choice(len(rows_array), size=sample_count, replace=True)
+            return rows_array[selected], dimensions_array[selected]
+        return rows_array, dimensions_array
+
+    sampled_wait_rows, sampled_wait_dimensions = balanced_pool(
+        wait_rows, wait_dimensions
+    )
+    sampled_dispatch_rows, sampled_dispatch_dimensions = balanced_pool(
+        dispatch_rows, dispatch_dimensions
+    )
+    well_rows = np.tile(
+        np.arange(len(actions), dtype=np.int64),
+        len(dimensions) - vessel_count,
+    )
+    well_dimensions = np.repeat(
+        np.arange(vessel_count, len(dimensions), dtype=np.int64),
+        len(actions),
+    )
+    row_indices = np.concatenate(
+        (sampled_wait_rows, sampled_dispatch_rows, well_rows)
+    )
+    dimension_indices = np.concatenate(
+        (sampled_wait_dimensions, sampled_dispatch_dimensions, well_dimensions)
+    )
+    permutation = rng.permutation(len(row_indices))
+    return BalancedDecisionTargets(
+        row_indices=row_indices[permutation],
+        dimension_indices=dimension_indices[permutation],
+        wait_pairs=len(wait_rows),
+        dispatch_pairs=len(dispatch_rows),
+        sampled_wait_pairs=len(sampled_wait_rows),
+        sampled_dispatch_pairs=len(sampled_dispatch_rows),
+        well_pairs=len(well_rows),
+    )
+
+
+def behavior_clone_balanced_decisions(
+    model,
+    observations,
+    actions: np.ndarray,
+    masks: np.ndarray,
+    action_dims,
+    vessel_count: int,
+    epochs: int = 10,
+    row_batch_size: int = 256,
+    lr: float = 1e-3,
+    seed: int = 0,
+    log: bool = True,
+) -> dict[str, int]:
+    """Clone balanced active vessel targets plus uniformly covered well targets."""
+
+    import torch
+
+    if epochs <= 0:
+        raise ValueError("epochs must be positive")
+    if row_batch_size <= 0:
+        raise ValueError("row_batch_size must be positive")
+    dimensions = [int(value) for value in action_dims]
+    actions = np.asarray(actions, dtype=np.int64)
+    masks = np.asarray(masks, dtype=bool)
+    _validate_action_batch(actions, masks, dimensions, vessel_count)
+    if _observation_count(observations) != len(actions):
+        raise ValueError("observations and actions must share a leading dimension")
+
+    policy = model.policy
+    observation_tensors = _tensor_observations(observations, policy.device)
+    action_tensors = torch.as_tensor(actions, dtype=torch.int64, device=policy.device)
+    mask_tensors = torch.as_tensor(masks, dtype=torch.bool, device=policy.device)
+    optimizer = torch.optim.Adam(policy.parameters(), lr=lr)
+    target_batch_size = row_batch_size * len(dimensions)
+    final_targets = None
+
+    policy.set_training_mode(True)
+    for epoch in range(epochs):
+        targets = balanced_decision_targets(
+            actions,
+            masks,
+            dimensions,
+            vessel_count,
+            np.random.default_rng(int(seed) + epoch),
+        )
+        final_targets = targets
+        row_indices = torch.as_tensor(
+            targets.row_indices, dtype=torch.int64, device=policy.device
+        )
+        dimension_indices = torch.as_tensor(
+            targets.dimension_indices, dtype=torch.int64, device=policy.device
+        )
+        running_loss = 0.0
+        for start in range(0, len(row_indices), target_batch_size):
+            rows = row_indices[start : start + target_batch_size]
+            target_dimensions = dimension_indices[start : start + target_batch_size]
+            batch_observations = _index_observations(observation_tensors, rows)
+            log_probabilities = _masked_action_log_probs(
+                policy,
+                batch_observations,
+                action_tensors[rows],
+                mask_tensors[rows],
+            )
+            selected = log_probabilities[
+                torch.arange(len(rows), device=policy.device), target_dimensions
+            ]
+            loss = -selected.mean()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            running_loss += float(loss.item()) * len(rows)
+        if log:
+            print(
+                f"[bc-balanced] epoch {epoch + 1}/{epochs} "
+                f"target_nll={running_loss / len(row_indices):.4f} "
+                f"wait={targets.sampled_wait_pairs} "
+                f"dispatch={targets.sampled_dispatch_pairs} "
+                f"well={targets.well_pairs}",
+                flush=True,
+            )
+    policy.set_training_mode(False)
+    assert final_targets is not None
+    return {
+        "wait_pairs": final_targets.wait_pairs,
+        "dispatch_pairs": final_targets.dispatch_pairs,
+        "sampled_wait_pairs": final_targets.sampled_wait_pairs,
+        "sampled_dispatch_pairs": final_targets.sampled_dispatch_pairs,
+        "well_pairs": final_targets.well_pairs,
+        "total_targets": len(final_targets.row_indices),
+    }
 
 
 def bc_pretrain(

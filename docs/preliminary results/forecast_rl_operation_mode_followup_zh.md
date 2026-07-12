@@ -1,5 +1,7 @@
 # 船舶运行状态观测对 MPC-BC/PPO 的影响：720 h 后续实验
 
+> Forced-action decision-only loss 与 WAIT/dispatch 平衡采样的后续消融见 [Decision-only loss 与平衡采样：BC 消融实验](decision_only_balanced_bc_ablation_zh.md)。
+
 ## 1. 结论摘要
 
 加入每艘船的五类 one-hot 运行状态 `sailing/loading/unloading/queued/idle` 后，两种编码器的平均 venting 均下降，并且确定性 rollout 中最长靠泊不发船时间缩短。状态观测确实帮助策略区分“航行或作业中必须 WAIT”和“可主动选择 WAIT/dispatch”，但尚未彻底解决 dispatch 稀缺与长期信用分配问题。
