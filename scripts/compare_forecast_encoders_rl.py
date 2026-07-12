@@ -48,6 +48,7 @@ from sim.environment.gym_adapter import flat_action_mask, native_action_from_fla
 from sim.environment.vessel_mode import (
     VESSEL_OPERATION_MODES,
     vessel_operation_mode_feature_names,
+    vessel_sailing_destination_feature_names,
 )
 from sim.metrics import EpisodeMetrics, run_episode
 from sim.train import make_native_env
@@ -170,6 +171,7 @@ def _add_locked_protocol_defaults(parser: argparse.ArgumentParser) -> None:
         overflow_risk_lookahead_h=24.0,
         operating_cost_weight=1.0,
         enforce_full_load_dispatch=False,
+        require_empty_terminal_departure=True,
         capture_noise_std=0.30,
         initial_inventory_fill_max=0.5,
         leg_wave_slowdown_multiplier=1.0,
@@ -196,10 +198,18 @@ def parse_args(argv=None):
     train = commands.add_parser("train")
     train.add_argument(
         "--variant",
-        choices=("state", "flat", "tcn", "state_mode", "tcn_mode"),
+        choices=(
+            "state",
+            "flat",
+            "tcn",
+            "state_mode",
+            "tcn_mode",
+            "tcn_mode_destination",
+        ),
         required=True,
     )
     train.add_argument("--demo-cache", required=True)
+    train.add_argument("--heldout-demo-cache")
     train.add_argument("--timesteps", type=_nonnegative_int, default=100_000)
     train.add_argument("--bc-epochs", type=int, default=20)
     train.add_argument(
@@ -249,6 +259,7 @@ def make_experiment_env(args, demonstration: bool = False):
         overflow_risk_lookahead_h=24.0,
         operating_cost_weight=1.0,
         enforce_full_load_dispatch=False,
+        require_empty_terminal_departure=True,
     )
 
 
@@ -273,6 +284,13 @@ class ExperimentEnvFactory:
             "state_size": len(state_names),
             "operation_mode_feature_names": list(vessel_operation_mode_feature_names(env)),
             "operation_mode_shape": [len(env.vessel_ids), len(VESSEL_OPERATION_MODES)],
+            "vessel_destination_feature_names": list(
+                vessel_sailing_destination_feature_names(env)
+            ),
+            "vessel_destination_shape": [
+                len(env.vessel_ids),
+                len(env.terminal_ids) + len(env.emitter_ids),
+            ],
             "action_dimensions": [*env.vessel_action_dims, *env.well_rate_action_dims],
             "vessel_action_dimensions": list(env.vessel_action_dims),
             "well_rate_action_dimensions": list(env.well_rate_action_dims),
@@ -287,6 +305,7 @@ class ExperimentEnvFactory:
                 "operating_cost_weight": 1.0,
             },
             "partial_load_dispatch": True,
+            "require_empty_terminal_departure": True,
             "warm_start": True,
             "scenario_context_hours": int(self.args.forecast_horizon_h) + 1,
             "emitter_buffer_capacity_t": {
@@ -344,6 +363,13 @@ def demo_diagnostics_path(args) -> Path:
     )
 
 
+def heldout_demo_diagnostics_path(args) -> Path:
+    return Path(args.out_dir) / (
+        f"heldout_demo_mode_diagnostics_{args.variant}{_bc_objective_suffix(args)}_seed"
+        f"{args.model_seed}.csv"
+    )
+
+
 def rollout_diagnostics_path(args) -> Path:
     return Path(args.out_dir) / (
         f"rollout_mode_diagnostics_{args.variant}{_bc_objective_suffix(args)}_seed"
@@ -365,6 +391,35 @@ def normalize_demo_cache_path(path) -> Path:
     if cache_path.suffix != ".npz":
         cache_path = Path(f"{cache_path}.npz")
     return cache_path
+
+
+def heldout_demonstration_diagnostics(
+    model,
+    batch,
+    *,
+    variant: str,
+    vessel_count: int,
+    stage: str,
+    model_seed: int,
+) -> list[dict[str, object]]:
+    if batch.operation_modes is None:
+        raise ValueError("held-out diagnostics require operation mode observations")
+    observations = batch.observations(variant)
+    return [
+        {
+            "stage": stage,
+            "model_seed": int(model_seed),
+            **row,
+        }
+        for row in demonstration_mode_diagnostics(
+            model,
+            observations,
+            batch.actions,
+            batch.masks,
+            batch.operation_modes,
+            vessel_count,
+        )
+    ]
 
 
 def file_sha256(path: Path) -> str:
@@ -747,6 +802,8 @@ def _ensure_new_run_outputs(args) -> None:
         demo_diagnostics_path(args),
         rollout_diagnostics_path(args),
     ]
+    if args.heldout_demo_cache:
+        paths.append(heldout_demo_diagnostics_path(args))
     if not args.bc_only:
         paths.append(checkpoint_path(args, "ppo"))
     collisions = [str(path) for path in paths if path.exists()]
@@ -760,6 +817,15 @@ def train_variant(args) -> dict[str, object]:
     factory = ExperimentEnvFactory(args)
     metadata = factory.metadata()
     batch = load_demonstrations(cache_path, metadata)
+    heldout_batch = None
+    heldout_cache_sha256 = None
+    if args.heldout_demo_cache:
+        heldout_cache_path = normalize_demo_cache_path(args.heldout_demo_cache)
+        heldout_batch = load_demonstrations(
+            heldout_cache_path,
+            metadata,
+        )
+        heldout_cache_sha256 = file_sha256(heldout_cache_path)
     observations = batch.observations(args.variant)
     native_env = make_experiment_env(args, demonstration=False)
     result = _train_loaded_batch(
@@ -769,6 +835,8 @@ def train_variant(args) -> dict[str, object]:
         native_env=native_env,
         metadata=metadata,
         cache_sha256=cache_sha,
+        heldout_batch=heldout_batch,
+        heldout_cache_sha256=heldout_cache_sha256,
     )
     return result
 
@@ -781,6 +849,8 @@ def _train_loaded_batch(
     native_env,
     metadata,
     cache_sha256: str,
+    heldout_batch=None,
+    heldout_cache_sha256: str | None = None,
 ) -> dict[str, object]:
     if MaskablePPO is None:
         raise ImportError("train requires sb3-contrib")
@@ -865,6 +935,7 @@ def _train_loaded_batch(
         model, observations, batch.actions, batch.masks
     )
     demo_diagnostic_rows = []
+    heldout_diagnostic_rows = []
     rollout_diagnostic_rows = []
     operation_modes = getattr(batch, "operation_modes", None)
     if operation_modes is not None:
@@ -881,6 +952,17 @@ def _train_loaded_batch(
                 batch.masks,
                 operation_modes,
                 len(native_env.vessel_ids),
+            )
+        )
+    if heldout_batch is not None:
+        heldout_diagnostic_rows.extend(
+            heldout_demonstration_diagnostics(
+                model,
+                heldout_batch,
+                variant=args.variant,
+                vessel_count=len(native_env.vessel_ids),
+                stage="bc",
+                model_seed=args.model_seed,
             )
         )
     bc_path = checkpoint_path(args, "bc")
@@ -937,6 +1019,17 @@ def _train_loaded_batch(
                     len(native_env.vessel_ids),
                 )
             )
+        if heldout_batch is not None:
+            heldout_diagnostic_rows.extend(
+                heldout_demonstration_diagnostics(
+                    model,
+                    heldout_batch,
+                    variant=args.variant,
+                    vessel_count=len(native_env.vessel_ids),
+                    stage="ppo",
+                    model_seed=args.model_seed,
+                )
+            )
         ppo_path = checkpoint_path(args, "ppo")
         model.save(str(ppo_path))
         rows.extend(
@@ -954,6 +1047,11 @@ def _train_loaded_batch(
     write_results_csv(results_path(args), rows)
     if demo_diagnostic_rows:
         write_diagnostics_csv(demo_diagnostics_path(args), demo_diagnostic_rows)
+    if heldout_diagnostic_rows:
+        write_diagnostics_csv(
+            heldout_demo_diagnostics_path(args),
+            heldout_diagnostic_rows,
+        )
     if rollout_diagnostic_rows:
         write_diagnostics_csv(rollout_diagnostics_path(args), rollout_diagnostic_rows)
 
@@ -966,6 +1064,12 @@ def _train_loaded_batch(
         "eval_seeds": [int(seed) for seed in args.eval_seeds],
         "demo_cache_path": str(normalize_demo_cache_path(args.demo_cache).resolve()),
         "demo_cache_sha256": cache_sha256,
+        "heldout_demo_cache_path": (
+            str(normalize_demo_cache_path(args.heldout_demo_cache).resolve())
+            if args.heldout_demo_cache
+            else None
+        ),
+        "heldout_demo_cache_sha256": heldout_cache_sha256,
         "git_commit": commit,
         "checkpoints": {
             "bc": str(bc_path),
@@ -975,6 +1079,11 @@ def _train_loaded_batch(
         "diagnostics": {
             "demonstration_mode_csv": (
                 str(demo_diagnostics_path(args)) if demo_diagnostic_rows else None
+            ),
+            "heldout_demonstration_mode_csv": (
+                str(heldout_demo_diagnostics_path(args))
+                if heldout_diagnostic_rows
+                else None
             ),
             "rollout_mode_csv": (
                 str(rollout_diagnostics_path(args)) if rollout_diagnostic_rows else None

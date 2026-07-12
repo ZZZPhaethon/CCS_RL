@@ -31,8 +31,10 @@ fi
 
 SHARD_DIR="${SHARD_DIR:-output/rl_forecast/demos/mpc_720h_100seeds_shards}"
 EPISODE_HOURS="${EPISODE_HOURS:-720}"
-START_SEED=$((TASK_ID * 10))
-END_SEED=$((START_SEED + 9))
+SEED_START="${SEED_START:-0}"
+SEEDS_PER_TASK="${SEEDS_PER_TASK:-10}"
+START_SEED=$((SEED_START + TASK_ID * SEEDS_PER_TASK))
+END_SEED=$((START_SEED + SEEDS_PER_TASK - 1))
 mapfile -t DEMO_SEEDS < <(seq "$START_SEED" "$END_SEED")
 DEMO_CACHE="$SHARD_DIR/mpc_720h_seeds_${START_SEED}_${END_SEED}.npz"
 
@@ -47,4 +49,3 @@ python -u scripts/compare_forecast_encoders_rl.py generate-demos \
   --demo-cache "$DEMO_CACHE" \
   --demo-seeds "${DEMO_SEEDS[@]}" \
   --episode-hours "$EPISODE_HOURS"
-

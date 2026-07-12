@@ -37,6 +37,7 @@ def make_native_env(
     overflow_risk_lookahead_h: float = 24.0,
     carbon_price_eur_per_t: float | None = None,
     enforce_full_load_dispatch: bool = False,
+    require_empty_terminal_departure: bool = True,
     scenario: str = "northern_lights_phase1",
     include_goal_obs: bool = False,
     capture_noise_std: float = 0.30,
@@ -89,6 +90,7 @@ def make_native_env(
             overflow_risk_eur_per_t=overflow_risk_eur_per_t,
             overflow_risk_lookahead_h=overflow_risk_lookahead_h,
             enforce_full_load_dispatch=enforce_full_load_dispatch,
+            require_empty_terminal_departure=require_empty_terminal_departure,
             include_goal_obs=include_goal_obs,
         ),
         scenario_config=ScenarioConfig(

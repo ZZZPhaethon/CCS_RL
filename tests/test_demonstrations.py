@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 import importlib
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -16,7 +16,7 @@ def _demonstrations():
     return importlib.import_module("sim.control.demonstrations")
 
 
-def _batch(operation_modes=None):
+def _batch(operation_modes=None, vessel_destinations=None):
     demonstrations = _demonstrations()
     return demonstrations.MpcDemonstrationBatch(
         state=np.arange(6, dtype=np.float32).reshape(2, 3),
@@ -30,6 +30,7 @@ def _batch(operation_modes=None):
         hours=np.array([0, 1], dtype=np.int64),
         metadata={"schema": "demo-v1", "nested": {"b": 2, "a": 1}},
         operation_modes=operation_modes,
+        vessel_destinations=vessel_destinations,
     )
 
 
@@ -38,6 +39,16 @@ def _operation_modes():
         [
             [[1, 0, 0, 0, 0], [0, 1, 0, 0, 0]],
             [[0, 0, 1, 0, 0], [0, 0, 0, 1, 0]],
+        ],
+        dtype=np.float32,
+    )
+
+
+def _vessel_destinations():
+    return np.asarray(
+        [
+            [[1, 0, 0], [0, 0, 0]],
+            [[0, 1, 0], [0, 0, 1]],
         ],
         dtype=np.float32,
     )
@@ -152,6 +163,24 @@ def test_v2_cache_round_trip_preserves_operation_modes(tmp_path):
     assert loaded.operation_modes.dtype == np.float32
 
 
+def test_v3_cache_round_trip_preserves_vessel_destinations(tmp_path):
+    demonstrations = _demonstrations()
+    batch = _batch(
+        operation_modes=_operation_modes(),
+        vessel_destinations=_vessel_destinations(),
+    )
+    path = tmp_path / "demo-v3.npz"
+
+    demonstrations.save_demonstrations(batch, path)
+    loaded = demonstrations.load_demonstrations(path, batch.metadata)
+
+    np.testing.assert_array_equal(
+        loaded.vessel_destinations,
+        batch.vessel_destinations,
+    )
+    assert loaded.vessel_destinations.dtype == np.float32
+
+
 def test_observation_variants_have_expected_shapes_and_flatten_time_major():
     batch = _batch()
 
@@ -184,6 +213,30 @@ def test_mode_observation_variants_append_flattened_vessel_major_modes():
         _batch().observations("state_mode")
 
 
+def test_destination_variant_appends_modes_then_sailing_destinations():
+    batch = _batch(
+        operation_modes=_operation_modes(),
+        vessel_destinations=_vessel_destinations(),
+    )
+
+    destination = batch.observations("tcn_mode_destination")
+
+    expected_state = np.concatenate(
+        (
+            batch.state,
+            _operation_modes().reshape(2, -1),
+            _vessel_destinations().reshape(2, -1),
+        ),
+        axis=1,
+    )
+    np.testing.assert_array_equal(destination["state"], expected_state)
+    assert destination["forecast"] is batch.forecast
+    with pytest.raises(ValueError, match="destination"):
+        _batch(operation_modes=_operation_modes()).observations(
+            "tcn_mode_destination"
+        )
+
+
 def test_metadata_mismatch_is_rejected(tmp_path):
     demonstrations = _demonstrations()
     path = tmp_path / "demo.npz"
@@ -203,6 +256,10 @@ def test_metadata_mismatch_is_rejected(tmp_path):
         (
             {"operation_modes": np.full((2, 2, 5), 0.2, dtype=np.float32)},
             "one-hot",
+        ),
+        (
+            {"vessel_destinations": np.full((2, 2, 3), 0.5, dtype=np.float32)},
+            "destination.*one-hot",
         ),
     ],
 )
@@ -231,6 +288,8 @@ def test_short_real_collection_returns_feasible_rows_and_exact_forecasts():
     assert batch.actions.shape[0] == batch.masks.shape[0] == 2
     assert batch.operation_modes.shape == (2, 3, 5)
     np.testing.assert_array_equal(batch.operation_modes.sum(axis=2), np.ones((2, 3)))
+    assert batch.vessel_destinations.shape == (2, 3, 4)
+    assert np.all(batch.vessel_destinations.sum(axis=2) <= 1.0)
     assert batch.seeds.tolist() == [3, 4]
     assert batch.hours.tolist() == [0, 0]
     assert batch.metadata == factory.metadata()
@@ -370,6 +429,41 @@ def test_merge_demonstration_shards_requires_complete_seeds_and_sorts_rows():
         (1, 1),
     ]
     assert merged.operation_modes.shape == (4, 2, 5)
+
+
+def test_merge_demonstration_shards_preserves_vessel_destinations():
+    shards = []
+    for seed in (1, 0):
+        shard = _merge_shard(seed, [1, 0])
+        destinations = np.zeros((2, 2, 3), dtype=np.float32)
+        destinations[:, 0, seed] = 1.0
+        shards.append(replace(shard, vessel_destinations=destinations))
+
+    merged = _demonstrations().merge_demonstration_shards(
+        shards,
+        expected_seeds=[0, 1],
+        episode_hours=2,
+    )
+
+    assert merged.vessel_destinations.shape == (4, 2, 3)
+    np.testing.assert_array_equal(
+        merged.vessel_destinations[:, 0],
+        [[1, 0, 0], [1, 0, 0], [0, 1, 0], [0, 1, 0]],
+    )
+
+
+def test_merge_demonstration_shards_rejects_mixed_destination_schemas():
+    with_destinations = replace(
+        _merge_shard(0, [0]),
+        vessel_destinations=np.zeros((1, 2, 3), dtype=np.float32),
+    )
+
+    with pytest.raises(ValueError, match="destination schema"):
+        _demonstrations().merge_demonstration_shards(
+            [with_destinations, _merge_shard(1, [0])],
+            expected_seeds=[0, 1],
+            episode_hours=1,
+        )
 
 
 @pytest.mark.parametrize(

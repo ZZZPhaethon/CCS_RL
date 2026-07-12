@@ -15,7 +15,10 @@ from ..environment.forecast import (
     future_forecast_observation,
 )
 from ..environment.gym_adapter import flat_action_from_native, flat_action_mask
-from ..environment.vessel_mode import vessel_operation_mode_observation
+from ..environment.vessel_mode import (
+    vessel_operation_mode_observation,
+    vessel_sailing_destination_observation,
+)
 from .native_mpc import RollingNativeMpcController
 from .replay import ReplayExpectation, ReplaySnapshot, replay_native_actions
 
@@ -30,10 +33,18 @@ class MpcDemonstrationBatch:
     hours: np.ndarray
     metadata: dict[str, object]
     operation_modes: np.ndarray | None = None
+    vessel_destinations: np.ndarray | None = None
 
     def observations(
         self,
-        variant: Literal["state", "flat", "tcn", "state_mode", "tcn_mode"],
+        variant: Literal[
+            "state",
+            "flat",
+            "tcn",
+            "state_mode",
+            "tcn_mode",
+            "tcn_mode_destination",
+        ],
     ):
         if variant == "state":
             return self.state
@@ -44,7 +55,7 @@ class MpcDemonstrationBatch:
             ).astype(np.float32, copy=False)
         if variant == "tcn":
             return {"state": self.state, "forecast": self.forecast}
-        if variant in {"state_mode", "tcn_mode"}:
+        if variant in {"state_mode", "tcn_mode", "tcn_mode_destination"}:
             if self.operation_modes is None:
                 raise ValueError(
                     f"operation mode observations are required for variant {variant!r}"
@@ -55,6 +66,19 @@ class MpcDemonstrationBatch:
             ).astype(np.float32, copy=False)
             if variant == "state_mode":
                 return enriched
+            if variant == "tcn_mode_destination":
+                if self.vessel_destinations is None:
+                    raise ValueError(
+                        "vessel destination observations are required for variant "
+                        f"{variant!r}"
+                    )
+                enriched = np.concatenate(
+                    (
+                        enriched,
+                        self.vessel_destinations.reshape(len(self.state), -1),
+                    ),
+                    axis=1,
+                ).astype(np.float32, copy=False)
             return {"state": enriched, "forecast": self.forecast}
         raise ValueError(f"unknown demonstration observation variant: {variant}")
 
@@ -82,6 +106,8 @@ def save_demonstrations(batch: MpcDemonstrationBatch, path) -> None:
     }
     if batch.operation_modes is not None:
         payload["operation_modes"] = batch.operation_modes
+    if batch.vessel_destinations is not None:
+        payload["vessel_destinations"] = batch.vessel_destinations
     np.savez_compressed(
         destination,
         **payload,
@@ -115,6 +141,11 @@ def load_demonstrations(
             operation_modes_array = (
                 np.asarray(cache["operation_modes"])
                 if "operation_modes" in cache.files
+                else None
+            )
+            vessel_destinations_array = (
+                np.asarray(cache["vessel_destinations"])
+                if "vessel_destinations" in cache.files
                 else None
             )
             metadata_array = np.asarray(cache["metadata_json"])
@@ -152,6 +183,7 @@ def load_demonstrations(
     seeds = _integer_array("seeds", arrays["seeds"], rank=1)
     hours = _integer_array("hours", arrays["hours"], rank=1)
     operation_modes = _operation_mode_array(operation_modes_array)
+    vessel_destinations = _vessel_destination_array(vessel_destinations_array)
 
     if not np.all(np.isfinite(state)) or not np.all(np.isfinite(forecast)):
         raise ValueError("state and forecast observations must contain only finite values")
@@ -165,8 +197,18 @@ def load_demonstrations(
     }
     if operation_modes is not None:
         leading["operation_modes"] = operation_modes.shape[0]
+    if vessel_destinations is not None:
+        leading["vessel_destinations"] = vessel_destinations.shape[0]
     if len(set(leading.values())) != 1:
         raise ValueError(f"misaligned leading dimensions: {leading}")
+    if (
+        operation_modes is not None
+        and vessel_destinations is not None
+        and operation_modes.shape[1] != vessel_destinations.shape[1]
+    ):
+        raise ValueError(
+            "operation mode and vessel destination observations disagree on vessel count"
+        )
 
     return MpcDemonstrationBatch(
         state=state,
@@ -177,6 +219,7 @@ def load_demonstrations(
         hours=hours,
         metadata=metadata,
         operation_modes=operation_modes,
+        vessel_destinations=vessel_destinations,
     )
 
 
@@ -200,6 +243,7 @@ def collect_mpc_demonstrations(
     recorded_seeds: list[int] = []
     hours: list[int] = []
     operation_modes: list[np.ndarray] = []
+    vessel_destinations: list[np.ndarray] = []
 
     for seed in seed_values:
         env = env_factory(demonstration=True)
@@ -217,6 +261,15 @@ def collect_mpc_demonstrations(
             operation_modes.append(
                 np.asarray(vessel_operation_mode_observation(env), dtype=np.float32).reshape(
                     len(env.vessel_ids), 5
+                )
+            )
+            vessel_destinations.append(
+                np.asarray(
+                    vessel_sailing_destination_observation(env),
+                    dtype=np.float32,
+                ).reshape(
+                    len(env.vessel_ids),
+                    len(env.terminal_ids) + len(env.emitter_ids),
                 )
             )
             forecasts.append(
@@ -279,6 +332,7 @@ def collect_mpc_demonstrations(
         hours=np.asarray(hours, dtype=np.int64),
         metadata=env_factory.metadata(),
         operation_modes=np.asarray(operation_modes, dtype=np.float32),
+        vessel_destinations=np.asarray(vessel_destinations, dtype=np.float32),
     )
 
 
@@ -325,6 +379,9 @@ def merge_demonstration_shards(
     operation_presence = [shard.operation_modes is not None for shard in shards]
     if len(set(operation_presence)) != 1:
         raise ValueError("demonstration shards disagree on operation mode schema")
+    destination_presence = [shard.vessel_destinations is not None for shard in shards]
+    if len(set(destination_presence)) != 1:
+        raise ValueError("demonstration shards disagree on vessel destination schema")
     order = np.lexsort((hours, seeds))
 
     def merged(name: str):
@@ -339,6 +396,9 @@ def merge_demonstration_shards(
         hours=hours[order].astype(np.int64, copy=False),
         metadata=metadata,
         operation_modes=(merged("operation_modes") if operation_presence[0] else None),
+        vessel_destinations=(
+            merged("vessel_destinations") if destination_presence[0] else None
+        ),
     )
 
 
@@ -383,6 +443,21 @@ def _operation_mode_array(value: np.ndarray | None) -> np.ndarray | None:
     ):
         raise ValueError("operation mode observations must be one-hot")
     return modes
+
+
+def _vessel_destination_array(value: np.ndarray | None) -> np.ndarray | None:
+    if value is None:
+        return None
+    destinations = _float_array("vessel_destinations", value, rank=3)
+    if destinations.shape[2] <= 0:
+        raise ValueError("invalid vessel_destinations shape: no destination slots")
+    if not np.all(np.isfinite(destinations)):
+        raise ValueError("vessel destination observations must contain only finite values")
+    if not np.all((destinations == 0.0) | (destinations == 1.0)) or not np.all(
+        destinations.sum(axis=2) <= 1.0
+    ):
+        raise ValueError("vessel destination observations must be zero-or-one-hot")
+    return destinations
 
 
 def _expectation_from_snapshot(snapshot: ReplaySnapshot) -> ReplayExpectation:

@@ -11,6 +11,7 @@ import pytest
 from scripts import compare_forecast_encoders_rl as compare
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
 from sim.environment.forecast_encoder import TCNForecastExtractor
+from sim.environment.vessel_mode import vessel_sailing_destination_feature_names
 from sim.metrics import EpisodeMetrics
 from sim.control.demonstrations import MpcDemonstrationBatch, save_demonstrations
 
@@ -190,6 +191,7 @@ def test_environment_factory_uses_demo_and_training_context_contract(tmp_path):
         assert call["overflow_risk_lookahead_h"] == 24.0
         assert call["operating_cost_weight"] == 1.0
         assert call["enforce_full_load_dispatch"] is False
+        assert call["require_empty_terminal_departure"] is True
 
 
 def test_metadata_is_derived_from_environment_helpers_without_schema_drift(tmp_path):
@@ -207,6 +209,11 @@ def test_metadata_is_derived_from_environment_helpers_without_schema_drift(tmp_p
     assert metadata["weather_observation_layout"] == "global"
     assert metadata["reward"]["mode"] == "vent_first"
     assert metadata["partial_load_dispatch"] is True
+    assert metadata["require_empty_terminal_departure"] is True
+    assert metadata["vessel_destination_feature_names"] == list(
+        vessel_sailing_destination_feature_names(env)
+    )
+    assert metadata["vessel_destination_shape"] == [3, 4]
     assert metadata["warm_start"] is True
     assert metadata["scenario_context_hours"] == 169
     assert metadata["emitter_buffer_capacity_t"]["yara_sluiskil"] == 15_000.0
@@ -216,7 +223,7 @@ def test_policy_mapping_uses_custom_extractor_only_for_tcn():
     assert compare.model_policy_config("state") == ("MlpPolicy", {})
     assert compare.model_policy_config("state_mode") == ("MlpPolicy", {})
     assert compare.model_policy_config("flat") == ("MlpPolicy", {})
-    for variant in ("tcn", "tcn_mode"):
+    for variant in ("tcn", "tcn_mode", "tcn_mode_destination"):
         policy, kwargs = compare.model_policy_config(variant)
         assert policy == "MultiInputPolicy"
         assert kwargs["features_extractor_class"] is TCNForecastExtractor
@@ -224,6 +231,94 @@ def test_policy_mapping_uses_custom_extractor_only_for_tcn():
             "state_features": 64,
             "forecast_features": 64,
         }
+
+
+def test_cli_accepts_tcn_mode_destination_variant(tmp_path):
+    args = _train_args(tmp_path, "tcn_mode_destination")
+
+    assert args.variant == "tcn_mode_destination"
+
+
+def test_cli_accepts_heldout_demo_cache_and_uses_distinct_diagnostic_path(tmp_path):
+    heldout = tmp_path / "heldout.npz"
+    args = _train_args(
+        tmp_path,
+        "tcn_mode_destination",
+        "--heldout-demo-cache",
+        str(heldout),
+    )
+
+    assert args.heldout_demo_cache == str(heldout)
+    assert compare.heldout_demo_diagnostics_path(args).name == (
+        "heldout_demo_mode_diagnostics_tcn_mode_destination_seed0.csv"
+    )
+
+
+def test_heldout_diagnostics_add_stage_and_model_seed(monkeypatch):
+    expected_rows = [{"vessel": "all", "mode": "all"}]
+    monkeypatch.setattr(
+        compare,
+        "demonstration_mode_diagnostics",
+        lambda *args, **kwargs: expected_rows,
+    )
+    batch = SimpleNamespace(
+        observations=lambda variant: {"variant": variant},
+        actions=np.zeros((1, 4), dtype=np.int64),
+        masks=np.ones((1, 21), dtype=bool),
+        operation_modes=np.ones((1, 3, 5), dtype=np.float32),
+    )
+
+    rows = compare.heldout_demonstration_diagnostics(
+        object(),
+        batch,
+        variant="tcn_mode_destination",
+        vessel_count=3,
+        stage="bc",
+        model_seed=2,
+    )
+
+    assert rows == [
+        {
+            "stage": "bc",
+            "model_seed": 2,
+            "vessel": "all",
+            "mode": "all",
+        }
+    ]
+
+
+def test_train_variant_loads_and_passes_heldout_demonstrations(tmp_path):
+    heldout_path = tmp_path / "heldout.npz"
+    heldout_path.write_bytes(b"heldout")
+    args = _train_args(
+        tmp_path,
+        "tcn_mode_destination",
+        "--heldout-demo-cache",
+        str(heldout_path),
+    )
+    training_batch = SimpleNamespace(
+        observations=lambda variant: {"training": variant}
+    )
+    heldout_batch = object()
+    factory = Mock()
+    factory.metadata.return_value = {"schema": "v3"}
+
+    with (
+        patch.object(compare, "file_sha256", return_value="sha"),
+        patch.object(compare, "ExperimentEnvFactory", return_value=factory),
+        patch.object(
+            compare,
+            "load_demonstrations",
+            side_effect=[training_batch, heldout_batch],
+        ) as load,
+        patch.object(compare, "make_experiment_env", return_value=object()),
+        patch.object(compare, "_train_loaded_batch", return_value={}) as train,
+    ):
+        compare.train_variant(args)
+
+    assert load.call_count == 2
+    assert train.call_args.kwargs["heldout_batch"] is heldout_batch
+    assert train.call_args.kwargs["heldout_cache_sha256"] == "sha"
 
 
 @pytest.mark.parametrize("variant", ["state", "state_mode", "tcn", "tcn_mode"])
@@ -274,6 +369,36 @@ def test_bc_objective_hpc_script_locks_bc_only_formal_protocol():
     assert "--bc-only" in source
     assert "--timesteps 0" in source
     assert 'EVAL_SEEDS="${EVAL_SEEDS:-101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120}"' in source
+
+
+def test_demo_shard_scripts_support_disjoint_training_and_heldout_seed_ranges():
+    root = Path(compare.__file__).resolve().parents[1]
+    shard = (root / "hpc/submit_forecast_mpc_demo_shards.sh").read_text(
+        encoding="utf-8"
+    )
+    merge = (root / "hpc/submit_forecast_mpc_demo_merge.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'SEED_START="${SEED_START:-0}"' in shard
+    assert 'SEEDS_PER_TASK="${SEEDS_PER_TASK:-10}"' in shard
+    assert 'SEED_START="${SEED_START:-0}"' in merge
+    assert 'TASK_COUNT="${TASK_COUNT:-10}"' in merge
+    assert 'SEEDS_PER_TASK="${SEEDS_PER_TASK:-10}"' in merge
+
+
+def test_destination_bc_hpc_script_locks_mask_destination_comparison():
+    root = Path(compare.__file__).resolve().parents[1]
+    source = (root / "hpc/submit_destination_bc.sh").read_text(encoding="utf-8")
+
+    assert "#SBATCH --array=0-9%5" in source
+    assert "VARIANTS=(tcn_mode tcn_mode_destination)" in source
+    assert "MODEL_SEEDS=(0 1 2 3 4)" in source
+    assert 'BC_EPOCHS="${BC_EPOCHS:-50}"' in source
+    assert '--bc-objective decision_only' in source
+    assert '--heldout-demo-cache "$HELDOUT_DEMO_CACHE"' in source
+    assert "--bc-only" in source
+    assert "--timesteps 0" in source
 
 
 def _bc_ablation_rows(offset):
@@ -398,7 +523,9 @@ def test_hpc_scripts_lock_formal_protocol_defaults():
     assert "--cpus-per-task=4" in shards
     assert "--mem=32G" in shards
     assert "merge-demos" in merge
-    assert "seq 0 99" in merge
+    assert 'SEED_START="${SEED_START:-0}"' in merge
+    assert 'TASK_COUNT="${TASK_COUNT:-10}"' in merge
+    assert 'SEEDS_PER_TASK="${SEEDS_PER_TASK:-10}"' in merge
 
 
 def test_manifest_write_accepts_identical_bytes_and_rejects_different_content(tmp_path):
@@ -571,6 +698,7 @@ def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, ob
         "--eval-seeds",
         "9",
     )
+    args.heldout_demo_cache = "heldout.npz"
     observations = np.zeros((2, 4), dtype=np.float32)
     batch = SimpleNamespace(
         actions=np.zeros((2, 4), dtype=np.int64),
@@ -591,6 +719,8 @@ def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, ob
         "total_targets": 8,
     }
     evaluated = []
+    heldout_rows = [{"stage": "bc", "model_seed": 0}]
+    heldout_batch = object()
 
     def fake_evaluate(_args, _model, *, stage, **_kwargs):
         evaluated.append(stage)
@@ -617,6 +747,12 @@ def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, ob
         patch.object(compare, "evaluate_reference_rows", return_value=[]),
         patch.object(compare, "count_trainable_parameters", return_value=12),
         patch.object(compare, "write_results_csv"),
+        patch.object(
+            compare,
+            "heldout_demonstration_diagnostics",
+            return_value=heldout_rows,
+        ) as heldout_diagnostics,
+        patch.object(compare, "write_diagnostics_csv") as write_diagnostics,
         patch.object(compare, "write_json_immutable") as write_manifest,
         patch.object(compare, "git_commit", return_value="abc123"),
     ):
@@ -627,6 +763,7 @@ def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, ob
             native_env=native_env,
             metadata={"action_dimensions": [5, 5, 5, 6]},
             cache_sha256="cache-sha",
+            heldout_batch=heldout_batch,
         )
 
     assert evaluated == ["bc"]
@@ -636,6 +773,14 @@ def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, ob
     assert manifest["bc"]["objective"] == objective
     assert manifest["ppo"]["explicitly_skipped"] is True
     assert manifest["checkpoints"]["ppo"] is None
+    heldout_diagnostics.assert_called_once()
+    write_diagnostics.assert_called_once_with(
+        compare.heldout_demo_diagnostics_path(args),
+        heldout_rows,
+    )
+    assert manifest["diagnostics"]["heldout_demonstration_mode_csv"] == str(
+        compare.heldout_demo_diagnostics_path(args)
+    )
     if objective == "decision_only":
         decision_only.assert_called_once()
         standard_clone.assert_called_once()

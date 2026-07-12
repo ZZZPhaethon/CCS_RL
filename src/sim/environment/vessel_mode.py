@@ -86,3 +86,31 @@ def vessel_operation_mode_observation(env: "CCSEnv") -> list[float]:
         for current_mode in modes
         for candidate in VESSEL_OPERATION_MODES
     ]
+
+
+def vessel_sailing_destination_feature_names(env: "CCSEnv") -> tuple[str, ...]:
+    destination_ids = [*env.terminal_ids, *env.emitter_ids]
+    return tuple(
+        f"{vessel_id}.sailing_to_{destination_id}"
+        for vessel_id in env.vessel_ids
+        for destination_id in destination_ids
+    )
+
+
+def vessel_sailing_destination_observation(env: "CCSEnv") -> list[float]:
+    if env.simulator is None:
+        raise RuntimeError("Call env.reset() before requesting vessel destinations.")
+    destination_ids = [*env.terminal_ids, *env.emitter_ids]
+    values: list[float] = []
+    for vessel_id in env.vessel_ids:
+        vessel_state = env.simulator.vessel_states[vessel_id]
+        current_destination = (
+            str(vessel_state["destination"])
+            if vessel_state["mode"] == "sailing"
+            else None
+        )
+        values.extend(
+            1.0 if current_destination == destination_id else 0.0
+            for destination_id in destination_ids
+        )
+    return values

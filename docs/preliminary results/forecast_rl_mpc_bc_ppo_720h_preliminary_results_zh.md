@@ -268,3 +268,84 @@ state 在 deterministic PPO 下明显优于 stochastic，而 TCN 的优势方向
 - Model-seed 分析：`output/rl_forecast/borg/formal_8193db1/formal_model_seed_analysis.md`
 - 最终 Borg 实验报告：`.superpowers/sdd/task-8-final-report.md`
 - Checkpoints、manifests 和单任务结果：`output/rl_forecast/borg/formal_8193db1/`
+
+## 12. 补充实验：terminal 业务规则与航行目的地观察
+
+### 12.1 实验动机与设置
+
+代码核查发现，旧环境允许仍载有货物的船舶从 terminal 离港；同时，航行中的船舶只有 `sailing` mode 和航行进度，没有当前目的地。这会让“相同 mode、相同进度、但驶向不同地点”的状态在观察空间中发生混叠。
+
+本轮做了两项最小修正：
+
+1. terminal 中仍有货物的船必须继续卸载，只允许 `WAIT`；emitter 中部分装载的船仍可主动离港，保留 milk run 决策；
+2. 新增每艘航行船的 `current_destination` one-hot，目的地槽位为 terminal 加 3 个 emitters；船舶靠泊时该向量全为 0。
+
+正式比较固定使用：100 个 MPC demonstration seeds（0–99）、每个 seed 720 h、共 72,000 个样本、decision-only BC loss、50 epochs、BC-only、5 个 model seeds 和 20 个完全配对的 rollout seeds（101–120）。另用 seeds 121–140 的 14,400 个 MPC 样本做独立 held-out 诊断。deterministic/argmax 为预先指定的主结果。
+
+缓存审计结果如下：
+
+- 训练缓存形状：state `[72000,51]`、forecast `[72000,168,9]`、mode `[72000,3,5]`、destination `[72000,3,4]`、mask `[72000,21]`；
+- 17,356 个“terminal 有货”训练船时全部只有 `WAIT` 合法，mask 违规数为 0；
+- 47,413 个“emitter 部分装载”训练船时全部仍允许驶向 terminal；
+- held-out 缓存有 14,400 行、20 个独立 seeds，并通过相同规则审计。
+
+### 12.2 闭环结果
+
+| 变体 | seed 0 | seed 1 | seed 2 | seed 3 | seed 4 | model-seed 均值 ± SD |
+|---|---:|---:|---:|---:|---:|---:|
+| 修正 mask + TCN + mode | 6,698 t | 6,455 t | 5,572 t | 9,283 t | 4,999 t | 6,602 ± 1,647 t |
+| 修正 mask + TCN + mode + destination | 2,948 t | 3,636 t | 1,915 t | 4,300 t | 5,832 t | **3,726 ± 1,471 t** |
+| 配对差值（destination − 无 destination） | −3,750 t | −2,820 t | −3,657 t | −4,983 t | +833 t | **−2,875 ± 2,212 t** |
+
+加入 destination 后，deterministic venting 从 6,602 t 降到 3,726 t，平均减少 2,875 t，即 43.6%。5 个 model seeds 中 4 个改善；以 model seed 为独立单位的配对差值 95% t 区间为 `[−5,622, −129] t`，`p=0.0438`。若把全部 100 个 rollout 对视为独立样本，配对 t 检验为 `p=1.84e-6`，但该检验忽略了同一 model seed 内的相关性，只应作为补充。
+
+| 指标 | 修正 mask + mode | 修正 mask + mode + destination | 差值 |
+|---|---:|---:|---:|
+| Deterministic venting | 6,602 t | **3,726 t** | −2,875 t |
+| Deterministic storage rate | 81.47% | **82.69%** | +1.22 pp |
+| Deterministic total cost | €2.085M | **€1.883M** | −€0.202M |
+| Deterministic dispatch 数 | 36.40 | **37.86** | +1.46 |
+| 最长靠泊未 dispatch streak | 124.45 h | **109.13 h** | −15.32 h |
+| Stochastic venting | 14,687 t | **10,655 t** | −4,033 t |
+
+stochastic 平均值也改善 27.5%，但按 5 个 model seeds 聚合后的差值 95% 区间为 `[−11,067, +3,002] t`，跨过 0，因此 stochastic 改善尚不稳健。
+
+作为历史上下文，terminal mask 修正前的 `tcn_mode + decision-only` deterministic venting 为 6,176 t；仅修正 mask 后为 6,602 t。因此不能把本轮提升归因于业务规则修正本身，主要增量来自 destination observation 与修正后状态定义的组合。
+
+### 12.3 离线 BC 诊断
+
+| Held-out 指标 | 修正 mask + mode | 修正 mask + mode + destination | 变化 |
+|---|---:|---:|---:|
+| WAIT specificity | 92.12% | **93.21%** | +1.09 pp |
+| Dispatch precision | 43.16% | **44.28%** | +1.12 pp |
+| Dispatch recall | **75.89%** | 69.87% | −6.02 pp |
+| Conditional destination accuracy | **62.10%** | 58.01% | −4.09 pp |
+| Mean argmax margin | 0.776 | **0.830** | +0.054 |
+
+训练集 joint exact-match 从 95.21% 提高到 96.93%，但 held-out dispatch recall 和 conditional destination accuracy 反而下降，且不同 model seed 的变化较大。这说明闭环改善不能解释为“模型全面学得更像 MPC”。更符合结果的解释是：destination 减少了舰队状态混叠，使策略的 WAIT/dispatch 边界和闭环协调更稳定；它没有解决全部 MPC 蒸馏误差。
+
+值得注意的是，一艘船靠泊并可以决策时，它自己的 destination one-hot 为全 0；该特征主要告诉它其他正在航行的船正驶向哪里。因此当前结果支持“舰队上下文有价值”，但还没有通过因果消融证明具体改善机制。
+
+### 12.4 与 Greedy/MPC 的关系和结论边界
+
+修正规则后的 Greedy、Rolling MPC 和 Idle 已在相同 seeds 101–120 上重新计算；三者的 venting 和 total cost 均与原基线逐 seed 完全一致，最大绝对差值为 0。Greedy 平均 venting 为 8,014 t，Rolling MPC 为 514 t。因此新 destination BC 的平均 deterministic venting 比 Greedy 低 4,287 t，但仍比 MPC 高 3,213 t。
+
+本轮结果支持的保守结论是：**在当前单一 Northern Lights 3-vessel、720 h、decision-only BC 协议下，加入航行目的地观察能显著改善 deterministic 闭环表现，并使 BC-only 超过 Greedy；但它仍未接近 MPC，也不能证明 MPC imitation fidelity 全面改善。**
+
+当前不支持以下更强结论：
+
+1. destination 在其他网络、训练预算或 PPO 阶段一定有效；
+2. destination 已经解决 WAIT 样本主导或长时序 credit assignment；
+3. held-out MPC 动作预测已经充分正确；
+4. 可以跳过 covariate-shift/DAgger 诊断。
+
+下一步按最小增量顺序应为：先做 destination 的 fleet-context 消融（仅观察其他船目的地 vs 完整目的地），再检查 learner 首次偏离 MPC 的状态；只有确认收益来自减少状态混叠后，再启动小规模 DAgger。当前不建议重新引入 50:50 平衡采样。
+
+### 12.5 本轮原始产物
+
+- 正式 checkpoints、results、manifests 和诊断：`output/rl_forecast/destination_bc_formal_cpu/`
+- Pilot：`output/rl_forecast/destination_bc_pilot_cpu/`
+- 训练 demonstration：`output/rl_forecast/demos/destination_mask_train_0_99.npz`
+- Held-out demonstration：`output/rl_forecast/demos/destination_mask_heldout_121_140.npz`
+- 修正规则后的 reference baselines：`output/rl_forecast/corrected_references/`
+- 实验代码提交：`0b10c9b`

@@ -23,10 +23,13 @@ export PYTHONUNBUFFERED=1
 SHARD_DIR="${SHARD_DIR:-output/rl_forecast/demos/mpc_720h_100seeds_shards}"
 DEMO_CACHE="${DEMO_CACHE:-output/rl_forecast/demos/mpc_720h_100seeds.npz}"
 EPISODE_HOURS="${EPISODE_HOURS:-720}"
+SEED_START="${SEED_START:-0}"
+TASK_COUNT="${TASK_COUNT:-10}"
+SEEDS_PER_TASK="${SEEDS_PER_TASK:-10}"
 SHARDS=()
-for TASK_ID in $(seq 0 9); do
-  START_SEED=$((TASK_ID * 10))
-  END_SEED=$((START_SEED + 9))
+for TASK_ID in $(seq 0 $((TASK_COUNT - 1))); do
+  START_SEED=$((SEED_START + TASK_ID * SEEDS_PER_TASK))
+  END_SEED=$((START_SEED + SEEDS_PER_TASK - 1))
   SHARD="$SHARD_DIR/mpc_720h_seeds_${START_SEED}_${END_SEED}.npz"
   if [[ ! -f "$SHARD" ]]; then
     echo "ERROR: missing demonstration shard: $SHARD" >&2
@@ -34,7 +37,8 @@ for TASK_ID in $(seq 0 9); do
   fi
   SHARDS+=("$SHARD")
 done
-mapfile -t EXPECTED_SEEDS < <(seq 0 99)
+FINAL_SEED=$((SEED_START + TASK_COUNT * SEEDS_PER_TASK - 1))
+mapfile -t EXPECTED_SEEDS < <(seq "$SEED_START" "$FINAL_SEED")
 
 mkdir -p logs "$(dirname "$DEMO_CACHE")"
 if [[ -z "${GIT_COMMIT:-}" ]]; then
@@ -47,4 +51,3 @@ python -u scripts/compare_forecast_encoders_rl.py merge-demos \
   --demo-cache "$DEMO_CACHE" \
   --expected-seeds "${EXPECTED_SEEDS[@]}" \
   --episode-hours "$EPISODE_HOURS"
-

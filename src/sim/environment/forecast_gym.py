@@ -14,19 +14,33 @@ from .forecast import (
     future_forecast_observation,
 )
 from .gym_adapter import flat_action_mask, native_action_from_flat
-from .vessel_mode import vessel_operation_mode_observation
+from .vessel_mode import (
+    vessel_operation_mode_observation,
+    vessel_sailing_destination_observation,
+)
 
-ObservationVariant = Literal["state", "flat", "tcn", "state_mode", "tcn_mode"]
+ObservationVariant = Literal[
+    "state",
+    "flat",
+    "tcn",
+    "state_mode",
+    "tcn_mode",
+    "tcn_mode_destination",
+]
 
 
 def variant_uses_operation_modes(variant: str) -> bool:
-    return variant in {"state_mode", "tcn_mode"}
+    return variant in {"state_mode", "tcn_mode", "tcn_mode_destination"}
+
+
+def variant_uses_sailing_destinations(variant: str) -> bool:
+    return variant == "tcn_mode_destination"
 
 
 def variant_base_encoder(variant: str) -> str:
     if variant == "state_mode":
         return "state"
-    if variant == "tcn_mode":
+    if variant in {"tcn_mode", "tcn_mode_destination"}:
         return "tcn"
     if variant in {"state", "flat", "tcn"}:
         return variant
@@ -46,6 +60,12 @@ def forecast_policy_observation(
     if variant_uses_operation_modes(variant):
         modes = np.asarray(vessel_operation_mode_observation(env), dtype=np.float32)
         state = np.concatenate((state, modes)).astype(np.float32, copy=False)
+    if variant_uses_sailing_destinations(variant):
+        destinations = np.asarray(
+            vessel_sailing_destination_observation(env),
+            dtype=np.float32,
+        )
+        state = np.concatenate((state, destinations)).astype(np.float32, copy=False)
     base_variant = variant_base_encoder(variant)
     if base_variant == "state":
         return state
@@ -98,6 +118,10 @@ class ForecastGymEnv(Env):
         state_size = len(current_state_feature_names(env))
         if variant_uses_operation_modes(variant):
             state_size += 5 * len(env.vessel_ids)
+        if variant_uses_sailing_destinations(variant):
+            state_size += len(env.vessel_ids) * (
+                len(env.terminal_ids) + len(env.emitter_ids)
+            )
         base_variant = variant_base_encoder(variant)
         if base_variant == "state":
             self.observation_space = spaces.Box(

@@ -53,6 +53,47 @@ def test_operation_mode_variants_append_modes_to_current_state_only():
     np.testing.assert_array_equal(tcn_mode["state"], state_mode)
     assert tcn_mode["forecast"].shape == (168, 9)
 
+
+def test_tcn_mode_destination_appends_sailing_target_without_changing_legacy_variant():
+    native = _native()
+    native.reset(seed=4)
+    vessel_id = native.vessel_ids[0]
+    origin_id = native.emitter_ids[0]
+    terminal_id = native.terminal_ids[0]
+    other_emitter_id = native.emitter_ids[1]
+    native.simulator.state.vessel_berths.pop(vessel_id, None)
+    native.simulator.vessel_states[vessel_id].update(
+        {
+            "mode": "sailing",
+            "berth": None,
+            "origin": origin_id,
+            "destination": terminal_id,
+            "progress": 0.5,
+        }
+    )
+
+    legacy_before = forecast_policy_observation(native, "tcn_mode")
+    destination_before = forecast_policy_observation(native, "tcn_mode_destination")
+    native.simulator.vessel_states[vessel_id]["destination"] = other_emitter_id
+    legacy_after = forecast_policy_observation(native, "tcn_mode")
+    destination_after = forecast_policy_observation(native, "tcn_mode_destination")
+    destination_size = len(native.vessel_ids) * (
+        len(native.terminal_ids) + len(native.emitter_ids)
+    )
+
+    np.testing.assert_array_equal(legacy_before["state"], legacy_after["state"])
+    np.testing.assert_array_equal(
+        destination_before["state"][:-destination_size],
+        legacy_before["state"],
+    )
+    assert not np.array_equal(
+        destination_before["state"][-destination_size:],
+        destination_after["state"][-destination_size:],
+    )
+    wrapped = ForecastGymEnv(_native(), "tcn_mode_destination")
+    observation, _ = wrapped.reset(seed=4)
+    assert wrapped.observation_space["state"].shape == observation["state"].shape
+
     state_env = ForecastGymEnv(_native(), "state_mode")
     tcn_env = ForecastGymEnv(_native(), "tcn_mode")
     state_obs, _ = state_env.reset(seed=4)

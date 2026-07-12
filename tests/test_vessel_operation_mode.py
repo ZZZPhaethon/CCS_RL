@@ -5,6 +5,7 @@ import copy
 import numpy as np
 
 from sim.environment import CCSEnv, CCSEnvConfig
+from sim.environment import vessel_mode
 from sim.environment.vessel_mode import (
     VESSEL_OPERATION_MODES,
     vessel_operation_mode_feature_names,
@@ -71,6 +72,49 @@ def test_sailing_vessel_is_sailing():
     env.simulator.state.vessel_berths.pop(vessel_id, None)
 
     assert vessel_operation_modes(env)[0] == "sailing"
+
+
+def test_sailing_destination_observation_is_vessel_major_one_hot():
+    feature_names = getattr(vessel_mode, "vessel_sailing_destination_feature_names", None)
+    observation = getattr(vessel_mode, "vessel_sailing_destination_observation", None)
+    assert callable(feature_names)
+    assert callable(observation)
+    env = _env()
+    vessel_id = env.vessel_ids[0]
+    env.simulator.vessel_states[vessel_id] = {
+        "mode": "sailing",
+        "berth": None,
+        "origin": "source_a",
+        "destination": "source_b",
+        "progress": 0.5,
+    }
+    env.simulator.state.vessel_berths.pop(vessel_id, None)
+    destinations = [*env.terminal_ids, *env.emitter_ids]
+
+    values = np.asarray(observation(env), dtype=np.float32).reshape(
+        len(env.vessel_ids), len(destinations)
+    )
+
+    assert feature_names(env) == tuple(
+        f"{current_vessel_id}.sailing_to_{destination_id}"
+        for current_vessel_id in env.vessel_ids
+        for destination_id in destinations
+    )
+    np.testing.assert_array_equal(values[0], [0.0, 0.0, 1.0])
+    np.testing.assert_array_equal(values[1], np.zeros(len(destinations)))
+
+
+def test_berthed_vessels_have_no_sailing_destination():
+    observation = getattr(vessel_mode, "vessel_sailing_destination_observation", None)
+    assert callable(observation)
+    env = _env()
+
+    values = np.asarray(observation(env), dtype=np.float32)
+
+    np.testing.assert_array_equal(
+        values,
+        np.zeros(len(env.vessel_ids) * (len(env.terminal_ids) + len(env.emitter_ids))),
+    )
 
 
 def test_distinct_emitter_vessels_are_loading_when_transfer_is_possible():

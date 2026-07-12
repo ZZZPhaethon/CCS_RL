@@ -105,6 +105,7 @@ def demonstration_mode_diagnostics(
         expected = actions[:, vessel_index]
         predicted = vessel_probabilities.argmax(axis=1)
         for row_index in range(len(actions)):
+            sorted_probabilities = np.sort(vessel_probabilities[row_index])
             records.append(
                 {
                     "vessel_index": vessel_index,
@@ -116,6 +117,9 @@ def demonstration_mode_diagnostics(
                     "expected": int(expected[row_index]),
                     "predicted": int(predicted[row_index]),
                     "wait_probability": float(vessel_probabilities[row_index, 0]),
+                    "argmax_margin": float(
+                        sorted_probabilities[-1] - sorted_probabilities[-2]
+                    ),
                 }
             )
 
@@ -143,6 +147,13 @@ def demonstration_mode_diagnostics(
             ]
             dispatch = [record for record in selected if record["expected"] != 0]
             predicted_dispatch = sum(record["predicted"] != 0 for record in dispatch)
+            active = [record for record in selected if not record["forced_wait"]]
+            predicted_dispatch_records = [
+                record for record in active if record["predicted"] != 0
+            ]
+            correct_predicted_dispatch = sum(
+                record["expected"] != 0 for record in predicted_dispatch_records
+            )
             correct_destination = sum(
                 record["predicted"] == record["expected"] for record in dispatch
             )
@@ -162,9 +173,22 @@ def demonstration_mode_diagnostics(
                         len(voluntary_wait),
                     ),
                     "dispatch_recall": _safe_rate(predicted_dispatch, len(dispatch)),
+                    "dispatch_precision": _safe_rate(
+                        correct_predicted_dispatch,
+                        len(predicted_dispatch_records),
+                    ),
+                    "wait_specificity": _safe_rate(
+                        sum(record["predicted"] == 0 for record in voluntary_wait),
+                        len(voluntary_wait),
+                    ),
                     "conditional_destination_accuracy": _safe_rate(
                         correct_destination, len(dispatch)
                     ),
+                    "mean_argmax_margin": float(
+                        np.mean([record["argmax_margin"] for record in active])
+                    )
+                    if active
+                    else float("nan"),
                     "mean_wait_probability": float(wait_probabilities.mean()),
                     "mean_dispatch_probability": float((1.0 - wait_probabilities).mean()),
                 }

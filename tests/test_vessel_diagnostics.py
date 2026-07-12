@@ -77,7 +77,12 @@ def test_demonstration_diagnostics_separate_forced_wait_and_dispatch(monkeypatch
     assert all_row["voluntary_wait_count"] == 1
     assert all_row["dispatch_count"] == 2
     assert all_row["dispatch_recall"] == pytest.approx(0.5)
+    assert all_row["dispatch_precision"] == pytest.approx(1.0)
+    assert all_row["wait_specificity"] == pytest.approx(1.0)
     assert all_row["conditional_destination_accuracy"] == pytest.approx(0.5)
+    assert all_row["mean_argmax_margin"] == pytest.approx(
+        np.mean([0.32, 0.7, 0.01])
+    )
     assert all_row["mean_wait_probability"] == pytest.approx(0.5)
     assert all_row["mean_dispatch_probability"] == pytest.approx(0.5)
 

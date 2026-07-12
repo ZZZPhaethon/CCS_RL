@@ -100,11 +100,13 @@ class CCSEnvConfig:
     vent_first_vent_eur_per_t: float = 10_000.0
     overflow_risk_eur_per_t: float = 100.0
     overflow_risk_lookahead_h: float = 24.0
-    # Business dispatch constraints (full vessel before sailing to the terminal;
-    # unload before leaving it). Off by default so RL can learn partial-load
-    # dispatch when avoiding venting is worth an extra trip. Turn on only for the
-    # old curriculum-style behaviour.
+    # Require a full vessel before sailing to the terminal. Off by default so RL
+    # can learn partial-load dispatch when avoiding venting is worth an extra trip.
     enforce_full_load_dispatch: bool = False
+    # Keep terminal unloading independent from the emitter departure rule:
+    # partial-load dispatch remains legal, but a vessel cannot leave the terminal
+    # while it still carries cargo.
+    require_empty_terminal_departure: bool = True
     # Expose weather speed factors (current + 24 h/168 h forecast). Global
     # probability-window weather uses one shared forecast plus per-route travel
     # times; leg weather keeps per-route forecasts. Off by default so existing
@@ -444,11 +446,17 @@ class CCSEnv:
             return [True] + [False] * (self.vessel_action_count - 1)  # mid-voyage: can only WAIT
         berth = vstate["berth"]
         at_terminal = berth == route["destination"]
+        cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
+        if (
+            self.config.require_empty_terminal_departure
+            and at_terminal
+            and cargo_t > 1e-9
+        ):
+            return [True] + [False] * (self.vessel_action_count - 1)
         if not self.config.enforce_full_load_dispatch:
             mask = [True, not at_terminal]
             mask.extend(berth != emitter_id for emitter_id in self.emitter_ids)
             return mask
-        cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
         vessel = self.network.entities[vessel_id]
         # Business constraint: a loaded vessel at the terminal must finish
         # unloading before it may leave (can only WAIT).
@@ -547,9 +555,15 @@ class CCSEnv:
             destination = self._vessel_action_destination(vessel_id, choice)
             if destination == berth:
                 destination = None
+            cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
+            route = self._routes[vessel_id]
+            if (
+                self.config.require_empty_terminal_departure
+                and berth == route["destination"]
+                and cargo_t > 1e-9
+            ):
+                destination = None
             if self.config.enforce_full_load_dispatch:
-                cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
-                route = self._routes[vessel_id]
                 vessel = self.network.entities[vessel_id]
                 # A loaded vessel at the terminal must unload before leaving.
                 if berth == route["destination"] and cargo_t > 1e-9:
