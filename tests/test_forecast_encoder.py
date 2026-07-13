@@ -37,6 +37,18 @@ def _larger_mlp_extractor_class():
     return importlib.import_module(module_name).LargerMLPForecastExtractor
 
 
+def _stable_tcn_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(module_name).StableTCNForecastExtractor
+
+
+def _fixed_scale_tcn_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(module_name).FixedScaleTCNForecastExtractor
+
+
 def _tcn_env():
     native = make_native_env(
         episode_hours=2,
@@ -47,14 +59,18 @@ def _tcn_env():
     return ForecastGymEnv(native, "tcn")
 
 
-def _gnn_env():
+def _destination_env(variant):
     native = make_native_env(
         episode_hours=2,
         scenario_context_hours=169,
         scenario="northern_lights_phase1_3vessels",
         weather_mode="block",
     )
-    return ForecastGymEnv(native, "tcn_mode_destination")
+    return ForecastGymEnv(native, variant)
+
+
+def _gnn_env():
+    return _destination_env("tcn_mode_destination")
 
 
 def test_real_tcn_observation_batch_encodes_to_128_features():
@@ -213,7 +229,7 @@ def test_gnn_rejects_nonformal_current_state_layout():
 def test_new_encoder_variants_produce_128_features_and_finite_gradients(
     extractor_class,
 ):
-    env = _gnn_env()
+    env = _destination_env("tcn_mode_destination")
     observation, _ = env.reset(seed=4)
     batch = {
         key: torch.as_tensor(np.stack([value, value]))
@@ -232,7 +248,9 @@ def test_new_encoder_variants_produce_128_features_and_finite_gradients(
 
 
 def test_edge_gnn_places_route_state_on_vessel_location_edges():
-    encoder = _edge_gnn_extractor_class()(_gnn_env().observation_space).state_encoder
+    encoder = _edge_gnn_extractor_class()(
+        _destination_env("tcn_mode_destination").observation_space
+    ).state_encoder
     state = torch.zeros(1, 78)
     travel_times = torch.arange(1.0, 13.0).reshape(3, 4)
     state[:, 39:51] = travel_times.reshape(1, -1)
@@ -267,7 +285,7 @@ def test_edge_gnn_places_route_state_on_vessel_location_edges():
 
 
 def test_more_parameter_mlp_is_parameter_matched_to_edge_gnn_within_one_percent():
-    observation_space = _gnn_env().observation_space
+    observation_space = _destination_env("tcn_mode_destination").observation_space
     edge_encoder = _edge_gnn_extractor_class()(observation_space).state_encoder
     mlp_encoder = _larger_mlp_extractor_class()(observation_space).state_encoder
 
@@ -276,3 +294,41 @@ def test_more_parameter_mlp_is_parameter_matched_to_edge_gnn_within_one_percent(
 
     assert abs(edge_parameters - mlp_parameters) / edge_parameters < 0.01
     assert mlp_parameters > 5_056
+
+
+def test_stable_tcn_forecast_path_is_active_and_receives_gradients():
+    torch.manual_seed(11)
+    observation_space = _destination_env(
+        "stable_tcn_mode_destination"
+    ).observation_space
+    extractor = _stable_tcn_extractor_class()(observation_space)
+    batch = {
+        "state": torch.randn(4, *observation_space["state"].shape),
+        "forecast": torch.randn(4, *observation_space["forecast"].shape),
+    }
+
+    forecast_features = extractor(batch)[:, 64:]
+    forecast_features.square().mean().backward()
+
+    assert any(isinstance(module, nn.LayerNorm) for module in extractor.forecast_projection)
+    assert not torch.allclose(forecast_features, torch.zeros_like(forecast_features))
+    for parameter in extractor.forecast_convolutions.parameters():
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert torch.count_nonzero(parameter.grad) > 0
+
+
+def test_fixed_scale_tcn_has_non_affine_forecast_normalization():
+    observation_space = _destination_env(
+        "fixed_scale_tcn_mode_destination"
+    ).observation_space
+    extractor = _fixed_scale_tcn_extractor_class()(observation_space)
+    normalizations = [
+        module
+        for module in extractor.forecast_projection
+        if isinstance(module, nn.LayerNorm)
+    ]
+
+    assert len(normalizations) == 1
+    assert not normalizations[0].elementwise_affine
+    assert sum(parameter.numel() for parameter in extractor.parameters()) == 59_904

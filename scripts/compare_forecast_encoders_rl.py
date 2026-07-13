@@ -37,7 +37,11 @@ from sim.control.vessel_diagnostics import (
     masked_vessel_action_probabilities,
 )
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
-from sim.environment.forecast_encoder import TCNForecastExtractor
+from sim.environment.forecast_encoder import (
+    FixedScaleTCNForecastExtractor,
+    StableTCNForecastExtractor,
+    TCNForecastExtractor,
+)
 from sim.environment.forecast_gym import (
     ForecastGymEnv,
     forecast_policy_observation,
@@ -205,6 +209,8 @@ def parse_args(argv=None):
             "state_mode",
             "tcn_mode",
             "tcn_mode_destination",
+            "stable_tcn_mode_destination",
+            "fixed_scale_tcn_mode_destination",
         ),
         required=True,
     )
@@ -325,7 +331,20 @@ class ExperimentEnvFactory:
 
 
 def model_policy_config(variant: str):
-    if variant_base_encoder(variant) == "tcn":
+    extractor_classes = {
+        "stable_tcn": StableTCNForecastExtractor,
+        "fixed_scale_tcn": FixedScaleTCNForecastExtractor,
+    }
+    base_encoder = variant_base_encoder(variant)
+    if base_encoder in extractor_classes:
+        return "MultiInputPolicy", {
+            "features_extractor_class": extractor_classes[base_encoder],
+            "features_extractor_kwargs": {
+                "state_features": 64,
+                "forecast_features": 64,
+            },
+        }
+    if base_encoder == "tcn":
         return "MultiInputPolicy", {
             "features_extractor_class": TCNForecastExtractor,
             "features_extractor_kwargs": {
@@ -333,9 +352,20 @@ def model_policy_config(variant: str):
                 "forecast_features": 64,
             },
         }
-    if variant_base_encoder(variant) in {"state", "flat"}:
+    if base_encoder in {"state", "flat"}:
         return "MlpPolicy", {}
     raise ValueError(f"unknown variant: {variant}")
+
+
+def policy_manifest(variant: str) -> dict[str, object]:
+    policy_name, policy_kwargs = model_policy_config(variant)
+    if policy_name == "MlpPolicy":
+        return {"name": policy_name, "features_extractor": None}
+    return {
+        "name": policy_name,
+        "features_extractor": policy_kwargs["features_extractor_class"].__name__,
+        **policy_kwargs["features_extractor_kwargs"],
+    }
 
 
 def checkpoint_path(args, stage: str) -> Path:
@@ -1092,16 +1122,7 @@ def _train_loaded_batch(
             ),
         },
         "environment": metadata,
-        "policy": (
-            {
-                "name": "MultiInputPolicy",
-                "features_extractor": "TCNForecastExtractor",
-                "state_features": 64,
-                "forecast_features": 64,
-            }
-            if variant_base_encoder(args.variant) == "tcn"
-            else {"name": "MlpPolicy", "features_extractor": None}
-        ),
+        "policy": policy_manifest(args.variant),
         "bc": {
             "objective": args.bc_objective,
             "epochs": int(args.bc_epochs),

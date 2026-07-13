@@ -102,7 +102,18 @@ def test_tcn_mode_destination_appends_sailing_target_without_changing_legacy_var
     assert tcn_env.observation_space.contains(tcn_obs)
 
 
-@pytest.mark.parametrize("variant", ["state", "flat", "tcn", "state_mode", "tcn_mode"])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "state",
+        "flat",
+        "tcn",
+        "state_mode",
+        "tcn_mode",
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    ],
+)
 def test_terminal_observation_retains_declared_shape(variant):
     env = ForecastGymEnv(_native(), variant)
     observation, _ = env.reset(seed=4)
@@ -113,7 +124,12 @@ def test_terminal_observation_retains_declared_shape(variant):
     assert not truncated
     if variant == "flat":
         assert np.any(observation[51:] != 0.0)
-    elif variant in {"tcn", "tcn_mode"}:
+    elif variant in {
+        "tcn",
+        "tcn_mode",
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    }:
         assert np.any(observation["forecast"] != 0.0)
 
     observation, _, terminated, truncated, _ = env.step(action)
@@ -122,7 +138,12 @@ def test_terminal_observation_retains_declared_shape(variant):
     assert env.observation_space.contains(observation)
     if variant == "flat":
         assert np.any(observation[51:] != 0.0)
-    elif variant in {"tcn", "tcn_mode"}:
+    elif variant in {
+        "tcn",
+        "tcn_mode",
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    }:
         assert np.any(observation["forecast"] != 0.0)
 
 
@@ -185,7 +206,18 @@ def test_action_masks_preserve_native_multidiscrete_order():
     assert np.array_equal(env.action_masks(), expected)
 
 
-@pytest.mark.parametrize("variant", ["state", "flat", "tcn", "state_mode", "tcn_mode"])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "state",
+        "flat",
+        "tcn",
+        "state_mode",
+        "tcn_mode",
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    ],
+)
 def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
     from sim.environment.forecast_gym import make_forecast_ppo_policy
 
@@ -215,7 +247,14 @@ def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
     elif variant == "flat":
         assert captured["observation"].shape == (51 + 168 * 9,)
     else:
-        expected_state = 66 if variant == "tcn_mode" else 51
+        expected_state = (
+            78
+            if variant in {
+                "stable_tcn_mode_destination",
+                "fixed_scale_tcn_mode_destination",
+            }
+            else 66 if variant == "tcn_mode" else 51
+        )
         assert captured["observation"]["state"].shape == (expected_state,)
         assert captured["observation"]["forecast"].shape == (168, 9)
 

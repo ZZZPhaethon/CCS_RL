@@ -30,18 +30,31 @@ class TCNForecastExtractor(BaseFeaturesExtractor):
         )
         self.forecast_convolutions = nn.Sequential(
             nn.Conv1d(forecast_channels, 32, kernel_size=5, stride=2, padding=2),
-            nn.ReLU(),
+            self._forecast_activation(),
             nn.Conv1d(32, 32, kernel_size=5, stride=2, padding=2),
-            nn.ReLU(),
+            self._forecast_activation(),
             nn.Conv1d(32, 32, kernel_size=5, stride=2, padding=2),
-            nn.ReLU(),
+            self._forecast_activation(),
         )
         with torch.no_grad():
             convolution_output = self.forecast_convolutions(
                 torch.zeros(1, forecast_channels, forecast_steps)
             )
         flatten_size = convolution_output.shape[1] * convolution_output.shape[2]
-        self.forecast_projection = nn.Sequential(
+        self.forecast_projection = self._make_forecast_projection(
+            flatten_size,
+            forecast_features,
+        )
+
+    def _forecast_activation(self) -> nn.Module:
+        return nn.ReLU()
+
+    def _make_forecast_projection(
+        self,
+        flatten_size: int,
+        forecast_features: int,
+    ) -> nn.Sequential:
+        return nn.Sequential(
             nn.Flatten(),
             nn.Linear(flatten_size, forecast_features),
             nn.ReLU(),
@@ -54,6 +67,45 @@ class TCNForecastExtractor(BaseFeaturesExtractor):
             self.forecast_convolutions(forecast)
         )
         return torch.cat((state_features, forecast_features), dim=1)
+
+
+class StableTCNForecastExtractor(TCNForecastExtractor):
+    """Keep forecast gradients alive with smooth activations and normalization."""
+
+    def _forecast_activation(self) -> nn.Module:
+        return nn.SiLU()
+
+    def _make_forecast_projection(
+        self,
+        flatten_size: int,
+        forecast_features: int,
+    ) -> nn.Sequential:
+        return nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(flatten_size, forecast_features),
+            nn.LayerNorm(forecast_features),
+            nn.SiLU(),
+        )
+
+
+class FixedScaleTCNForecastExtractor(StableTCNForecastExtractor):
+    """Prevent BC from learning to suppress the normalized forecast modality."""
+
+    def _make_forecast_projection(
+        self,
+        flatten_size: int,
+        forecast_features: int,
+    ) -> nn.Sequential:
+        return nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(flatten_size, forecast_features),
+            nn.LayerNorm(
+                forecast_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
 
 
 class _GraphAttentionBlock(nn.Module):

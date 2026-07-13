@@ -10,7 +10,11 @@ import pytest
 
 from scripts import compare_forecast_encoders_rl as compare
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
-from sim.environment.forecast_encoder import TCNForecastExtractor
+from sim.environment.forecast_encoder import (
+    FixedScaleTCNForecastExtractor,
+    StableTCNForecastExtractor,
+    TCNForecastExtractor,
+)
 from sim.environment.vessel_mode import vessel_sailing_destination_feature_names
 from sim.metrics import EpisodeMetrics
 from sim.control.demonstrations import MpcDemonstrationBatch, save_demonstrations
@@ -236,12 +240,48 @@ def test_policy_mapping_uses_custom_extractor_only_for_tcn():
             "state_features": 64,
             "forecast_features": 64,
         }
+    policy, kwargs = compare.model_policy_config("stable_tcn_mode_destination")
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is StableTCNForecastExtractor
+    policy, kwargs = compare.model_policy_config("fixed_scale_tcn_mode_destination")
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is FixedScaleTCNForecastExtractor
 
 
 def test_cli_accepts_tcn_mode_destination_variant(tmp_path):
     args = _train_args(tmp_path, "tcn_mode_destination")
 
     assert args.variant == "tcn_mode_destination"
+
+
+@pytest.mark.parametrize(
+    ("variant", "extractor_name"),
+    [
+        ("tcn_mode_destination", "TCNForecastExtractor"),
+        ("stable_tcn_mode_destination", "StableTCNForecastExtractor"),
+        ("fixed_scale_tcn_mode_destination", "FixedScaleTCNForecastExtractor"),
+    ],
+)
+def test_policy_manifest_records_selected_encoder(variant, extractor_name):
+    assert compare.policy_manifest(variant) == {
+        "name": "MultiInputPolicy",
+        "features_extractor": extractor_name,
+        "state_features": 64,
+        "forecast_features": 64,
+    }
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    ],
+)
+def test_cli_accepts_tcn_stability_variants(tmp_path, variant):
+    args = _train_args(tmp_path, variant)
+
+    assert args.variant == variant
 
 
 def test_cli_accepts_heldout_demo_cache_and_uses_distinct_diagnostic_path(tmp_path):

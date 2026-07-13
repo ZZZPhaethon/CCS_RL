@@ -44,6 +44,8 @@ class MpcDemonstrationBatch:
             "state_mode",
             "tcn_mode",
             "tcn_mode_destination",
+            "stable_tcn_mode_destination",
+            "fixed_scale_tcn_mode_destination",
         ],
     ):
         if variant == "state":
@@ -55,7 +57,13 @@ class MpcDemonstrationBatch:
             ).astype(np.float32, copy=False)
         if variant == "tcn":
             return {"state": self.state, "forecast": self.forecast}
-        if variant in {"state_mode", "tcn_mode", "tcn_mode_destination"}:
+        if variant in {
+            "state_mode",
+            "tcn_mode",
+            "tcn_mode_destination",
+            "stable_tcn_mode_destination",
+            "fixed_scale_tcn_mode_destination",
+        }:
             if self.operation_modes is None:
                 raise ValueError(
                     f"operation mode observations are required for variant {variant!r}"
@@ -66,7 +74,11 @@ class MpcDemonstrationBatch:
             ).astype(np.float32, copy=False)
             if variant == "state_mode":
                 return enriched
-            if variant == "tcn_mode_destination":
+            if variant in {
+                "tcn_mode_destination",
+                "stable_tcn_mode_destination",
+                "fixed_scale_tcn_mode_destination",
+            }:
                 if self.vessel_destinations is None:
                     raise ValueError(
                         "vessel destination observations are required for variant "
