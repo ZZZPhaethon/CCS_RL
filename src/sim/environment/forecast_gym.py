@@ -26,6 +26,9 @@ ObservationVariant = Literal[
     "state_mode",
     "tcn_mode",
     "tcn_mode_destination",
+    "gnn_mode_destination",
+    "larger_mlp_mode_destination",
+    "edge_gnn_mode_destination",
     "stable_tcn_mode_destination",
     "fixed_scale_tcn_mode_destination",
 ]
@@ -36,6 +39,9 @@ def variant_uses_operation_modes(variant: str) -> bool:
         "state_mode",
         "tcn_mode",
         "tcn_mode_destination",
+        "gnn_mode_destination",
+        "larger_mlp_mode_destination",
+        "edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     }
@@ -44,6 +50,9 @@ def variant_uses_operation_modes(variant: str) -> bool:
 def variant_uses_sailing_destinations(variant: str) -> bool:
     return variant in {
         "tcn_mode_destination",
+        "gnn_mode_destination",
+        "larger_mlp_mode_destination",
+        "edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     }
@@ -54,6 +63,12 @@ def variant_base_encoder(variant: str) -> str:
         return "state"
     if variant in {"tcn_mode", "tcn_mode_destination"}:
         return "tcn"
+    if variant == "gnn_mode_destination":
+        return "gnn"
+    if variant == "larger_mlp_mode_destination":
+        return "larger_mlp"
+    if variant == "edge_gnn_mode_destination":
+        return "edge_gnn"
     if variant == "stable_tcn_mode_destination":
         return "stable_tcn"
     if variant == "fixed_scale_tcn_mode_destination":
@@ -89,7 +104,14 @@ def forecast_policy_observation(
     forecast = np.asarray(future_forecast_observation(env), dtype=np.float32)
     if base_variant == "flat":
         return np.concatenate((state, forecast.reshape(-1))).astype(np.float32)
-    if base_variant in {"tcn", "stable_tcn", "fixed_scale_tcn"}:
+    if base_variant in {
+        "tcn",
+        "gnn",
+        "larger_mlp",
+        "edge_gnn",
+        "stable_tcn",
+        "fixed_scale_tcn",
+    }:
         return {"state": state, "forecast": forecast}
     raise AssertionError(f"unhandled forecast observation variant: {variant}")
 
@@ -147,7 +169,14 @@ class ForecastGymEnv(Env):
             self.observation_space = spaces.Box(
                 -10.0, 10.0, (state_size + 168 * 9,), np.float32
             )
-        elif base_variant in {"tcn", "stable_tcn", "fixed_scale_tcn"}:
+        elif base_variant in {
+            "tcn",
+            "gnn",
+            "larger_mlp",
+            "edge_gnn",
+            "stable_tcn",
+            "fixed_scale_tcn",
+        }:
             self.observation_space = spaces.Dict(
                 {
                     "state": spaces.Box(-10.0, 10.0, (state_size,), np.float32),

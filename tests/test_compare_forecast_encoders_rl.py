@@ -11,7 +11,10 @@ import pytest
 from scripts import compare_forecast_encoders_rl as compare
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
 from sim.environment.forecast_encoder import (
+    EdgeGNNForecastExtractor,
     FixedScaleTCNForecastExtractor,
+    GNNForecastExtractor,
+    LargerMLPForecastExtractor,
     StableTCNForecastExtractor,
     TCNForecastExtractor,
 )
@@ -240,6 +243,19 @@ def test_policy_mapping_uses_custom_extractor_only_for_tcn():
             "state_features": 64,
             "forecast_features": 64,
         }
+    policy, kwargs = compare.model_policy_config("gnn_mode_destination")
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is GNNForecastExtractor
+    assert kwargs["features_extractor_kwargs"] == {
+        "state_features": 64,
+        "forecast_features": 64,
+    }
+    policy, kwargs = compare.model_policy_config("larger_mlp_mode_destination")
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is LargerMLPForecastExtractor
+    policy, kwargs = compare.model_policy_config("edge_gnn_mode_destination")
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is EdgeGNNForecastExtractor
     policy, kwargs = compare.model_policy_config("stable_tcn_mode_destination")
     assert policy == "MultiInputPolicy"
     assert kwargs["features_extractor_class"] is StableTCNForecastExtractor
@@ -258,6 +274,9 @@ def test_cli_accepts_tcn_mode_destination_variant(tmp_path):
     ("variant", "extractor_name"),
     [
         ("tcn_mode_destination", "TCNForecastExtractor"),
+        ("gnn_mode_destination", "GNNForecastExtractor"),
+        ("larger_mlp_mode_destination", "LargerMLPForecastExtractor"),
+        ("edge_gnn_mode_destination", "EdgeGNNForecastExtractor"),
         ("stable_tcn_mode_destination", "StableTCNForecastExtractor"),
         ("fixed_scale_tcn_mode_destination", "FixedScaleTCNForecastExtractor"),
     ],
@@ -271,14 +290,22 @@ def test_policy_manifest_records_selected_encoder(variant, extractor_name):
     }
 
 
+def test_cli_accepts_gnn_mode_destination_variant(tmp_path):
+    args = _train_args(tmp_path, "gnn_mode_destination")
+
+    assert args.variant == "gnn_mode_destination"
+
+
 @pytest.mark.parametrize(
     "variant",
     [
+        "larger_mlp_mode_destination",
+        "edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     ],
 )
-def test_cli_accepts_tcn_stability_variants(tmp_path, variant):
+def test_cli_accepts_new_encoder_variants(tmp_path, variant):
     args = _train_args(tmp_path, variant)
 
     assert args.variant == variant
@@ -438,6 +465,20 @@ def test_destination_bc_hpc_script_locks_mask_destination_comparison():
 
     assert "#SBATCH --array=0-9%5" in source
     assert "VARIANTS=(tcn_mode tcn_mode_destination)" in source
+    assert "MODEL_SEEDS=(0 1 2 3 4)" in source
+    assert 'BC_EPOCHS="${BC_EPOCHS:-50}"' in source
+    assert '--bc-objective decision_only' in source
+    assert '--heldout-demo-cache "$HELDOUT_DEMO_CACHE"' in source
+    assert "--bc-only" in source
+    assert "--timesteps 0" in source
+
+
+def test_gnn_bc_hpc_script_locks_encoder_only_comparison():
+    root = Path(compare.__file__).resolve().parents[1]
+    source = (root / "hpc/submit_gnn_bc.sh").read_text(encoding="utf-8")
+
+    assert "#SBATCH --array=0-9%5" in source
+    assert "VARIANTS=(tcn_mode_destination gnn_mode_destination)" in source
     assert "MODEL_SEEDS=(0 1 2 3 4)" in source
     assert 'BC_EPOCHS="${BC_EPOCHS:-50}"' in source
     assert '--bc-objective decision_only' in source

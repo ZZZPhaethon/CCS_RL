@@ -93,6 +93,11 @@ def test_tcn_mode_destination_appends_sailing_target_without_changing_legacy_var
     wrapped = ForecastGymEnv(_native(), "tcn_mode_destination")
     observation, _ = wrapped.reset(seed=4)
     assert wrapped.observation_space["state"].shape == observation["state"].shape
+    gnn_observation = forecast_policy_observation(native, "gnn_mode_destination")
+    np.testing.assert_array_equal(gnn_observation["state"], destination_after["state"])
+    np.testing.assert_array_equal(
+        gnn_observation["forecast"], destination_after["forecast"]
+    )
 
     state_env = ForecastGymEnv(_native(), "state_mode")
     tcn_env = ForecastGymEnv(_native(), "tcn_mode")
@@ -105,11 +110,9 @@ def test_tcn_mode_destination_appends_sailing_target_without_changing_legacy_var
 @pytest.mark.parametrize(
     "variant",
     [
-        "state",
-        "flat",
-        "tcn",
-        "state_mode",
-        "tcn_mode",
+        "state", "flat", "tcn", "state_mode", "tcn_mode",
+        "gnn_mode_destination", "larger_mlp_mode_destination",
+        "edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     ],
@@ -125,8 +128,8 @@ def test_terminal_observation_retains_declared_shape(variant):
     if variant == "flat":
         assert np.any(observation[51:] != 0.0)
     elif variant in {
-        "tcn",
-        "tcn_mode",
+        "tcn", "tcn_mode", "gnn_mode_destination",
+        "larger_mlp_mode_destination", "edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     }:
@@ -139,8 +142,8 @@ def test_terminal_observation_retains_declared_shape(variant):
     if variant == "flat":
         assert np.any(observation[51:] != 0.0)
     elif variant in {
-        "tcn",
-        "tcn_mode",
+        "tcn", "tcn_mode", "gnn_mode_destination",
+        "larger_mlp_mode_destination", "edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     }:
@@ -209,11 +212,9 @@ def test_action_masks_preserve_native_multidiscrete_order():
 @pytest.mark.parametrize(
     "variant",
     [
-        "state",
-        "flat",
-        "tcn",
-        "state_mode",
-        "tcn_mode",
+        "state", "flat", "tcn", "state_mode", "tcn_mode",
+        "gnn_mode_destination", "larger_mlp_mode_destination",
+        "edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     ],
@@ -247,14 +248,15 @@ def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
     elif variant == "flat":
         assert captured["observation"].shape == (51 + 168 * 9,)
     else:
-        expected_state = (
-            78
-            if variant in {
-                "stable_tcn_mode_destination",
-                "fixed_scale_tcn_mode_destination",
-            }
-            else 66 if variant == "tcn_mode" else 51
-        )
+        expected_state = {
+            "tcn": 51,
+            "tcn_mode": 66,
+            "gnn_mode_destination": 78,
+            "larger_mlp_mode_destination": 78,
+            "edge_gnn_mode_destination": 78,
+            "stable_tcn_mode_destination": 78,
+            "fixed_scale_tcn_mode_destination": 78,
+        }[variant]
         assert captured["observation"]["state"].shape == (expected_state,)
         assert captured["observation"]["forecast"].shape == (168, 9)
 

@@ -16,8 +16,9 @@ set -euo pipefail
 source /scratch_root/hx721/miniconda3/etc/profile.d/conda.sh
 conda activate mas-ccus
 
-cd /scratch_root/hx721/CCS_RLLLM
-export MPLCONFIGDIR=/scratch_root/hx721/CCS_RLLLM/.cache/matplotlib
+PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM}"
+cd "$PROJECT_DIR"
+export MPLCONFIGDIR="$PROJECT_DIR/.cache/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 
 echo "Job started at $(date)"

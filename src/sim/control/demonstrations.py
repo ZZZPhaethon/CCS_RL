@@ -44,6 +44,9 @@ class MpcDemonstrationBatch:
             "state_mode",
             "tcn_mode",
             "tcn_mode_destination",
+            "gnn_mode_destination",
+            "larger_mlp_mode_destination",
+            "edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
             "fixed_scale_tcn_mode_destination",
         ],
@@ -61,6 +64,9 @@ class MpcDemonstrationBatch:
             "state_mode",
             "tcn_mode",
             "tcn_mode_destination",
+            "gnn_mode_destination",
+            "larger_mlp_mode_destination",
+            "edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
             "fixed_scale_tcn_mode_destination",
         }:
@@ -76,6 +82,9 @@ class MpcDemonstrationBatch:
                 return enriched
             if variant in {
                 "tcn_mode_destination",
+                "gnn_mode_destination",
+                "larger_mlp_mode_destination",
+                "edge_gnn_mode_destination",
                 "stable_tcn_mode_destination",
                 "fixed_scale_tcn_mode_destination",
             }:

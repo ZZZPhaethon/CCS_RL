@@ -229,16 +229,17 @@ def test_destination_variant_appends_modes_then_sailing_destinations():
     )
     for variant in (
         "tcn_mode_destination",
+        "gnn_mode_destination",
+        "larger_mlp_mode_destination",
+        "edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     ):
         destination = batch.observations(variant)
         np.testing.assert_array_equal(destination["state"], expected_state)
         assert destination["forecast"] is batch.forecast
-    with pytest.raises(ValueError, match="destination"):
-        _batch(operation_modes=_operation_modes()).observations(
-            "tcn_mode_destination"
-        )
+        with pytest.raises(ValueError, match="destination"):
+            _batch(operation_modes=_operation_modes()).observations(variant)
 
 
 def test_metadata_mismatch_is_rejected(tmp_path):
