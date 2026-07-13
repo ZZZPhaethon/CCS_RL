@@ -51,9 +51,11 @@ def future_forecast_observation(
         for emitter_id in env.emitter_ids:
             emitter = env.network.entities[emitter_id]
             multiplier = float(env.scenario.emitter_availability[emitter_id][index])
+            capture_tph = emitter.capture_rate_tph_at(
+                index * env.scenario.time_step_hours
+            )
             capture.append(
-                min(emitter.max_production_tph, emitter.nominal_capture_tph * multiplier)
-                / max(1e-9, emitter.max_production_tph)
+                capture_tph * multiplier / max(1e-9, emitter.max_production_tph)
             )
             emitter_online.append(1.0 if multiplier > 0.0 else 0.0)
         well_available = [

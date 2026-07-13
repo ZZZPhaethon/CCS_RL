@@ -202,6 +202,11 @@ def test_metadata_is_derived_from_environment_helpers_without_schema_drift(tmp_p
 
     assert metadata["forecast_channels"] == list(forecast_channel_names(env))
     assert metadata["forecast_shape"] == [168, 9]
+    assert metadata["forecast_schema_version"] == 3
+    assert (
+        metadata["forecast_capture_source"]
+        == "uncapped_hourly_profile_times_availability"
+    )
     assert metadata["state_feature_names"] == list(current_state_feature_names(env))
     assert metadata["state_size"] == len(current_state_feature_names(env)) == 51
     assert metadata["action_dimensions"] == [*env.vessel_action_dims, *env.well_rate_action_dims]

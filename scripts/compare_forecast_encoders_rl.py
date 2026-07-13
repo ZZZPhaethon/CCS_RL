@@ -280,6 +280,8 @@ class ExperimentEnvFactory:
             "horizon_h": int(self.args.forecast_horizon_h),
             "forecast_shape": [int(self.args.forecast_horizon_h), len(channels)],
             "forecast_channels": channels,
+            "forecast_schema_version": 3,
+            "forecast_capture_source": "uncapped_hourly_profile_times_availability",
             "state_feature_names": state_names,
             "state_size": len(state_names),
             "operation_mode_feature_names": list(vessel_operation_mode_feature_names(env)),

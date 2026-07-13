@@ -40,6 +40,28 @@ def test_three_vessel_forecast_is_168_by_9_and_starts_next_hour():
     assert forecast[0, 8] == env.scenario.vessel_speed_factor[vessel_id][1]
 
 
+def test_future_capture_uses_hourly_emission_profile():
+    env = _env()
+    env.reset(seed=7)
+    emitter_id = env.emitter_ids[0]
+    emitter = env.network.entities[emitter_id]
+    env.scenario.emitter_availability[emitter_id][1] = 2.0
+
+    forecast = np.asarray(future_forecast_observation(env), dtype=np.float32)
+    expected = (
+        emitter.capture_rate_tph_at(1.0)
+        * env.scenario.emitter_availability[emitter_id][1]
+        / emitter.max_production_tph
+    )
+
+    assert np.isclose(forecast[0, 0], expected)
+    assert expected > 1.0
+    assert not np.isclose(
+        emitter.capture_rate_tph_at(1.0),
+        emitter.nominal_capture_tph,
+    )
+
+
 def test_current_state_has_current_weather_but_no_future_summaries():
     env = _env()
     env.reset(seed=7)
