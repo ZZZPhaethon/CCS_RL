@@ -38,14 +38,14 @@ def future_forecast_observation(
         raise ValueError("the comparison forecast schema requires 3 emitters and 1 well")
     now_index = env.scenario.step_index(env.simulator.state.time_h)
     final_index = now_index + int(horizon_h)
-    if final_index >= env.scenario.n_steps:
+    if final_index > env.scenario.n_steps:
         raise RuntimeError(
-            f"forecast requires scenario index {final_index}, "
+            f"forecast requires scenario index {final_index - 1}, "
             f"but trajectory ends at {env.scenario.n_steps - 1}"
         )
     vessel_id = env.vessel_ids[0]
     rows: list[list[float]] = []
-    for index in range(now_index + 1, final_index + 1):
+    for index in range(now_index, final_index):
         capture = []
         emitter_online = []
         for emitter_id in env.emitter_ids:

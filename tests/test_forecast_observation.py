@@ -1,5 +1,6 @@
 import numpy as np
 
+from sim.control.rolling_milp import _capture_tonnes
 from sim.environment.forecast import (
     FORECAST_HORIZON_H,
     current_state_feature_names,
@@ -19,7 +20,7 @@ def _env(hours=2):
     )
 
 
-def test_three_vessel_forecast_is_168_by_9_and_starts_next_hour():
+def test_three_vessel_forecast_is_168_by_9_and_starts_current_hour():
     env = _env()
     env.reset(seed=7)
     forecast = np.asarray(future_forecast_observation(env), dtype=np.float32)
@@ -37,7 +38,7 @@ def test_three_vessel_forecast_is_168_by_9_and_starts_next_hour():
         "weather.global_speed_factor",
     )
     vessel_id = env.vessel_ids[0]
-    assert forecast[0, 8] == env.scenario.vessel_speed_factor[vessel_id][1]
+    assert forecast[0, 8] == env.scenario.vessel_speed_factor[vessel_id][0]
 
 
 def test_future_capture_uses_hourly_emission_profile():
@@ -45,21 +46,38 @@ def test_future_capture_uses_hourly_emission_profile():
     env.reset(seed=7)
     emitter_id = env.emitter_ids[0]
     emitter = env.network.entities[emitter_id]
-    env.scenario.emitter_availability[emitter_id][1] = 2.0
+    env.scenario.emitter_availability[emitter_id][0] = 2.0
 
     forecast = np.asarray(future_forecast_observation(env), dtype=np.float32)
     expected = (
-        emitter.capture_rate_tph_at(1.0)
-        * env.scenario.emitter_availability[emitter_id][1]
+        emitter.capture_rate_tph_at(0.0)
+        * env.scenario.emitter_availability[emitter_id][0]
         / emitter.max_production_tph
     )
 
     assert np.isclose(forecast[0, 0], expected)
     assert expected > 1.0
     assert not np.isclose(
-        emitter.capture_rate_tph_at(1.0),
+        emitter.capture_rate_tph_at(0.0),
         emitter.nominal_capture_tph,
     )
+
+
+def test_future_capture_matches_mpc_rollout_offsets_zero_through_167():
+    env = _env(hours=24)
+    env.reset(seed=7)
+    forecast = np.asarray(future_forecast_observation(env), dtype=np.float64)
+
+    for channel, emitter_id in enumerate(env.emitter_ids):
+        emitter = env.network.entities[emitter_id]
+        expected = np.asarray(
+            [
+                _capture_tonnes(env, emitter_id, offset_h)
+                / emitter.max_production_tph
+                for offset_h in range(168)
+            ]
+        )
+        np.testing.assert_allclose(forecast[:, channel], expected)
 
 
 def test_current_state_has_current_weather_but_no_future_summaries():
@@ -86,5 +104,5 @@ def test_last_rl_step_still_has_full_forecast_context():
     forecast = np.asarray(future_forecast_observation(env))
     vessel_id = env.vessel_ids[0]
     assert forecast.shape == (168, 9)
-    assert forecast[0, 8] == env.scenario.vessel_speed_factor[vessel_id][720]
-    assert forecast[-1, 8] == env.scenario.vessel_speed_factor[vessel_id][887]
+    assert forecast[0, 8] == env.scenario.vessel_speed_factor[vessel_id][719]
+    assert forecast[-1, 8] == env.scenario.vessel_speed_factor[vessel_id][886]
