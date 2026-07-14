@@ -270,6 +270,40 @@ class LargerMLPForecastExtractor(TCNForecastExtractor):
         )
 
 
+class FixedScaleLargerMLPForecastExtractor(FixedScaleTCNForecastExtractor):
+    """Pair the parameter-matched state MLP with the fixed-scale TCN."""
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            state_features=state_features,
+            forecast_features=forecast_features,
+        )
+        state_size = observation_space["state"].shape[0]
+        if state_size != LargerMLPForecastExtractor.STATE_SIZE:
+            raise ValueError(
+                "fixed-scale larger MLP forecast encoder requires 78 current-state "
+                f"features for the formal 3-vessel layout, got {state_size}"
+            )
+        self.state_encoder = nn.Sequential(
+            nn.Linear(
+                state_size,
+                LargerMLPForecastExtractor.HIDDEN_FEATURES,
+            ),
+            nn.ReLU(),
+            nn.Linear(
+                LargerMLPForecastExtractor.HIDDEN_FEATURES,
+                state_features,
+            ),
+            nn.ReLU(),
+        )
+
+
 class _EdgeAwareAttentionBlock(nn.Module):
     def __init__(self, node_features: int, edge_features: int) -> None:
         super().__init__()
@@ -437,6 +471,26 @@ class _EdgeAwareCCSGraphStateEncoder(nn.Module):
 
 class EdgeGNNForecastExtractor(TCNForecastExtractor):
     """Combine an edge-aware CCS graph encoder with the unchanged TCN."""
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            state_features=state_features,
+            forecast_features=forecast_features,
+        )
+        self.state_encoder = _EdgeAwareCCSGraphStateEncoder(
+            observation_space["state"].shape[0],
+            state_features,
+        )
+
+
+class FixedScaleEdgeGNNForecastExtractor(FixedScaleTCNForecastExtractor):
+    """Pair the edge-aware state graph with the fixed-scale TCN."""
 
     def __init__(
         self,
