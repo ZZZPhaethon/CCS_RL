@@ -233,7 +233,7 @@ git commit -m "Select weather observation layout by source"
 
 **Files:**
 - Modify: `src/sim/train.py:24-100`
-- Modify: `scripts/compare_reward_modes_bc.py:65-72,77-112,224-365`
+- Modify: `experiments/compare_reward_modes_bc.py:65-72,77-112,224-365`
 - Modify: `tests/test_compare_reward_modes_bc.py`
 
 **Interfaces:**
@@ -305,7 +305,7 @@ Expected: all selected tests pass.
 - [ ] **Step 5: Commit the experiment parameter**
 
 ```bash
-git add src/sim/train.py scripts/compare_reward_modes_bc.py tests/test_compare_reward_modes_bc.py
+git add src/sim/train.py experiments/compare_reward_modes_bc.py tests/test_compare_reward_modes_bc.py
 git commit -m "Expose weather window rate to RL experiments"
 ```
 
@@ -388,7 +388,7 @@ git commit -m "Pass weather window rate in Borg jobs"
 - Sync: `src/sim/environment/env.py`
 - Sync: `src/sim/environment/factories.py`
 - Sync: `src/sim/train.py`
-- Sync: `scripts/compare_reward_modes_bc.py`
+- Sync: `experiments/compare_reward_modes_bc.py`
 - Sync: `hpc/submit_reward_modes_bc.sh`
 - Retrieve: `output/rl_ppo/*weatherrate0.3*`
 - Retrieve: `output/rl_ppo/*weatherrate1*`

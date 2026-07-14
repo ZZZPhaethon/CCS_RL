@@ -4,7 +4,7 @@ there is above greedy for RL/LLM to chase.
 
 Usage (ccs-rlllm-gpu env, from repo root):
     set PYTHONPATH=src
-    python scripts/eval_milp_ceiling.py --seeds 101 102 --episode-hours 720
+    python experiments/eval_milp_ceiling.py --seeds 101 102 --episode-hours 720
 """
 from __future__ import annotations
 

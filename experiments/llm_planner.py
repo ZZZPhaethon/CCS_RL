@@ -10,7 +10,7 @@ the proven cluster rule (~77% on milk-run). Compares:
 
 Usage (ccs-rlllm-gpu env, Ollama running):
     set PYTHONPATH=src
-    python scripts/llm_planner.py --model qwen2.5:7b-instruct --seeds 101 102
+    python experiments/llm_planner.py --model qwen2.5:7b-instruct --seeds 101 102
 """
 from __future__ import annotations
 

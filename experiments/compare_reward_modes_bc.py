@@ -5,7 +5,7 @@ mask. The reported "actual" cost is operating cost plus venting penalty only.
 
 Usage:
     set PYTHONPATH=src
-    python scripts/compare_reward_modes_bc.py --timesteps 100000 --episode-hours 720
+    python experiments/compare_reward_modes_bc.py --timesteps 100000 --episode-hours 720
 """
 
 from __future__ import annotations

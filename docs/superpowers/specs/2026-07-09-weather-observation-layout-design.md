@@ -60,7 +60,7 @@ The observation schema is therefore known before the first reset and remains fix
 `weather_window_rate_per_week` is exposed through:
 
 1. `make_native_env`;
-2. `scripts/compare_reward_modes_bc.py` CLI;
+2. `experiments/compare_reward_modes_bc.py` CLI;
 3. `hpc/submit_reward_modes_bc.sh` as `WEATHER_WINDOW_RATE_PER_WEEK`;
 4. model/result tags and Markdown reports.
 

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from scripts import compare_reward_modes_bc as compare
+from experiments import compare_reward_modes_bc as compare
 from sim.entities import Emitter
 
 

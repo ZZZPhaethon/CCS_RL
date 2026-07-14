@@ -128,8 +128,9 @@ uv run python -m sim.scenario_generation.wave_height.prediction.train_gru
 
 ## 强化学习与 LLM 实验
 
-`scripts/` 目录是 RL + LLM 的实验栈。完整结论(RL 追平 greedy、milk-run 路由头空间、
-LLM 规划、目标条件泛化等)见 [`docs/experiments_summary.md`](docs/experiments_summary.md)。
+训练和训练数据工作流放在 `scripts/`；比较、评估、消融和 LLM 概念验证实验放在
+`experiments/`。完整结论（RL 追平 greedy、milk-run 路由头空间、LLM 规划、
+目标条件泛化等）见 [`docs/experiments_summary.md`](docs/experiments_summary.md)。
 
 ### 行为克隆 + PPO(kickstarting)
 
@@ -162,20 +163,20 @@ ollama pull qwen2.5:7b-instruct
 ollama pull llama3.1:8b
 ```
 
-- `scripts\llm_planner.py` —— LLM 产生高层"船→源"分配,由确定性 cluster 策略执行(分层规划)。
-- `scripts\llm_router.py` —— LLM 在每个发船决策点选目的地。
-- `scripts\eval_llm_goal.py` —— 对比"LLM 目标 vs 启发式目标"喂给目标条件策略。
+- `experiments\llm_planner.py` —— LLM 产生高层"船→源"分配,由确定性 cluster 策略执行(分层规划)。
+- `experiments\llm_router.py` —— LLM 在每个发船决策点选目的地。
+- `experiments\eval_llm_goal.py` —— 对比"LLM 目标 vs 启发式目标"喂给目标条件策略。
 
 ```powershell
-uv run python scripts\llm_planner.py --model qwen2.5:7b-instruct `
+uv run python experiments\llm_planner.py --model qwen2.5:7b-instruct `
   --scenario northern_lights_phase1_milkrun_imbalanced
 ```
 
 ### 评估与天花板
 
 ```powershell
-uv run python scripts\eval_ppo_model.py output\rl_ppo\<model>.zip
-uv run python scripts\eval_milp_ceiling.py --seeds 101 102   # rolling-MILP 参考上界
+uv run python experiments\eval_ppo_model.py output\rl_ppo\<model>.zip
+uv run python experiments\eval_milp_ceiling.py --seeds 101 102   # rolling-MILP 参考上界
 ```
 
 ### Milk-run 场景
@@ -204,10 +205,10 @@ CCS_RLLLM/
 |-- data/                 # capture-rate profile、外部资料和实验数据
 |-- docs/                 # 研究说明、设计文档和历史想法
 |-- examples/             # 小型 demo 与 dashboard 生成脚本
-|-- experiments/          # 研究实验入口，例如 controller comparison
+|-- experiments/          # 比较、评估、消融和各类研究实验入口
 |-- hpc/                  # 集群提交脚本与 smoke test
 |-- scenarios/            # 可复现实验场景 JSON
-|-- scripts/              # PPO/BC 训练和模型评估脚本
+|-- scripts/              # 训练和训练数据工作流脚本
 |-- src/sim/              # 主 Python 包
 |-- tests/                # 单元测试、结构测试和实验 smoke test
 |-- visualisation html/   # 旧可视化产物目录

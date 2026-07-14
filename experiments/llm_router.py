@@ -6,7 +6,7 @@ scenario to test whether LLM reasoning beats the greedy teacher.
 
 Usage (ccs-rlllm-gpu env, from repo root, Ollama running):
     set PYTHONPATH=src
-    python scripts/llm_router.py --model qwen2.5:7b-instruct --seeds 101 --episode-hours 720
+    python experiments/llm_router.py --model qwen2.5:7b-instruct --seeds 101 --episode-hours 720
 """
 from __future__ import annotations
 

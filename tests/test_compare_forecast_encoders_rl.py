@@ -586,7 +586,7 @@ def _bc_ablation_rows(offset):
 
 
 def test_bc_ablation_report_computes_exact_paired_objective_deltas():
-    from scripts import report_bc_objective_ablation as report
+    from experiments import report_bc_objective_ablation as report
 
     rows_by_objective = {
         "current": _bc_ablation_rows(0.0),
@@ -608,7 +608,7 @@ def test_bc_ablation_report_computes_exact_paired_objective_deltas():
 
 
 def test_bc_ablation_report_rejects_missing_pair_keys():
-    from scripts import report_bc_objective_ablation as report
+    from experiments import report_bc_objective_ablation as report
 
     rows_by_objective = {
         "current": _bc_ablation_rows(0.0),
@@ -620,7 +620,7 @@ def test_bc_ablation_report_rejects_missing_pair_keys():
 
 
 def test_bc_ablation_report_summarizes_decision_and_rollout_diagnostics():
-    from scripts import report_bc_objective_ablation as report
+    from experiments import report_bc_objective_ablation as report
 
     demo = {}
     rollout = {}

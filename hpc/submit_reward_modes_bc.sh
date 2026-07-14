@@ -69,7 +69,7 @@ python --version
 nvidia-smi
 
 # shellcheck disable=SC2086
-python -u scripts/compare_reward_modes_bc.py \
+python -u experiments/compare_reward_modes_bc.py \
   --scenario northern_lights_phase1_3vessels \
   --episode-hours 720 \
   --timesteps "$TIMESTEPS" \

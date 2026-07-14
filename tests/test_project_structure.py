@@ -77,6 +77,23 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertIn("train", source)
         self.assertIn("report", source)
 
+    def test_scripts_and_experiments_have_distinct_entry_point_roles(self):
+        script_names = {
+            path.name
+            for path in (ROOT / "scripts").glob("*.py")
+            if path.name != "__init__.py"
+        }
+        experiment_names = {path.name for path in (ROOT / "experiments").glob("*.py")}
+
+        self.assertTrue(
+            all(
+                name.startswith("train_") or name == "compare_forecast_encoders_rl.py"
+                for name in script_names
+            )
+        )
+        self.assertFalse(any(name.startswith("train_") for name in experiment_names))
+        self.assertFalse(script_names & experiment_names)
+
     def test_forecast_rl_hpc_scripts_have_borg_runtime_contract(self):
         paths = (
             ROOT / "hpc" / "submit_forecast_mpc_demos.sh",

@@ -8,15 +8,20 @@ changes the outcome. This is the minimal test of LLM-in-the-loop value.
 
 Usage (ccs-rlllm-gpu env, Ollama running, from repo root):
     set PYTHONPATH=src
-    python scripts/eval_llm_goal.py --model-zip output/rl_ppo/goal_conditioned_milkrun.zip
+    python experiments/eval_llm_goal.py --model-zip output/rl_ppo/goal_conditioned_milkrun.zip
 """
 from __future__ import annotations
 
 import argparse
 import statistics
+import sys
+from pathlib import Path
 
-# scripts/ is on sys.path[0] when run directly, so these import cleanly
-from train_goal_conditioned import build_env, TRAIN_LAYOUTS, TEST_LAYOUT, DISTURB
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.train_goal_conditioned import build_env, TRAIN_LAYOUTS, TEST_LAYOUT, DISTURB
 from llm_planner import llm_assignment
 
 from sim.environment.gym_adapter import make_ppo_policy

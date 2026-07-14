@@ -4,7 +4,7 @@ output/rl_ppo/. Reports both stochastic and deterministic PPO because an argmax
 
 Usage (ccs-rlllm-gpu env, from repo root):
     set PYTHONPATH=src
-    python scripts/eval_ppo_model.py output/rl_ppo/ppo_phase1_720h_inj80_ts200000.zip
+    python experiments/eval_ppo_model.py output/rl_ppo/ppo_phase1_720h_inj80_ts200000.zip
 """
 from __future__ import annotations
 
