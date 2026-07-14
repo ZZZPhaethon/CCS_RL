@@ -15,6 +15,7 @@ from sim.environment.forecast_encoder import (
     FixedScaleEdgeGNNForecastExtractor,
     FixedScaleLargerMLPForecastExtractor,
     FixedScaleTCNForecastExtractor,
+    FutureMLPForecastExtractor,
     GNNForecastExtractor,
     LargerMLPForecastExtractor,
     StableTCNForecastExtractor,
@@ -262,6 +263,9 @@ def test_policy_mapping_uses_custom_extractor_only_for_tcn():
     policy, kwargs = compare.model_policy_config("edge_gnn_mode_destination")
     assert policy == "MultiInputPolicy"
     assert kwargs["features_extractor_class"] is EdgeGNNForecastExtractor
+    policy, kwargs = compare.model_policy_config("future_mlp_mode_destination")
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is FutureMLPForecastExtractor
     policy, kwargs = compare.model_policy_config(
         "fixed_scale_larger_mlp_mode_destination"
     )
@@ -345,6 +349,7 @@ def test_cli_accepts_learned_plan_context_imitation_only_variant(tmp_path):
         ("gnn_mode_destination", "GNNForecastExtractor"),
         ("larger_mlp_mode_destination", "LargerMLPForecastExtractor"),
         ("edge_gnn_mode_destination", "EdgeGNNForecastExtractor"),
+        ("future_mlp_mode_destination", "FutureMLPForecastExtractor"),
         (
             "fixed_scale_larger_mlp_mode_destination",
             "FixedScaleLargerMLPForecastExtractor",
@@ -377,6 +382,7 @@ def test_cli_accepts_gnn_mode_destination_variant(tmp_path):
     [
         "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
+        "future_mlp_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",

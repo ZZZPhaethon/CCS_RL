@@ -108,6 +108,49 @@ class FixedScaleTCNForecastExtractor(StableTCNForecastExtractor):
         )
 
 
+class FutureMLPForecastExtractor(BaseFeaturesExtractor):
+    """Encode state and a parameter-matched flattened forecast MLP separately."""
+
+    FORECAST_HIDDEN_FEATURES = 35
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            features_dim=state_features + forecast_features,
+        )
+        state_size = observation_space["state"].shape[0]
+        forecast_steps, forecast_channels = observation_space["forecast"].shape
+        self.state_encoder = nn.Sequential(
+            nn.Linear(state_size, state_features),
+            nn.ReLU(),
+        )
+        self.forecast_projection = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(
+                forecast_steps * forecast_channels,
+                self.FORECAST_HIDDEN_FEATURES,
+            ),
+            nn.SiLU(),
+            nn.Linear(self.FORECAST_HIDDEN_FEATURES, forecast_features),
+            nn.LayerNorm(
+                forecast_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
+
+    def forward(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
+        state_features = self.state_encoder(observations["state"])
+        forecast_features = self.forecast_projection(observations["forecast"])
+        return torch.cat((state_features, forecast_features), dim=1)
+
+
 class _GraphAttentionBlock(nn.Module):
     def __init__(self, features: int) -> None:
         super().__init__()

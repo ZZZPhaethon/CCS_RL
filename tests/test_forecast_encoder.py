@@ -49,6 +49,12 @@ def _fixed_scale_tcn_extractor_class():
     return importlib.import_module(module_name).FixedScaleTCNForecastExtractor
 
 
+def _future_mlp_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(module_name).FutureMLPForecastExtractor
+
+
 def _fixed_scale_larger_mlp_extractor_class():
     module_name = "sim.environment.forecast_encoder"
     assert importlib.util.find_spec(module_name) is not None
@@ -344,6 +350,45 @@ def test_fixed_scale_tcn_has_non_affine_forecast_normalization():
     assert len(normalizations) == 1
     assert not normalizations[0].elementwise_affine
     assert sum(parameter.numel() for parameter in extractor.parameters()) == 59_904
+
+
+def test_future_mlp_is_parameter_matched_and_keeps_forecast_gradients_active():
+    torch.manual_seed(11)
+    observation_space = _destination_env(
+        "future_mlp_mode_destination"
+    ).observation_space
+    mlp = _future_mlp_extractor_class()(observation_space)
+    tcn = _fixed_scale_tcn_extractor_class()(observation_space)
+    batch = {
+        "state": torch.randn(4, *observation_space["state"].shape),
+        "forecast": torch.randn(4, *observation_space["forecast"].shape),
+    }
+
+    forecast_features = mlp(batch)[:, 64:]
+    forecast_features.square().mean().backward()
+
+    mlp_forecast_parameters = sum(
+        parameter.numel() for parameter in mlp.forecast_projection.parameters()
+    )
+    tcn_forecast_parameters = sum(
+        parameter.numel()
+        for module in (tcn.forecast_convolutions, tcn.forecast_projection)
+        for parameter in module.parameters()
+    )
+    assert abs(mlp_forecast_parameters - tcn_forecast_parameters) / tcn_forecast_parameters < 0.01
+    assert forecast_features.shape == (4, 64)
+    assert torch.count_nonzero(forecast_features) > 0
+    normalizations = [
+        module
+        for module in mlp.forecast_projection
+        if isinstance(module, nn.LayerNorm)
+    ]
+    assert len(normalizations) == 1
+    assert not normalizations[0].elementwise_affine
+    for parameter in mlp.forecast_projection.parameters():
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert torch.count_nonzero(parameter.grad) > 0
 
 
 @pytest.mark.parametrize(
