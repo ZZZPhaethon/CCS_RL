@@ -291,15 +291,17 @@ state 在 deterministic PPO 下明显优于 stochastic，而 TCN 的优势方向
 
 ### 12.2 闭环结果
 
+为避免歧义，本节两组学习策略均使用 `decision-only` loss，训练阶段均为 **BC-only（没有 PPO，也没有 balanced sampling）**；两组之间唯一的观察空间差异是是否加入 `current_destination`。
+
 | 变体 | seed 0 | seed 1 | seed 2 | seed 3 | seed 4 | model-seed 均值 ± SD |
 |---|---:|---:|---:|---:|---:|---:|
-| 修正 mask + TCN + mode | 6,698 t | 6,455 t | 5,572 t | 9,283 t | 4,999 t | 6,602 ± 1,647 t |
-| 修正 mask + TCN + mode + destination | 2,948 t | 3,636 t | 1,915 t | 4,300 t | 5,832 t | **3,726 ± 1,471 t** |
+| 修正 mask + TCN + mode + decision-only BC-only | 6,698 t | 6,455 t | 5,572 t | 9,283 t | 4,999 t | 6,602 ± 1,647 t |
+| 修正 mask + TCN + mode + destination + decision-only BC-only | 2,948 t | 3,636 t | 1,915 t | 4,300 t | 5,832 t | **3,726 ± 1,471 t** |
 | 配对差值（destination − 无 destination） | −3,750 t | −2,820 t | −3,657 t | −4,983 t | +833 t | **−2,875 ± 2,212 t** |
 
 加入 destination 后，deterministic venting 从 6,602 t 降到 3,726 t，平均减少 2,875 t，即 43.6%。5 个 model seeds 中 4 个改善；以 model seed 为独立单位的配对差值 95% t 区间为 `[−5,622, −129] t`，`p=0.0438`。若把全部 100 个 rollout 对视为独立样本，配对 t 检验为 `p=1.84e-6`，但该检验忽略了同一 model seed 内的相关性，只应作为补充。
 
-| 指标 | 修正 mask + mode | 修正 mask + mode + destination | 差值 |
+| 指标 | 无 destination（decision-only BC-only） | 有 destination（decision-only BC-only） | 差值 |
 |---|---:|---:|---:|
 | Deterministic venting | 6,602 t | **3,726 t** | −2,875 t |
 | Deterministic storage rate | 81.47% | **82.69%** | +1.22 pp |
