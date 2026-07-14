@@ -16,6 +16,7 @@ corresponding emitter or terminal.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from itertools import product
 import math
@@ -61,6 +62,7 @@ class RollingMilpPlan:
     replay_is_exact: bool = False
     replay_mismatches: tuple[str, ...] = ()
     replay_compared_fields: frozenset[str] = frozenset()
+    solver_is_valid: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,7 @@ def _plan_explicit_actions(
     planning_horizon_h: int,
     economics: EconomicParameters,
     time_limit_s: float = 30.0,
+    solver: str = "cbc",
 ) -> RollingMilpPlan:
     """Plan hourly vessel actions and continuous injection over a lookahead."""
     import pulp
@@ -294,8 +297,8 @@ def _plan_explicit_actions(
     if objective_weights.mode == "vent_first":
         stage_start = time.perf_counter()
         prob.setObjective(vent_expr)
-        _solve_cbc(prob, time_limit_s)
-        stage_one_status = pulp.LpStatus[prob.status]
+        _solve_mip(prob, time_limit_s, solver)
+        stage_one_status = _solution_status(prob)
         if stage_one_status not in {"Optimal", "Integer Feasible"}:
             status = stage_one_status
         else:
@@ -303,8 +306,8 @@ def _plan_explicit_actions(
             prob += vent_expr <= optimal_vent_t + 1e-3
             elapsed_s = time.perf_counter() - stage_start
             prob.setObjective(end_unstored_inventory_expr)
-            _solve_cbc(prob, max(1.0, (time_limit_s - elapsed_s) / 2.0))
-            stage_two_status = pulp.LpStatus[prob.status]
+            _solve_mip(prob, max(1.0, (time_limit_s - elapsed_s) / 2.0), solver)
+            stage_two_status = _solution_status(prob)
             if stage_two_status not in {"Optimal", "Integer Feasible"}:
                 status = stage_two_status
             else:
@@ -312,16 +315,16 @@ def _plan_explicit_actions(
                 prob += end_unstored_inventory_expr <= optimal_end_unstored_t + 1e-3
                 remaining_s = max(1.0, time_limit_s - (time.perf_counter() - stage_start))
                 prob.setObjective(operating_cost_expr)
-                _solve_cbc(prob, remaining_s)
-                status = pulp.LpStatus[prob.status]
+                _solve_mip(prob, remaining_s, solver)
+                status = _solution_status(prob)
     else:
         prob.setObjective(
             operating_cost_expr
             + vent_expr * economics.carbon_price_eur_per_t
             + shortfall * economics.storage_shortfall_eur_per_t
         )
-        _solve_cbc(prob, time_limit_s)
-        status = pulp.LpStatus[prob.status]
+        _solve_mip(prob, time_limit_s, solver)
+        status = _solution_status(prob)
 
     vessel_actions_by_hour = _extract_actions(env, H, arcs, arc_vars)
     injection_tph = [max(0.0, _value(inj[t])) for t in hours]
@@ -425,7 +428,76 @@ def _plan_explicit_actions(
         replay_is_exact=replay.is_exact,
         replay_mismatches=replay.mismatches,
         replay_compared_fields=replay.compared_fields,
+        solver_is_valid=validation.is_valid,
     )
+
+
+def _plan_native_cplex_actions(
+    env: CCSEnv,
+    planning_horizon_h: int,
+    economics: EconomicParameters,
+    time_limit_s: float = 60.0,
+    execution_h: int = 24,
+) -> RollingMilpPlan:
+    """Plan a rolling window with the environment-aligned native CPLEX MILP."""
+    from .cplex_milp import replay_full_scenario_cplex_plan, solve_full_scenario_with_cplex
+
+    warm_start_actions = _idle_native_warm_start(env, planning_horizon_h)
+    result = solve_full_scenario_with_cplex(
+        env,
+        horizon_h=planning_horizon_h,
+        economics=economics,
+        warm_start_native_actions_by_hour=warm_start_actions,
+        time_limit_s=time_limit_s,
+        lexicographic_vent_first=True,
+        safe_execution_h=min(execution_h, planning_horizon_h),
+    )
+    replay = replay_full_scenario_cplex_plan(copy.deepcopy(env), result)
+    replay_error = "" if replay.is_exact else ";".join(
+        dict.fromkeys((*replay.violations, *replay.mismatches))
+    )
+    validation_error = ";".join(
+        error for error in (result.validation_error, replay_error) if error
+    )
+    return RollingMilpPlan(
+        vessel_actions_by_hour=result.vessel_actions_by_hour,
+        injection_tph=result.injection_tph,
+        native_actions_by_hour=result.native_actions_by_hour,
+        vented_t=result.vented_t,
+        shortfall_t=result.shortfall_t,
+        total_cost=result.total_cost,
+        replay_vented_t=replay.vented_t,
+        replay_stored_t=replay.stored_t,
+        replay_total_cost=replay.total_cost,
+        replay_is_valid=replay.is_executable,
+        replay_validation_error=replay_error,
+        status=result.status,
+        is_valid=result.is_valid and replay.is_exact,
+        validation_error=validation_error,
+        max_binary_integrality_violation=result.max_binary_integrality_violation,
+        replay_is_exact=replay.is_exact,
+        replay_mismatches=replay.mismatches,
+        replay_compared_fields=replay.compared_fields,
+        solver_is_valid=result.is_valid,
+    )
+
+
+def _idle_native_warm_start(env: CCSEnv, horizon_h: int) -> list[dict[str, list[int]]]:
+    replay_env = copy.deepcopy(env)
+    actions: list[dict[str, list[int]]] = []
+    for _ in range(horizon_h):
+        action = {
+            "vessels": [VESSEL_WAIT] * len(replay_env.vessel_ids),
+            "wells": [
+                replay_env.highest_feasible_well_rate_index(well_id)
+                for well_id in replay_env.well_ids
+            ],
+        }
+        actions.append(action)
+        _obs, _reward, terminated, truncated, _info = replay_env.step(action)
+        if terminated or truncated:
+            break
+    return actions
 
 
 def _well_rate_indices_for_total_tph(env: CCSEnv, target_tph: float) -> list[int]:
@@ -521,6 +593,33 @@ def _solve_cbc(prob, time_limit_s: float) -> None:
             Path(f"{prob.name}-pulp{suffix}").unlink(missing_ok=True)
 
 
+def _solve_mip(prob, time_limit_s: float, solver: str) -> None:
+    solver_name = str(solver).lower()
+    if solver_name == "cbc":
+        _solve_cbc(prob, time_limit_s)
+        return
+    if solver_name == "cplex":
+        from .cplex_milp import _make_cplex_cmd
+
+        prob.solve(
+            _make_cplex_cmd(
+                time_limit_s=float(time_limit_s),
+                warm_start=True,
+                msg=False,
+            )
+        )
+        return
+    raise ValueError(f"Unknown rolling MILP solver: {solver}")
+
+
+def _solution_status(prob) -> str:
+    import pulp
+
+    if prob.sol_status == pulp.constants.LpSolutionIntegerFeasible:
+        return "Integer Feasible"
+    return pulp.LpStatus[prob.status]
+
+
 class RollingMilpController:
     """Re-planning MILP controller, usable as a metrics ``policy(env)``."""
 
@@ -532,13 +631,17 @@ class RollingMilpController:
         progress: Callable[[str], None] | None = None,
         planning_horizon_h: int = 168,
         time_limit_s: float = 30.0,
+        solver: str = "cbc",
         fallback_policy: Policy | None = None,
     ):
-        self.replan_every = replan_every
+        self.replan_every = max(1, int(replan_every))
         self.economics = economics or EconomicParameters()
         self.progress = progress
-        self.planning_horizon_h = int(planning_horizon_h)
+        self.planning_horizon_h = max(1, int(planning_horizon_h))
         self.time_limit_s = float(time_limit_s)
+        self.solver = str(solver).lower()
+        if self.solver not in {"cbc", "cplex", "cplex_native"}:
+            raise ValueError(f"Unknown rolling MILP solver: {solver}")
         self.fallback_policy = fallback_policy
         self._vessel_actions_by_hour: dict[str, list[int]] = {}
         self._planned_injection_tph: list[float] = []
@@ -549,6 +652,12 @@ class RollingMilpController:
         self.last_plan_status = ""
         self.last_plan_valid = False
         self.last_validation_error = ""
+        self.last_model_replay_is_exact = False
+        self.last_model_replay_mismatches: tuple[str, ...] = ()
+        self.last_execution_replay_is_valid = False
+        self.last_execution_replay_mismatches: tuple[str, ...] = ()
+        self.replan_count = 0
+        self.model_inexact_replan_count = 0
         self.fallback_count = 0
 
     def __call__(self, env: CCSEnv) -> dict[str, list]:
@@ -560,36 +669,83 @@ class RollingMilpController:
         if new_episode or now - self._plan_origin_h >= self.replan_every or not self._has_active_plan:
             self._replan(env, now)
 
+        elapsed = int(max(0.0, math.floor(now - self._plan_origin_h)))
+        if elapsed < len(self._native_actions_by_hour):
+            action = self._native_actions_by_hour[elapsed]
+            self._validate_native_action(env, action)
+            return {
+                "vessels": [int(choice) for choice in action["vessels"]],
+                "wells": [int(choice) for choice in action["wells"]],
+            }
+
         masks = env.vessel_action_mask()
-        vessel_actions = [
-            self._planned_vessel_action(env, vessel_id, now, masks[index])
-            for index, vessel_id in enumerate(env.vessel_ids)
-        ]
-        return {"vessels": vessel_actions, "wells": self._well_rate_indices_for_plan(env, now)}
+        return {
+            "vessels": [
+                self._planned_vessel_action(env, vessel_id, now, masks[index])
+                for index, vessel_id in enumerate(env.vessel_ids)
+            ],
+            "wells": self._well_rate_indices_for_plan(env, now),
+        }
 
     def _replan(self, env: CCSEnv, now: float) -> None:
         state = env.simulator.state
         term_init = sum(state.entity_inventory_t.get(t, 0.0) for t in env.terminal_ids)
         source_buffer = sum(state.entity_inventory_t.get(e, 0.0) for e in env.emitter_ids)
         start = time.perf_counter()
+        remaining_h = max(1, min(self.planning_horizon_h, env.n_steps - env.t))
         if self.progress is not None:
             self.progress(
                 f"  rolling_milp replan at t={now:.0f} h; "
-                f"lookahead={self.planning_horizon_h} h; "
+                f"lookahead={remaining_h} h; "
                 f"terminal={term_init:,.1f} t; source_buffer={source_buffer:,.1f} t"
             )
-        plan = _plan_explicit_actions(
-            env,
-            self.planning_horizon_h,
-            self.economics,
-            time_limit_s=self.time_limit_s,
-        )
+        if self.solver == "cplex_native":
+            plan = _plan_native_cplex_actions(
+                env,
+                remaining_h,
+                self.economics,
+                time_limit_s=self.time_limit_s,
+                execution_h=self.replan_every,
+            )
+        else:
+            plan = _plan_explicit_actions(
+                env,
+                remaining_h,
+                self.economics,
+                time_limit_s=self.time_limit_s,
+                solver=self.solver,
+            )
         self.last_plan_status = plan.status
-        self.last_plan_valid = plan.is_valid
-        self.last_validation_error = plan.validation_error
+        solver_is_valid = bool(getattr(plan, "solver_is_valid", plan.is_valid))
+        native_actions = list(getattr(plan, "native_actions_by_hour", []))
+        if native_actions:
+            execution_h = min(self.replan_every, remaining_h, len(native_actions))
+            execution_replay = replay_native_actions(
+                env,
+                native_actions[:execution_h],
+                horizon_h=execution_h,
+            )
+            replay_is_valid = execution_replay.is_executable
+            execution_mismatches = execution_replay.mismatches
+        else:
+            replay_is_valid = bool(getattr(plan, "replay_is_valid", plan.is_valid))
+            execution_mismatches = tuple(getattr(plan, "replay_mismatches", ()))
+        # Model-to-environment metric mismatches remain diagnostics; execution
+        # is gated by solver validity and feasibility of only the control slice
+        # that will run before the next replan.
+        execution_ready = solver_is_valid and replay_is_valid
+        self.last_plan_valid = execution_ready
+        self.last_validation_error = "" if execution_ready else plan.validation_error
+        self.last_model_replay_is_exact = bool(getattr(plan, "replay_is_exact", plan.is_valid))
+        self.last_model_replay_mismatches = tuple(getattr(plan, "replay_mismatches", ()))
+        self.last_execution_replay_is_valid = replay_is_valid
+        self.last_execution_replay_mismatches = execution_mismatches
+        self.replan_count += 1
+        if not self.last_model_replay_is_exact:
+            self.model_inexact_replan_count += 1
         self._plan_origin_h = now
         self._has_active_plan = True
-        if not plan.is_valid:
+        if not execution_ready:
             self._has_active_plan = False
             self._vessel_actions_by_hour = {}
             self._planned_injection_tph = []
@@ -604,7 +760,7 @@ class RollingMilpController:
 
         self._vessel_actions_by_hour = plan.vessel_actions_by_hour
         self._planned_injection_tph = plan.injection_tph
-        self._native_actions_by_hour = list(getattr(plan, "native_actions_by_hour", []))
+        self._native_actions_by_hour = native_actions
         self._using_fallback = False
         planned_departures = sum(
             1
@@ -616,8 +772,22 @@ class RollingMilpController:
             self.progress(
                 f"  rolling_milp plan ready in {time.perf_counter() - start:.1f}s; "
                 f"planned_departures={planned_departures}; "
-                f"vented={plan.vented_t:,.1f} t; shortfall={plan.shortfall_t:,.1f} t"
+                f"vented={plan.vented_t:,.1f} t; shortfall={plan.shortfall_t:,.1f} t; "
+                f"model_replay_exact={self.last_model_replay_is_exact}"
             )
+
+    @staticmethod
+    def _validate_native_action(env: CCSEnv, action: dict[str, list[int]]) -> None:
+        vessel_actions = action.get("vessels", [])
+        well_actions = action.get("wells", [])
+        if len(vessel_actions) != len(env.vessel_ids) or len(well_actions) != len(env.well_ids):
+            raise RuntimeError("rolling_milp native trace has the wrong action dimension")
+        for vessel_id, choice, mask in zip(env.vessel_ids, vessel_actions, env.vessel_action_mask()):
+            if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
+                raise RuntimeError(f"rolling_milp action is infeasible for {vessel_id}: {choice}")
+        for well_id, choice, mask in zip(env.well_ids, well_actions, env.well_rate_action_mask()):
+            if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
+                raise RuntimeError(f"rolling_milp action is infeasible for {well_id}: {choice}")
 
     def _planned_vessel_action(self, env: CCSEnv, vessel_id: str, now: float, mask: list[bool]) -> int:
         actions = self._vessel_actions_by_hour.get(vessel_id)

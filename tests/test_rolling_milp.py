@@ -15,6 +15,7 @@ from sim.control.rolling_milp import (
     RollingMilpController,
     _build_action_arcs,
     _capture_tonnes,
+    _plan_native_cplex_actions,
     _plan_explicit_actions,
     _sail_hours_between,
 )
@@ -164,6 +165,15 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         self.assertEqual(controller.time_limit_s, 1.0)
         self.assertIs(controller.progress, progress)
 
+    def test_controller_accepts_cplex_and_rejects_unknown_solver(self):
+        controller = RollingMilpController(_cold_env(), solver="cplex")
+        native_controller = RollingMilpController(_cold_env(), solver="cplex_native")
+
+        self.assertEqual(controller.solver, "cplex")
+        self.assertEqual(native_controller.solver, "cplex_native")
+        with self.assertRaisesRegex(ValueError, "Unknown rolling MILP solver"):
+            RollingMilpController(_cold_env(), solver="unknown")
+
     def test_controller_defaults_use_week_horizon_with_longer_solver_budget(self):
         controller = RollingMilpController(_cold_env())
 
@@ -175,7 +185,8 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         defaults = _plan_explicit_actions.__defaults__
 
         self.assertIsNotNone(defaults)
-        self.assertEqual(defaults[-1], 30.0)
+        self.assertEqual(defaults[-2], 30.0)
+        self.assertEqual(defaults[-1], "cbc")
 
     def test_invalid_plan_raises_instead_of_executing_a_fallback_policy(self):
         env = _cold_env(cap_hours=24)
@@ -274,6 +285,39 @@ class RollingMilpInterfaceTests(unittest.TestCase):
             action = RollingMilpController(env, replan_every=12).policy(env)
 
         self.assertEqual(action["wells"], planned_wells)
+
+    def test_controller_only_requires_the_pre_replan_action_slice_to_be_executable(self):
+        env = _no_capture_env(cap_hours=30)
+        env.reset(seed=1)
+        actions = [
+            {"vessels": [VESSEL_WAIT], "wells": [0]}
+            for _ in range(30)
+        ]
+        actions[24] = {"vessels": [99], "wells": [0]}
+        plan = SimpleNamespace(
+            vessel_actions_by_hour={"ship": [action["vessels"][0] for action in actions]},
+            injection_tph=[0.0] * 30,
+            native_actions_by_hour=actions,
+            vented_t=0.0,
+            shortfall_t=0.0,
+            total_cost=0.0,
+            status="Optimal",
+            is_valid=False,
+            solver_is_valid=True,
+            replay_is_valid=False,
+            replay_is_exact=False,
+            replay_mismatches=("action[24] is not executable",),
+            validation_error="action[24] is not executable",
+        )
+
+        with patch("sim.control.rolling_milp._plan_explicit_actions", return_value=plan):
+            controller = RollingMilpController(env, replan_every=24, planning_horizon_h=30)
+            action = controller.policy(env)
+
+        self.assertEqual(action, {"vessels": [VESSEL_WAIT], "wells": [0]})
+        self.assertTrue(controller.last_plan_valid)
+        self.assertTrue(controller.last_execution_replay_is_valid)
+        self.assertFalse(controller.last_model_replay_is_exact)
 
     def test_planner_sailing_hours_between_emitters_uses_maritime_route(self):
         env = _cold_env(cap_hours=24)
@@ -383,7 +427,47 @@ class NativeMpcTests(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_PULP, "pulp/CBC not installed")
 class RollingMilpTests(unittest.TestCase):
-    def test_controller_rejects_an_inexact_plan(self):
+    @unittest.skipUnless(
+        HAVE_PULP and bool(pulp.CPLEX_CMD(msg=0).available()),
+        "CPLEX executable not installed",
+    )
+    def test_explicit_plan_supports_cplex_backend(self):
+        env = _no_capture_env(cap_hours=1)
+        env.reset(seed=1)
+
+        plan = _plan_explicit_actions(
+            env,
+            planning_horizon_h=1,
+            economics=EconomicParameters(),
+            time_limit_s=5.0,
+            solver="cplex",
+        )
+
+        self.assertIn(plan.status, {"Optimal", "Integer Feasible"})
+        self.assertTrue(plan.solver_is_valid, plan.validation_error)
+        self.assertTrue(plan.replay_is_valid, plan.validation_error)
+
+    @unittest.skipUnless(
+        HAVE_PULP and bool(pulp.CPLEX_CMD(msg=0).available()),
+        "CPLEX executable not installed",
+    )
+    def test_native_cplex_rolling_plan_uses_lexicographic_replayable_actions(self):
+        env = _no_capture_env(cap_hours=2)
+        env.reset(seed=1)
+
+        plan = _plan_native_cplex_actions(
+            env,
+            planning_horizon_h=2,
+            economics=EconomicParameters(),
+            time_limit_s=10.0,
+        )
+
+        self.assertIn(plan.status, {"Optimal", "Integer Feasible"})
+        self.assertTrue(plan.solver_is_valid, plan.validation_error)
+        self.assertTrue(plan.replay_is_valid, plan.validation_error)
+        self.assertEqual(len(plan.native_actions_by_hour), 2)
+
+    def test_controller_executes_replay_valid_plan_and_reports_model_mismatch(self):
         env = _cold_env(cap_hours=96)
         controller = RollingMilpController(
             env,
@@ -392,26 +476,48 @@ class RollingMilpTests(unittest.TestCase):
             time_limit_s=1.0,
             economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
         )
-        with self.assertRaisesRegex(RuntimeError, "expected"):
-            run_episode(env, controller, seed=1)
-        self.assertFalse(controller.last_plan_valid)
-        self.assertTrue(controller.last_validation_error)
+        metrics = run_episode(env, controller, seed=1)
 
-    def test_controller_consistently_rejects_inexact_plans_after_reset(self):
+        self.assertEqual(metrics.elapsed_hours, 96)
+        self.assertTrue(controller.last_plan_valid)
+        self.assertFalse(controller.last_model_replay_is_exact)
+        self.assertTrue(controller.last_model_replay_mismatches)
+        self.assertEqual(controller.model_inexact_replan_count, controller.replan_count)
+
+    def test_controller_consistently_executes_replay_valid_plans_after_reset(self):
         env = _cold_env(cap_hours=96)
         controller = RollingMilpController(env, replan_every=48, planning_horizon_h=48, time_limit_s=3.0)
         for _ in range(2):
-            with self.assertRaisesRegex(RuntimeError, "expected"):
-                run_episode(env, controller, seed=1)
-            self.assertFalse(controller.last_plan_valid)
+            metrics = run_episode(env, controller, seed=1)
+            self.assertEqual(metrics.elapsed_hours, 96)
+            self.assertTrue(controller.last_plan_valid)
+            self.assertFalse(controller.last_model_replay_is_exact)
 
-    def test_controller_rejects_inexact_fixed_horizon_plan_without_storage_goal(self):
+    def test_controller_uses_executable_trace_when_model_metrics_are_inexact(self):
         env = _cold_env(cap_hours=96)
         env.reset(seed=1)
         controller = RollingMilpController(env, replan_every=12, planning_horizon_h=48)
-        with self.assertRaisesRegex(RuntimeError, "expected"):
-            controller.policy(env)
-        self.assertFalse(controller.last_plan_valid)
+        action = controller.policy(env)
+
+        self.assertEqual(len(action["vessels"]), len(env.vessel_ids))
+        self.assertEqual(len(action["wells"]), len(env.well_ids))
+        self.assertTrue(controller.last_plan_valid)
+        self.assertFalse(controller.last_model_replay_is_exact)
+
+    def test_controller_shortens_the_final_planning_window_to_the_episode(self):
+        env = _no_capture_env(cap_hours=25)
+        controller = RollingMilpController(
+            env,
+            replan_every=24,
+            planning_horizon_h=168,
+            time_limit_s=3.0,
+        )
+
+        metrics = run_episode(env, controller, seed=1)
+
+        self.assertEqual(metrics.elapsed_hours, 25)
+        self.assertEqual(controller.replan_count, 2)
+        self.assertEqual(len(controller._native_actions_by_hour), 1)
 
     def test_unusual_state_does_not_silently_fallback_to_greedy(self):
         env = _cold_env(cap_hours=96)

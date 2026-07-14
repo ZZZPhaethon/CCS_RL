@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 import math
 import os
 import subprocess
+import time
 
 try:
     import pulp
@@ -249,6 +250,9 @@ def solve_full_scenario_with_cplex(
     mip_gap_abs: float | None = None,
     threads: int | None = None,
     msg: bool = False,
+    lexicographic_vent_first: bool = False,
+    environment_aligned_service: bool = False,
+    safe_execution_h: int | None = None,
 ) -> FullScenarioCplexMilpResult:
     """Solve one full scenario with perfect foresight using external CPLEX.
 
@@ -303,8 +307,16 @@ def solve_full_scenario_with_cplex(
         for vessel_id in env.vessel_ids
         for t in range(H + 1)
     }
-    cargo_positive = {}
-    cargo_space = {}
+    cargo_positive = {
+        (vessel_id, t): pulp.LpVariable(f"cargo_positive_{vessel_id}_{t}", cat="Binary")
+        for vessel_id in env.vessel_ids
+        for t in hours
+    } if environment_aligned_service else {}
+    cargo_space = {
+        (vessel_id, t): pulp.LpVariable(f"cargo_space_{vessel_id}_{t}", cat="Binary")
+        for vessel_id in env.vessel_ids
+        for t in hours
+    } if environment_aligned_service else {}
     load = {
         (vessel_id, emitter_id, t): pulp.LpVariable(f"load_{vessel_id}_{emitter_id}_{t}", lowBound=0.0)
         for vessel_id in env.vessel_ids
@@ -317,7 +329,15 @@ def solve_full_scenario_with_cplex(
         for emitter_id in env.emitter_ids
         for t in hours
     }
-    load_limit_choice = {}
+    load_limit_choice = {
+        (vessel_id, emitter_id, t, limit): pulp.LpVariable(
+            f"load_limit_{vessel_id}_{emitter_id}_{t}_{limit}", cat="Binary"
+        )
+        for vessel_id in env.vessel_ids
+        for emitter_id in env.emitter_ids
+        for t in hours
+        for limit in range(3)
+    } if environment_aligned_service else {}
     unload = {
         (vessel_id, t): pulp.LpVariable(f"unload_{vessel_id}_{t}", lowBound=0.0)
         for vessel_id in env.vessel_ids
@@ -328,7 +348,14 @@ def solve_full_scenario_with_cplex(
         for vessel_id in env.vessel_ids
         for t in hours
     }
-    unload_limit_choice = {}
+    unload_limit_choice = {
+        (vessel_id, t, limit): pulp.LpVariable(
+            f"unload_limit_{vessel_id}_{t}_{limit}", cat="Binary"
+        )
+        for vessel_id in env.vessel_ids
+        for t in hours
+        for limit in range(3)
+    } if environment_aligned_service else {}
     source_stock = {
         (emitter_id, t): pulp.LpVariable(
             f"source_stock_{emitter_id}_{t}",
@@ -400,12 +427,48 @@ def solve_full_scenario_with_cplex(
             == 1
         )
 
+    if safe_execution_h is not None:
+        safe_h = max(0, min(H, int(safe_execution_h)))
+        for index, arc in enumerate(arcs):
+            if not arc.is_sailing or arc.start_h >= safe_h:
+                continue
+            terminal_id = str(env._routes[arc.vessel_id]["destination"])
+            if arc.origin_id != terminal_id:
+                continue
+            vessel_state = env.simulator.vessel_states[arc.vessel_id]
+            initially_empty_at_terminal = (
+                vessel_state["mode"] == "berthed"
+                and str(vessel_state["berth"]) == terminal_id
+                and float(state.entity_inventory_t.get(arc.vessel_id, 0.0)) <= 1e-9
+            )
+            if not (initially_empty_at_terminal and arc.start_h == 0):
+                prob += arc_vars[index] == 0
+
+    if environment_aligned_service:
+        for t in hours:
+            for node_id in [*env.emitter_ids, *env.terminal_ids]:
+                prob += pulp.lpSum(
+                    arc_vars[index]
+                    for vessel_id in env.vessel_ids
+                    for index in outgoing.get((vessel_id, t, node_id), [])
+                ) <= 1
+
     for vessel_id in env.vessel_ids:
         vessel = env.network.entities[vessel_id]
         initial_cargo_t = float(state.entity_inventory_t.get(vessel_id, 0.0))
         prob += cargo[(vessel_id, 0)] == initial_cargo_t
         terminal_id = str(env._routes[vessel_id]["destination"])
         for t in hours:
+            if environment_aligned_service:
+                capacity_t = float(vessel.capacity_t)
+                epsilon_t = 1e-6
+                prob += cargo[(vessel_id, t)] <= capacity_t * cargo_positive[(vessel_id, t)]
+                prob += cargo[(vessel_id, t)] >= epsilon_t * cargo_positive[(vessel_id, t)]
+                prob += cargo[(vessel_id, t)] >= capacity_t * (1 - cargo_space[(vessel_id, t)])
+                prob += (
+                    cargo[(vessel_id, t)]
+                    <= capacity_t - epsilon_t + capacity_t * (1 - cargo_space[(vessel_id, t)])
+                )
             prob += (
                 cargo[(vessel_id, t + 1)]
                 == cargo[(vessel_id, t)]
@@ -429,6 +492,25 @@ def solve_full_scenario_with_cplex(
                 )
                 prob += load[(vessel_id, emitter_id, t)] <= source_ready[(emitter_id, t)]
                 prob += load[(vessel_id, emitter_id, t)] <= vessel.capacity_t - cargo[(vessel_id, t)]
+                if environment_aligned_service:
+                    wait = _wait_expr(arc_vars, wait_arc, vessel_id, emitter_id, t)
+                    active = load_active[(vessel_id, emitter_id, t)]
+                    prob += active <= cargo_space[(vessel_id, t)]
+                    prob += active >= wait + cargo_space[(vessel_id, t)] - 1
+                    choices = [load_limit_choice[(vessel_id, emitter_id, t, i)] for i in range(3)]
+                    prob += pulp.lpSum(choices) == active
+                    big_m = max(
+                        float(vessel.capacity_t),
+                        float(emitter.buffer_capacity_t),
+                        float(load_cap_tph),
+                    )
+                    limits = (
+                        float(load_cap_tph),
+                        source_ready[(emitter_id, t)],
+                        float(vessel.capacity_t) - cargo[(vessel_id, t)],
+                    )
+                    for choice, limit in zip(choices, limits):
+                        prob += load[(vessel_id, emitter_id, t)] >= limit - big_m * (1 - choice)
             prob += (
                 unload[(vessel_id, t)]
                 <= vessel.unloading_rate_tph * _wait_expr(arc_vars, wait_arc, vessel_id, terminal_id, t)
@@ -436,6 +518,20 @@ def solve_full_scenario_with_cplex(
             prob += unload[(vessel_id, t)] <= vessel.unloading_rate_tph * unload_active[(vessel_id, t)]
             prob += unload_active[(vessel_id, t)] <= _wait_expr(arc_vars, wait_arc, vessel_id, terminal_id, t)
             prob += unload[(vessel_id, t)] <= cargo[(vessel_id, t)]
+            if environment_aligned_service:
+                wait = _wait_expr(arc_vars, wait_arc, vessel_id, terminal_id, t)
+                active = unload_active[(vessel_id, t)]
+                prob += active <= cargo_positive[(vessel_id, t)]
+                prob += active >= wait + cargo_positive[(vessel_id, t)] - 1
+
+        if environment_aligned_service and env.config.require_empty_terminal_departure:
+            for index, arc in enumerate(arcs):
+                if (
+                    arc.vessel_id == vessel_id
+                    and arc.is_sailing
+                    and arc.origin_id == terminal_id
+                ):
+                    prob += cargo[(vessel_id, arc.start_h)] <= vessel.capacity_t * (1 - arc_vars[index])
 
     for emitter_id in env.emitter_ids:
         initial_source_t = float(state.entity_inventory_t.get(emitter_id, 0.0))
@@ -530,6 +626,22 @@ def solve_full_scenario_with_cplex(
             for vessel_id in vessels_for_terminal:
                 vessel = env.network.entities[vessel_id]
                 prob += unload[(vessel_id, t)] <= terminal_free
+                if environment_aligned_service:
+                    active = unload_active[(vessel_id, t)]
+                    choices = [unload_limit_choice[(vessel_id, t, i)] for i in range(3)]
+                    prob += pulp.lpSum(choices) == active
+                    big_m = max(
+                        float(terminal_capacity_t + max_hourly_injection_t),
+                        float(vessel.capacity_t),
+                        float(vessel.unloading_rate_tph),
+                    )
+                    limits = (
+                        float(vessel.unloading_rate_tph),
+                        cargo[(vessel_id, t)],
+                        terminal_free,
+                    )
+                    for choice, limit in zip(choices, limits):
+                        prob += unload[(vessel_id, t)] >= limit - big_m * (1 - choice)
         for pipeline_id, pipeline in env.network._entities_of_type(Pipeline).items():
             prob += (
                 pulp.lpSum(well_inj[(well_id, t)] for well_id in _pipeline_wells(env, pipeline_id))
@@ -560,10 +672,17 @@ def solve_full_scenario_with_cplex(
         + _unloading_cost_expression(env, unload, params)
         + stored_expr * params.reconditioning_eur_per_t
     )
-    prob += (
+    vent_expr = pulp.lpSum(
+        vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours
+    )
+    end_unstored_inventory_expr = (
+        pulp.lpSum(source_stock[(emitter_id, H)] for emitter_id in env.emitter_ids)
+        + terminal_stock[H]
+        + pulp.lpSum(cargo[(vessel_id, H)] for vessel_id in env.vessel_ids)
+    )
+    weighted_objective = (
         objective_weights.operating_cost_weight * operating_cost_expr
-        + objective_weights.vent_eur_per_t
-        * pulp.lpSum(vent[(emitter_id, t)] for emitter_id in env.emitter_ids for t in hours)
+        + objective_weights.vent_eur_per_t * vent_expr
         + objective_weights.overflow_risk_eur_per_t * pulp.lpSum(overflow_risk.values())
         - stored_expr * reward_per_t
     )
@@ -599,24 +718,51 @@ def solve_full_scenario_with_cplex(
             vent=vent,
         )
 
-    solver = _make_cplex_cmd(
-        cplex_path=cplex_path,
-        time_limit_s=time_limit_s,
-        mip_gap_rel=mip_gap_rel,
-        mip_gap_abs=mip_gap_abs,
-        threads=threads,
-        warm_start=use_warm_start,
-        msg=msg,
-    )
-    try:
-        prob.solve(solver)
-    except pulp.PulpSolverError as exc:
-        raise RuntimeError(
-            "CPLEX_CMD failed. Install IBM ILOG CPLEX, add the cplex executable "
-            "to PATH, or pass cplex_path=... to solve_full_scenario_with_cplex()."
-        ) from exc
+    def solve_stage(limit_s: float | None, warm_start: bool) -> str:
+        solver = _make_cplex_cmd(
+            cplex_path=cplex_path,
+            time_limit_s=limit_s,
+            mip_gap_rel=mip_gap_rel,
+            mip_gap_abs=mip_gap_abs,
+            threads=threads,
+            warm_start=warm_start,
+            msg=msg,
+        )
+        try:
+            prob.solve(solver)
+        except pulp.PulpSolverError as exc:
+            raise RuntimeError(
+                "CPLEX_CMD failed. Install IBM ILOG CPLEX, add the cplex executable "
+                "to PATH, or pass cplex_path=... to solve_full_scenario_with_cplex()."
+            ) from exc
+        return _solution_status_label(prob.status, getattr(prob, "sol_status", None))
 
-    status = _solution_status_label(prob.status, getattr(prob, "sol_status", None))
+    if lexicographic_vent_first:
+        stage_start = time.perf_counter()
+        prob.setObjective(vent_expr)
+        status = solve_stage(time_limit_s, use_warm_start)
+        if status in {"Optimal", "Integer Feasible"}:
+            optimal_vent_t = max(0.0, _value(vent_expr))
+            prob += vent_expr <= optimal_vent_t + 1e-3
+            remaining_s = None if time_limit_s is None else max(
+                1.0,
+                float(time_limit_s) - (time.perf_counter() - stage_start),
+            )
+            stage_two_s = None if remaining_s is None else max(1.0, remaining_s / 2.0)
+            prob.setObjective(end_unstored_inventory_expr)
+            status = solve_stage(stage_two_s, True)
+            if status in {"Optimal", "Integer Feasible"}:
+                optimal_end_unstored_t = max(0.0, _value(end_unstored_inventory_expr))
+                prob += end_unstored_inventory_expr <= optimal_end_unstored_t + 1e-3
+                remaining_s = None if time_limit_s is None else max(
+                    1.0,
+                    float(time_limit_s) - (time.perf_counter() - stage_start),
+                )
+                prob.setObjective(operating_cost_expr)
+                status = solve_stage(remaining_s, True)
+    else:
+        prob.setObjective(weighted_objective)
+        status = solve_stage(time_limit_s, use_warm_start)
     vessel_actions_by_hour = _extract_vessel_actions(env, H, arcs, arc_vars)
     well_rate_indices_by_hour = _extract_well_rate_indices(env, H, well_rate_options, well_choice)
     native_actions_by_hour = [
@@ -674,6 +820,7 @@ def solve_full_scenario_with_cplex(
         captured_from_operations_t=captured_from_operations_t,
         initial_in_transit_t=initial_in_transit_t,
         max_storable_from_deliveries_t=initial_terminal_t + unloaded_t,
+        integrality_tol=1e-5 if environment_aligned_service else 1e-6,
     )
 
     return FullScenarioCplexMilpResult(

@@ -510,7 +510,7 @@ def _validate_static_solution(
     if numeric_values:
         max_integrality = max(abs(value - round(value)) for value in numeric_values)
 
-    if status != "Optimal":
+    if status not in {"Optimal", "Integer Feasible"}:
         return StaticSolutionValidation(
             False,
             f"solver status {status} is not a validated integer solution",

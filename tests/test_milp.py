@@ -277,6 +277,18 @@ class MilpTests(unittest.TestCase):
         self.assertFalse(nonoptimal.is_valid)
         self.assertIn("status", nonoptimal.validation_error)
 
+        integer_feasible = milp_module._validate_static_solution(
+            status="Integer Feasible",
+            binary_values=[0.0, 1.0],
+            stored_t=100.0,
+            vented_t=0.0,
+            in_transit_t=0.0,
+            captured_from_operations_t=100.0,
+            initial_in_transit_t=0.0,
+            max_storable_from_deliveries_t=100.0,
+        )
+        self.assertTrue(integer_feasible.is_valid)
+
         fractional = milp_module._validate_static_solution(
             status="Optimal",
             binary_values=[0.0, 0.25, 1.0],

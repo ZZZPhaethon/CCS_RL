@@ -1,4 +1,4 @@
-"""Replay-validated greedy versus native rolling-MPC headroom experiment."""
+"""Replay-validated native MPC headroom experiment with optional rolling MILP."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import csv
 import json
 import math
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,7 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
 from sim.control.baselines import greedy_shuttle_policy
 from sim.control.native_mpc import RollingNativeMpcController
 from sim.control.replay import ReplayExpectation, replay_native_actions
+from sim.control.rolling_milp import RollingMilpController
 from sim.economics import CostModel, EconomicParameters
 from sim.environment import CCSEnv, CCSEnvConfig
 from sim.metrics import EpisodeMetrics, _MetricsRecorder
@@ -170,11 +172,13 @@ def run_seed(args: argparse.Namespace, seed: int, economics: EconomicParameters)
         replan_every=args.replan_every,
         planning_horizon_h=args.planning_horizon_h,
     )
+    mpc_start = time.perf_counter()
     mpc_actions, native_mpc_trace, native_mpc_expected = collect_actions(
         trace_env,
         mpc,
         seed,
     )
+    mpc_wall_s = time.perf_counter() - mpc_start
     native_mpc_replay_env = make_env(args, economics)
     native_mpc_replay_env.reset(seed=seed)
     native_mpc_replay = replay_native_actions(
@@ -197,7 +201,7 @@ def run_seed(args: argparse.Namespace, seed: int, economics: EconomicParameters)
         and len(greedy_actions) == args.hours
         and len(mpc_actions) == args.hours
     )
-    row = {
+    row: dict[str, object] = {
         "seed": seed,
         "objective_mode": OBJECTIVE_MODE,
         "replay_ok": replay_ok,
@@ -210,6 +214,7 @@ def run_seed(args: argparse.Namespace, seed: int, economics: EconomicParameters)
         "native_mpc_replay_is_exact": native_mpc_replay.is_exact,
         "native_mpc_replay_mismatches": ";".join(native_mpc_replay.mismatches),
         "candidate_evaluations": mpc.candidate_evaluations,
+        "native_mpc_wall_s": mpc_wall_s,
         "last_candidate": mpc.last_candidate_name,
         "greedy_vented_t": greedy.vented_t,
         "native_mpc_vented_t": native_mpc.vented_t,
@@ -228,7 +233,63 @@ def run_seed(args: argparse.Namespace, seed: int, economics: EconomicParameters)
         "native_mpc_unit_cost_eur_per_t": mpc_unit_cost,
         "unit_cost_saving_eur_per_t": greedy_unit_cost - mpc_unit_cost if replay_ok else "",
     }
-    return row, {"greedy": greedy_actions, "native_mpc": mpc_actions}
+    actions = {"greedy": greedy_actions, "native_mpc": mpc_actions}
+
+    if getattr(args, "include_rolling_milp", False):
+        milp_env = make_env(args, economics)
+        rolling_milp = RollingMilpController(
+            milp_env,
+            replan_every=args.replan_every,
+            planning_horizon_h=args.planning_horizon_h,
+            time_limit_s=args.rolling_milp_time_limit_s,
+            solver=getattr(args, "rolling_milp_solver", "cbc"),
+            economics=economics,
+        )
+        milp_start = time.perf_counter()
+        milp_actions, milp_trace, milp_expected = collect_actions(
+            milp_env,
+            rolling_milp,
+            seed,
+        )
+        milp_wall_s = time.perf_counter() - milp_start
+        milp_replay_env = make_env(args, economics)
+        milp_replay_env.reset(seed=seed)
+        milp_replay = replay_native_actions(
+            milp_replay_env,
+            milp_actions,
+            horizon_h=args.hours,
+            expected=milp_expected,
+        )
+        milp_replay_ok = (
+            rolling_milp.last_plan_valid
+            and milp_replay.is_executable
+            and milp_replay.is_exact
+            and len(milp_actions) == args.hours
+        )
+        milp_unit_cost = (
+            milp_trace.total_cost / milp_trace.stored_t
+            if milp_trace.stored_t > 0.0
+            else math.nan
+        )
+        row.update(
+            {
+                "rolling_milp_replay_ok": milp_replay_ok,
+                "rolling_milp_replay_is_executable": milp_replay.is_executable,
+                "rolling_milp_replay_is_exact": milp_replay.is_exact,
+                "rolling_milp_replay_mismatches": ";".join(milp_replay.mismatches),
+                "rolling_milp_solver": rolling_milp.solver,
+                "rolling_milp_wall_s": milp_wall_s,
+                "rolling_milp_replans": rolling_milp.replan_count,
+                "rolling_milp_model_inexact_replans": rolling_milp.model_inexact_replan_count,
+                "rolling_milp_vented_t": milp_trace.vented_t,
+                "rolling_milp_stored_t": milp_trace.stored_t,
+                "rolling_milp_total_cost_eur": milp_trace.total_cost,
+                "rolling_milp_unit_cost_eur_per_t": milp_unit_cost,
+            }
+        )
+        actions["rolling_milp"] = milp_actions
+
+    return row, actions
 
 
 def write_csv(path: Path, rows: list[dict[str, object]]) -> None:
@@ -253,6 +314,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--capture-high-output-mean-hours", type=float, default=48.0)
     parser.add_argument("--capture-multiplier-min", type=float, default=1.25)
     parser.add_argument("--capture-multiplier-max", type=float, default=1.75)
+    parser.add_argument(
+        "--include-rolling-milp",
+        action="store_true",
+        help="Also evaluate the replay-grounded rolling MILP on the same scenario.",
+    )
+    parser.add_argument("--rolling-milp-time-limit-s", type=float, default=30.0)
+    parser.add_argument(
+        "--rolling-milp-solver",
+        choices=("cbc", "cplex", "cplex_native"),
+        default="cbc",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("output/rolling_native_mpc_block_24h_720h"))
     return parser.parse_args(argv)
 
@@ -275,6 +347,11 @@ def main() -> None:
                 f"native_mpc_vent={row['native_mpc_vented_t']:.1f} "
                 f"reduction={row['vented_reduction_pct']:.1f}% replay=True"
             )
+            if args.include_rolling_milp:
+                message += (
+                    f" rolling_milp_vent={row['rolling_milp_vented_t']:.1f} "
+                    f"milp_replay={row['rolling_milp_replay_ok']}"
+                )
         else:
             message = (
                 f"seed={seed} replay=False; greedy_mismatches="

@@ -43,6 +43,36 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             experiment.parse_args(["--objective-mode", "vent_then_total_cost"])
 
+    def test_native_mpc_experiment_can_include_replay_grounded_rolling_milp(self):
+        from experiments import rolling_native_mpc_headroom as experiment
+
+        args = SimpleNamespace(
+            hours=2,
+            disturbance_profile="none",
+            replan_every=2,
+            planning_horizon_h=2,
+            weather_update_hours=24.0,
+            weather_speed_min=0.75,
+            weather_speed_max=1.0,
+            capture_noise_std=0.10,
+            capture_high_output_rate_per_week=0.5,
+            capture_high_output_mean_hours=48.0,
+            capture_multiplier_min=1.25,
+            capture_multiplier_max=1.75,
+            include_rolling_milp=True,
+            rolling_milp_time_limit_s=5.0,
+        )
+
+        row, actions = experiment.run_seed(
+            args,
+            seed=1,
+            economics=experiment.EconomicParameters(),
+        )
+
+        self.assertTrue(row["rolling_milp_replay_ok"])
+        self.assertTrue(row["rolling_milp_replay_is_exact"])
+        self.assertEqual(len(actions["rolling_milp"]), args.hours)
+
     def test_common_native_mpc_replay_detects_final_state_mismatch(self):
         from experiments import rolling_native_mpc_headroom as experiment
         from sim.control.baselines import greedy_shuttle_policy
