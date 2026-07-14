@@ -49,6 +49,18 @@ def _fixed_scale_tcn_extractor_class():
     return importlib.import_module(module_name).FixedScaleTCNForecastExtractor
 
 
+def _fixed_scale_larger_mlp_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(module_name).FixedScaleLargerMLPForecastExtractor
+
+
+def _fixed_scale_edge_gnn_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(module_name).FixedScaleEdgeGNNForecastExtractor
+
+
 def _tcn_env():
     native = make_native_env(
         episode_hours=2,
@@ -332,3 +344,57 @@ def test_fixed_scale_tcn_has_non_affine_forecast_normalization():
     assert len(normalizations) == 1
     assert not normalizations[0].elementwise_affine
     assert sum(parameter.numel() for parameter in extractor.parameters()) == 59_904
+
+
+@pytest.mark.parametrize(
+    "extractor_class",
+    [
+        _fixed_scale_larger_mlp_extractor_class,
+        _fixed_scale_edge_gnn_extractor_class,
+    ],
+)
+def test_fixed_scale_state_encoder_combinations_keep_forecast_gradients_active(
+    extractor_class,
+):
+    torch.manual_seed(11)
+    observation_space = _destination_env(
+        "fixed_scale_tcn_mode_destination"
+    ).observation_space
+    extractor = extractor_class()(observation_space)
+    batch = {
+        "state": torch.randn(4, *observation_space["state"].shape),
+        "forecast": torch.randn(4, *observation_space["forecast"].shape),
+    }
+
+    forecast_features = extractor(batch)[:, 64:]
+    forecast_features.square().mean().backward()
+
+    normalizations = [
+        module
+        for module in extractor.forecast_projection
+        if isinstance(module, nn.LayerNorm)
+    ]
+    assert len(normalizations) == 1
+    assert not normalizations[0].elementwise_affine
+    assert torch.count_nonzero(forecast_features) > 0
+    for parameter in extractor.forecast_convolutions.parameters():
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert torch.count_nonzero(parameter.grad) > 0
+
+
+def test_fixed_scale_larger_mlp_remains_parameter_matched_to_fixed_scale_edge_gnn():
+    observation_space = _destination_env(
+        "fixed_scale_tcn_mode_destination"
+    ).observation_space
+    edge_encoder = _fixed_scale_edge_gnn_extractor_class()(
+        observation_space
+    ).state_encoder
+    mlp_encoder = _fixed_scale_larger_mlp_extractor_class()(
+        observation_space
+    ).state_encoder
+
+    edge_parameters = sum(parameter.numel() for parameter in edge_encoder.parameters())
+    mlp_parameters = sum(parameter.numel() for parameter in mlp_encoder.parameters())
+
+    assert abs(edge_parameters - mlp_parameters) / edge_parameters < 0.01

@@ -47,6 +47,8 @@ class MpcDemonstrationBatch:
             "gnn_mode_destination",
             "larger_mlp_mode_destination",
             "edge_gnn_mode_destination",
+            "fixed_scale_larger_mlp_mode_destination",
+            "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
             "fixed_scale_tcn_mode_destination",
         ],
@@ -67,6 +69,8 @@ class MpcDemonstrationBatch:
             "gnn_mode_destination",
             "larger_mlp_mode_destination",
             "edge_gnn_mode_destination",
+            "fixed_scale_larger_mlp_mode_destination",
+            "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
             "fixed_scale_tcn_mode_destination",
         }:
@@ -85,6 +89,8 @@ class MpcDemonstrationBatch:
                 "gnn_mode_destination",
                 "larger_mlp_mode_destination",
                 "edge_gnn_mode_destination",
+                "fixed_scale_larger_mlp_mode_destination",
+                "fixed_scale_edge_gnn_mode_destination",
                 "stable_tcn_mode_destination",
                 "fixed_scale_tcn_mode_destination",
             }:

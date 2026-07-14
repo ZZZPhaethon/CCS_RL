@@ -113,6 +113,8 @@ def test_tcn_mode_destination_appends_sailing_target_without_changing_legacy_var
         "state", "flat", "tcn", "state_mode", "tcn_mode",
         "gnn_mode_destination", "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     ],
@@ -130,6 +132,8 @@ def test_terminal_observation_retains_declared_shape(variant):
     elif variant in {
         "tcn", "tcn_mode", "gnn_mode_destination",
         "larger_mlp_mode_destination", "edge_gnn_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     }:
@@ -144,6 +148,8 @@ def test_terminal_observation_retains_declared_shape(variant):
     elif variant in {
         "tcn", "tcn_mode", "gnn_mode_destination",
         "larger_mlp_mode_destination", "edge_gnn_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     }:
@@ -215,6 +221,8 @@ def test_action_masks_preserve_native_multidiscrete_order():
         "state", "flat", "tcn", "state_mode", "tcn_mode",
         "gnn_mode_destination", "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     ],
@@ -254,6 +262,8 @@ def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
             "gnn_mode_destination": 78,
             "larger_mlp_mode_destination": 78,
             "edge_gnn_mode_destination": 78,
+            "fixed_scale_larger_mlp_mode_destination": 78,
+            "fixed_scale_edge_gnn_mode_destination": 78,
             "stable_tcn_mode_destination": 78,
             "fixed_scale_tcn_mode_destination": 78,
         }[variant]

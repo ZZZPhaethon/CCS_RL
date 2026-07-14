@@ -29,6 +29,8 @@ ObservationVariant = Literal[
     "gnn_mode_destination",
     "larger_mlp_mode_destination",
     "edge_gnn_mode_destination",
+    "fixed_scale_larger_mlp_mode_destination",
+    "fixed_scale_edge_gnn_mode_destination",
     "stable_tcn_mode_destination",
     "fixed_scale_tcn_mode_destination",
 ]
@@ -42,6 +44,8 @@ def variant_uses_operation_modes(variant: str) -> bool:
         "gnn_mode_destination",
         "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     }
@@ -53,6 +57,8 @@ def variant_uses_sailing_destinations(variant: str) -> bool:
         "gnn_mode_destination",
         "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     }
@@ -69,6 +75,10 @@ def variant_base_encoder(variant: str) -> str:
         return "larger_mlp"
     if variant == "edge_gnn_mode_destination":
         return "edge_gnn"
+    if variant == "fixed_scale_larger_mlp_mode_destination":
+        return "fixed_scale_larger_mlp"
+    if variant == "fixed_scale_edge_gnn_mode_destination":
+        return "fixed_scale_edge_gnn"
     if variant == "stable_tcn_mode_destination":
         return "stable_tcn"
     if variant == "fixed_scale_tcn_mode_destination":
@@ -109,6 +119,8 @@ def forecast_policy_observation(
         "gnn",
         "larger_mlp",
         "edge_gnn",
+        "fixed_scale_larger_mlp",
+        "fixed_scale_edge_gnn",
         "stable_tcn",
         "fixed_scale_tcn",
     }:
@@ -174,6 +186,8 @@ class ForecastGymEnv(Env):
             "gnn",
             "larger_mlp",
             "edge_gnn",
+            "fixed_scale_larger_mlp",
+            "fixed_scale_edge_gnn",
             "stable_tcn",
             "fixed_scale_tcn",
         }:

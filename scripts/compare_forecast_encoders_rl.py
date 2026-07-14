@@ -39,6 +39,8 @@ from sim.control.vessel_diagnostics import (
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
 from sim.environment.forecast_encoder import (
     EdgeGNNForecastExtractor,
+    FixedScaleEdgeGNNForecastExtractor,
+    FixedScaleLargerMLPForecastExtractor,
     FixedScaleTCNForecastExtractor,
     GNNForecastExtractor,
     LargerMLPForecastExtractor,
@@ -215,6 +217,8 @@ def parse_args(argv=None):
             "gnn_mode_destination",
             "larger_mlp_mode_destination",
             "edge_gnn_mode_destination",
+            "fixed_scale_larger_mlp_mode_destination",
+            "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
             "fixed_scale_tcn_mode_destination",
         ),
@@ -343,6 +347,8 @@ def model_policy_config(variant: str):
         "gnn": GNNForecastExtractor,
         "larger_mlp": LargerMLPForecastExtractor,
         "edge_gnn": EdgeGNNForecastExtractor,
+        "fixed_scale_larger_mlp": FixedScaleLargerMLPForecastExtractor,
+        "fixed_scale_edge_gnn": FixedScaleEdgeGNNForecastExtractor,
         "stable_tcn": StableTCNForecastExtractor,
         "fixed_scale_tcn": FixedScaleTCNForecastExtractor,
     }

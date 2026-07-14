@@ -12,6 +12,8 @@ from scripts import compare_forecast_encoders_rl as compare
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
 from sim.environment.forecast_encoder import (
     EdgeGNNForecastExtractor,
+    FixedScaleEdgeGNNForecastExtractor,
+    FixedScaleLargerMLPForecastExtractor,
     FixedScaleTCNForecastExtractor,
     GNNForecastExtractor,
     LargerMLPForecastExtractor,
@@ -258,6 +260,16 @@ def test_policy_mapping_uses_custom_extractor_only_for_tcn():
     policy, kwargs = compare.model_policy_config("edge_gnn_mode_destination")
     assert policy == "MultiInputPolicy"
     assert kwargs["features_extractor_class"] is EdgeGNNForecastExtractor
+    policy, kwargs = compare.model_policy_config(
+        "fixed_scale_larger_mlp_mode_destination"
+    )
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is FixedScaleLargerMLPForecastExtractor
+    policy, kwargs = compare.model_policy_config(
+        "fixed_scale_edge_gnn_mode_destination"
+    )
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is FixedScaleEdgeGNNForecastExtractor
     policy, kwargs = compare.model_policy_config("stable_tcn_mode_destination")
     assert policy == "MultiInputPolicy"
     assert kwargs["features_extractor_class"] is StableTCNForecastExtractor
@@ -279,6 +291,14 @@ def test_cli_accepts_tcn_mode_destination_variant(tmp_path):
         ("gnn_mode_destination", "GNNForecastExtractor"),
         ("larger_mlp_mode_destination", "LargerMLPForecastExtractor"),
         ("edge_gnn_mode_destination", "EdgeGNNForecastExtractor"),
+        (
+            "fixed_scale_larger_mlp_mode_destination",
+            "FixedScaleLargerMLPForecastExtractor",
+        ),
+        (
+            "fixed_scale_edge_gnn_mode_destination",
+            "FixedScaleEdgeGNNForecastExtractor",
+        ),
         ("stable_tcn_mode_destination", "StableTCNForecastExtractor"),
         ("fixed_scale_tcn_mode_destination", "FixedScaleTCNForecastExtractor"),
     ],
@@ -303,6 +323,8 @@ def test_cli_accepts_gnn_mode_destination_variant(tmp_path):
     [
         "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
     ],
