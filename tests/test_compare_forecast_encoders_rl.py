@@ -85,6 +85,8 @@ def test_cli_has_all_subcommands_and_locks_formal_defaults(tmp_path):
     assert train.bc_batch_size == 256
     assert train.bc_lr == 1e-3
     assert train.nonwait_weight == 10.0
+    assert train.replan_action_weight == 1.0
+    assert not train.imitation_only
     assert train.kickstart_coef == 1.0
     assert train.eval_seeds == [101, 102, 103, 104, 105]
     assert train.model_seed == 0
@@ -276,12 +278,64 @@ def test_policy_mapping_uses_custom_extractor_only_for_tcn():
     policy, kwargs = compare.model_policy_config("fixed_scale_tcn_mode_destination")
     assert policy == "MultiInputPolicy"
     assert kwargs["features_extractor_class"] is FixedScaleTCNForecastExtractor
+    phase_policy, phase_kwargs = compare.model_policy_config(
+        "fixed_scale_tcn_mode_destination_replan_phase"
+    )
+    assert phase_policy == "MultiInputPolicy"
+    assert phase_kwargs["features_extractor_class"] is FixedScaleTCNForecastExtractor
 
 
 def test_cli_accepts_tcn_mode_destination_variant(tmp_path):
     args = _train_args(tmp_path, "tcn_mode_destination")
 
     assert args.variant == "tcn_mode_destination"
+
+
+def test_cli_accepts_replan_phase_variant_and_weight(tmp_path):
+    args = _train_args(
+        tmp_path,
+        "fixed_scale_tcn_mode_destination_replan_phase",
+        "--bc-objective",
+        "decision_only",
+        "--bc-only",
+        "--replan-action-weight",
+        "3",
+    )
+
+    assert args.variant == "fixed_scale_tcn_mode_destination_replan_phase"
+    assert args.replan_action_weight == 3.0
+
+
+def test_cli_accepts_oracle_candidate_imitation_only_variant(tmp_path):
+    args = _train_args(
+        tmp_path,
+        "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+        "--bc-objective",
+        "decision_only",
+        "--bc-only",
+        "--imitation-only",
+    )
+
+    assert args.imitation_only
+    policy, kwargs = compare.model_policy_config(args.variant)
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is FixedScaleTCNForecastExtractor
+
+
+def test_cli_accepts_learned_plan_context_imitation_only_variant(tmp_path):
+    args = _train_args(
+        tmp_path,
+        "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
+        "--bc-objective",
+        "decision_only",
+        "--bc-only",
+        "--imitation-only",
+    )
+
+    assert args.imitation_only
+    policy, kwargs = compare.model_policy_config(args.variant)
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is FixedScaleTCNForecastExtractor
 
 
 @pytest.mark.parametrize(

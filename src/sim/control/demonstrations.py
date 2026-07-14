@@ -13,13 +13,14 @@ import numpy as np
 from ..environment.forecast import (
     current_state_observation,
     future_forecast_observation,
+    replan_phase_observation,
 )
 from ..environment.gym_adapter import flat_action_from_native, flat_action_mask
 from ..environment.vessel_mode import (
     vessel_operation_mode_observation,
     vessel_sailing_destination_observation,
 )
-from .native_mpc import RollingNativeMpcController
+from .native_mpc import RollingNativeMpcController, native_mpc_candidate_names
 from .replay import ReplayExpectation, ReplaySnapshot, replay_native_actions
 
 
@@ -34,6 +35,9 @@ class MpcDemonstrationBatch:
     metadata: dict[str, object]
     operation_modes: np.ndarray | None = None
     vessel_destinations: np.ndarray | None = None
+    plan_candidates: np.ndarray | None = None
+    candidate_names: tuple[str, ...] | None = None
+    plan_context: np.ndarray | None = None
 
     def observations(
         self,
@@ -51,6 +55,9 @@ class MpcDemonstrationBatch:
             "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
             "fixed_scale_tcn_mode_destination",
+            "fixed_scale_tcn_mode_destination_replan_phase",
+            "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+            "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
         ],
     ):
         if variant == "state":
@@ -73,6 +80,9 @@ class MpcDemonstrationBatch:
             "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
             "fixed_scale_tcn_mode_destination",
+            "fixed_scale_tcn_mode_destination_replan_phase",
+            "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+            "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
         }:
             if self.operation_modes is None:
                 raise ValueError(
@@ -93,6 +103,9 @@ class MpcDemonstrationBatch:
                 "fixed_scale_edge_gnn_mode_destination",
                 "stable_tcn_mode_destination",
                 "fixed_scale_tcn_mode_destination",
+                "fixed_scale_tcn_mode_destination_replan_phase",
+                "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+                "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
             }:
                 if self.vessel_destinations is None:
                     raise ValueError(
@@ -106,6 +119,40 @@ class MpcDemonstrationBatch:
                     ),
                     axis=1,
                 ).astype(np.float32, copy=False)
+            if variant in {
+                "fixed_scale_tcn_mode_destination_replan_phase",
+                "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+                "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
+            }:
+                phase = np.asarray(
+                    [replan_phase_observation(hour) for hour in self.hours],
+                    dtype=np.float32,
+                )
+                enriched = np.concatenate((enriched, phase), axis=1).astype(
+                    np.float32,
+                    copy=False,
+                )
+            if variant == "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate":
+                if self.plan_candidates is None or self.candidate_names is None:
+                    raise ValueError("oracle candidate observations require plan candidates")
+                candidates = np.eye(len(self.candidate_names), dtype=np.float32)[
+                    self.plan_candidates
+                ]
+                enriched = np.concatenate((enriched, candidates), axis=1).astype(
+                    np.float32,
+                    copy=False,
+                )
+            if variant == "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context":
+                if (
+                    self.plan_context is None
+                    or self.plan_context.ndim != 2
+                    or self.plan_context.shape != (len(self.state), 8)
+                ):
+                    raise ValueError("learned plan-context observations require [N, 8] context")
+                enriched = np.concatenate((enriched, self.plan_context), axis=1).astype(
+                    np.float32,
+                    copy=False,
+                )
             return {"state": enriched, "forecast": self.forecast}
         raise ValueError(f"unknown demonstration observation variant: {variant}")
 
@@ -135,6 +182,11 @@ def save_demonstrations(batch: MpcDemonstrationBatch, path) -> None:
         payload["operation_modes"] = batch.operation_modes
     if batch.vessel_destinations is not None:
         payload["vessel_destinations"] = batch.vessel_destinations
+    if batch.plan_candidates is not None:
+        if batch.candidate_names is None:
+            raise ValueError("candidate names are required with plan candidates")
+        payload["plan_candidates"] = batch.plan_candidates
+        payload["candidate_names"] = np.asarray(batch.candidate_names)
     np.savez_compressed(
         destination,
         **payload,
@@ -175,6 +227,16 @@ def load_demonstrations(
                 if "vessel_destinations" in cache.files
                 else None
             )
+            plan_candidates_array = (
+                np.asarray(cache["plan_candidates"])
+                if "plan_candidates" in cache.files
+                else None
+            )
+            candidate_names_array = (
+                np.asarray(cache["candidate_names"])
+                if "candidate_names" in cache.files
+                else None
+            )
             metadata_array = np.asarray(cache["metadata_json"])
     except (OSError, TypeError, ValueError) as error:
         if isinstance(error, ValueError) and str(error).startswith("demonstration cache"):
@@ -211,6 +273,27 @@ def load_demonstrations(
     hours = _integer_array("hours", arrays["hours"], rank=1)
     operation_modes = _operation_mode_array(operation_modes_array)
     vessel_destinations = _vessel_destination_array(vessel_destinations_array)
+    if (plan_candidates_array is None) != (candidate_names_array is None):
+        raise ValueError(
+            "invalid demonstration cache: plan candidates and candidate names must coexist"
+        )
+    plan_candidates = (
+        _integer_array("plan_candidates", plan_candidates_array, rank=1)
+        if plan_candidates_array is not None
+        else None
+    )
+    candidate_names = None
+    if candidate_names_array is not None:
+        if candidate_names_array.ndim != 1 or candidate_names_array.dtype.kind not in {
+            "U",
+            "S",
+        }:
+            raise ValueError("invalid candidate_names array")
+        candidate_names = tuple(str(value) for value in candidate_names_array.tolist())
+        if not candidate_names or len(set(candidate_names)) != len(candidate_names):
+            raise ValueError("candidate_names must be non-empty and unique")
+        if np.any(plan_candidates < 0) or np.any(plan_candidates >= len(candidate_names)):
+            raise ValueError("plan_candidates contain an out-of-range candidate index")
 
     if not np.all(np.isfinite(state)) or not np.all(np.isfinite(forecast)):
         raise ValueError("state and forecast observations must contain only finite values")
@@ -226,6 +309,8 @@ def load_demonstrations(
         leading["operation_modes"] = operation_modes.shape[0]
     if vessel_destinations is not None:
         leading["vessel_destinations"] = vessel_destinations.shape[0]
+    if plan_candidates is not None:
+        leading["plan_candidates"] = plan_candidates.shape[0]
     if len(set(leading.values())) != 1:
         raise ValueError(f"misaligned leading dimensions: {leading}")
     if (
@@ -247,6 +332,8 @@ def load_demonstrations(
         metadata=metadata,
         operation_modes=operation_modes,
         vessel_destinations=vessel_destinations,
+        plan_candidates=plan_candidates,
+        candidate_names=candidate_names,
     )
 
 
@@ -271,10 +358,20 @@ def collect_mpc_demonstrations(
     hours: list[int] = []
     operation_modes: list[np.ndarray] = []
     vessel_destinations: list[np.ndarray] = []
+    plan_candidates: list[int] = []
+    candidate_names: tuple[str, ...] | None = None
 
     for seed in seed_values:
         env = env_factory(demonstration=True)
         env.reset(seed=seed)
+        seed_candidate_names = native_mpc_candidate_names(env)
+        if candidate_names is None:
+            candidate_names = seed_candidate_names
+        elif candidate_names != seed_candidate_names:
+            raise RuntimeError("MPC candidate names changed across demonstration seeds")
+        candidate_index = {
+            name: index for index, name in enumerate(seed_candidate_names)
+        }
         replay_env = copy.deepcopy(env)
         controller = RollingNativeMpcController(
             env,
@@ -316,6 +413,13 @@ def collect_mpc_demonstrations(
                     f"MPC candidate replay mismatch at seed={seed}, hour={hour}: {details}"
                 )
             actions.append(flat_action_from_native(env, native_action))
+            try:
+                plan_candidates.append(candidate_index[controller.last_candidate_name])
+            except KeyError as error:
+                raise RuntimeError(
+                    f"unknown MPC candidate at seed={seed}, hour={hour}: "
+                    f"{controller.last_candidate_name!r}"
+                ) from error
             native_actions.append(copy.deepcopy(native_action))
             recorded_seeds.append(seed)
             hours.append(hour)
@@ -360,6 +464,8 @@ def collect_mpc_demonstrations(
         metadata=env_factory.metadata(),
         operation_modes=np.asarray(operation_modes, dtype=np.float32),
         vessel_destinations=np.asarray(vessel_destinations, dtype=np.float32),
+        plan_candidates=np.asarray(plan_candidates, dtype=np.int64),
+        candidate_names=candidate_names,
     )
 
 
@@ -409,6 +515,15 @@ def merge_demonstration_shards(
     destination_presence = [shard.vessel_destinations is not None for shard in shards]
     if len(set(destination_presence)) != 1:
         raise ValueError("demonstration shards disagree on vessel destination schema")
+    candidate_presence = [shard.plan_candidates is not None for shard in shards]
+    if len(set(candidate_presence)) != 1:
+        raise ValueError("demonstration shards disagree on plan candidate schema")
+    candidate_names = shards[0].candidate_names
+    if candidate_presence[0]:
+        if candidate_names is None or any(
+            shard.candidate_names != candidate_names for shard in shards
+        ):
+            raise ValueError("demonstration shards disagree on candidate names")
     order = np.lexsort((hours, seeds))
 
     def merged(name: str):
@@ -426,6 +541,8 @@ def merge_demonstration_shards(
         vessel_destinations=(
             merged("vessel_destinations") if destination_presence[0] else None
         ),
+        plan_candidates=(merged("plan_candidates") if candidate_presence[0] else None),
+        candidate_names=candidate_names if candidate_presence[0] else None,
     )
 
 

@@ -376,6 +376,32 @@ class ImitationTests(unittest.TestCase):
                         vessel_count=vessel_count,
                     )
 
+    def test_replan_weight_only_scales_nonforced_vessel_targets_at_phase_zero(self):
+        weights = np.array(
+            [
+                [0.0, 1.0, 10.0, 1.0],
+                [1.0, 10.0, 0.0, 1.0],
+                [1.0, 1.0, 10.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+
+        actual = imitation.apply_replan_action_weight(
+            weights,
+            hours=np.array([0, 1, 24]),
+            vessel_count=3,
+            replan_weight=3.0,
+        )
+
+        self.assertEqual(
+            actual.tolist(),
+            [
+                [0.0, 3.0, 30.0, 1.0],
+                [1.0, 10.0, 0.0, 1.0],
+                [3.0, 3.0, 30.0, 1.0],
+            ],
+        )
+
     def test_bc_pretrain_passes_dimension_weights_to_behavior_clone(self):
         obs = np.zeros((2, 3), dtype=np.float32)
         acts = np.array([[0, 1, 0], [0, 0, 2]], dtype=np.int64)

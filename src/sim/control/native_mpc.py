@@ -104,7 +104,6 @@ class RollingNativeMpcController:
                 f"  rolling_native_mpc replan at t={now:.0f} h; candidate={best.name}; "
                 f"forecast_vent={best.vented_t:,.1f} t; end_unstored={best.end_unstored_t:,.1f} t"
             )
-
     @staticmethod
     def _candidate_key(candidate: _NativeMpcCandidate) -> tuple[float, float, float]:
         return (
@@ -125,6 +124,16 @@ class RollingNativeMpcController:
         for well_id, choice, mask in zip(env.well_ids, well_actions, env.well_rate_action_mask()):
             if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
                 raise RuntimeError(f"rolling_native_mpc action is infeasible for {well_id}: {choice}")
+
+
+def native_mpc_candidate_names(env: CCSEnv) -> tuple[str, ...]:
+    """Return candidate names in the stable order used by the native MPC."""
+    names = ["greedy", "forecast_urgency"]
+    names.extend(
+        "dedicated:" + ",".join(assignment[vessel_id] for vessel_id in env.vessel_ids)
+        for assignment in _dedicated_assignments(env)
+    )
+    return tuple(names)
 
 
 def _rollout_native_candidate(env: CCSEnv, policy: Policy, horizon_h: int, name: str) -> _NativeMpcCandidate:

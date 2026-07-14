@@ -25,6 +25,7 @@ from sim.control.demonstrations import (
 )
 from sim.control.imitation import (
     action_dimension_weights,
+    apply_replan_action_weight,
     behavior_clone,
     behavior_clone_balanced_decisions,
     decision_only_action_weights,
@@ -51,6 +52,8 @@ from sim.environment.forecast_gym import (
     ForecastGymEnv,
     forecast_policy_observation,
     variant_base_encoder,
+    variant_uses_learned_plan_context,
+    variant_uses_oracle_candidate,
     variant_uses_operation_modes,
 )
 from sim.environment.gym_adapter import flat_action_mask, native_action_from_flat
@@ -221,6 +224,9 @@ def parse_args(argv=None):
             "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
             "fixed_scale_tcn_mode_destination",
+            "fixed_scale_tcn_mode_destination_replan_phase",
+            "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+            "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
         ),
         required=True,
     )
@@ -242,12 +248,15 @@ def parse_args(argv=None):
     train.add_argument("--device", default="auto")
     train.add_argument("--verbose", type=int, default=1)
     train.add_argument("--progress-bar", action="store_true")
+    train.add_argument("--imitation-only", action="store_true")
     train.add_argument("--out-dir", default="output/rl_forecast")
+    train.add_argument("--replan-action-weight", type=float)
     train.set_defaults(
         gamma=0.999,
         learning_rate=3e-4,
         bc_lr=1e-3,
         nonwait_weight=10.0,
+        replan_action_weight=1.0,
         kickstart_coef=1.0,
     )
     _add_locked_protocol_defaults(train)
@@ -905,12 +914,35 @@ def _train_loaded_batch(
         raise ImportError("train requires sb3-contrib")
     if args.bc_objective != "current" and not args.bc_only:
         raise ValueError("decision-only BC objectives require --bc-only")
+    if args.replan_action_weight != 1.0 and args.bc_objective != "decision_only":
+        raise ValueError("replan action weighting requires --bc-objective decision_only")
+    if args.imitation_only and not args.bc_only:
+        raise ValueError("--imitation-only requires --bc-only")
+    if (
+        variant_uses_oracle_candidate(args.variant)
+        or variant_uses_learned_plan_context(args.variant)
+    ) and not args.imitation_only:
+        raise ValueError("plan-context variants require --imitation-only")
     _ensure_new_run_outputs(args)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     commit = git_commit()
     policy_name, policy_kwargs = model_policy_config(args.variant)
-    gym_env = ForecastGymEnv(native_env, args.variant)
+    if variant_uses_oracle_candidate(args.variant):
+        if batch.candidate_names is None or len(batch.candidate_names) != 8:
+            raise ValueError("oracle candidate training requires eight candidate names")
+        if heldout_batch is not None and heldout_batch.candidate_names != batch.candidate_names:
+            raise ValueError("train and held-out candidate names must match")
+    gym_env = ForecastGymEnv(
+        native_env,
+        args.variant,
+        oracle_candidate_index=(0 if variant_uses_oracle_candidate(args.variant) else None),
+        learned_plan_context=(
+            np.zeros(8, dtype=np.float32)
+            if variant_uses_learned_plan_context(args.variant)
+            else None
+        ),
+    )
     model = MaskablePPO(
         policy_name,
         gym_env,
@@ -953,6 +985,13 @@ def _train_loaded_batch(
             vessel_count,
             nonwait_weight=args.nonwait_weight,
         )
+        if args.replan_action_weight != 1.0:
+            weights = apply_replan_action_weight(
+                weights,
+                batch.hours,
+                vessel_count,
+                args.replan_action_weight,
+            )
         behavior_clone(
             model,
             observations,
@@ -1016,15 +1055,17 @@ def _train_loaded_batch(
         )
     bc_path = checkpoint_path(args, "bc")
     model.save(str(bc_path))
-    rows = evaluate_learned_stage(
-        args,
-        model,
-        stage="bc",
-        trainable_parameters=parameter_count,
-        demonstration_exact_match=bc_accuracy,
-        demonstration_action_accuracy=bc_dimension_accuracy,
-        rollout_diagnostic_rows=rollout_diagnostic_rows,
-    )
+    rows = []
+    if not args.imitation_only:
+        rows = evaluate_learned_stage(
+            args,
+            model,
+            stage="bc",
+            trainable_parameters=parameter_count,
+            demonstration_exact_match=bc_accuracy,
+            demonstration_action_accuracy=bc_dimension_accuracy,
+            rollout_diagnostic_rows=rollout_diagnostic_rows,
+        )
 
     ppo_accuracy = None
     ppo_dimension_accuracy = None
@@ -1092,7 +1133,8 @@ def _train_loaded_batch(
                 rollout_diagnostic_rows=rollout_diagnostic_rows,
             )
         )
-    rows.extend(evaluate_reference_rows(args))
+    if not args.imitation_only:
+        rows.extend(evaluate_reference_rows(args))
     write_results_csv(results_path(args), rows)
     if demo_diagnostic_rows:
         write_diagnostics_csv(demo_diagnostics_path(args), demo_diagnostic_rows)
@@ -1150,12 +1192,15 @@ def _train_loaded_batch(
                 else float(args.nonwait_weight)
             ),
             "forced_vessel_weight": 1.0 if args.bc_objective == "current" else 0.0,
+            "replan_action_weight": float(args.replan_action_weight),
+            "replan_weight_scope": "non_forced_vessel_dimensions_at_phase_zero",
             "decision_sampling": (
                 "balanced_wait_dispatch_pairs"
                 if args.bc_objective == "decision_balanced"
                 else "uniform_rows"
             ),
             "sampler_audit": sampler_audit,
+            "imitation_only": bool(args.imitation_only),
         },
         "ppo": {
             "timesteps": int(args.timesteps),

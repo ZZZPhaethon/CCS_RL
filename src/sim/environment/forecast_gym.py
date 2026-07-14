@@ -12,6 +12,7 @@ from .forecast import (
     current_state_feature_names,
     current_state_observation,
     future_forecast_observation,
+    replan_phase_observation,
 )
 from .gym_adapter import flat_action_mask, native_action_from_flat
 from .vessel_mode import (
@@ -33,7 +34,12 @@ ObservationVariant = Literal[
     "fixed_scale_edge_gnn_mode_destination",
     "stable_tcn_mode_destination",
     "fixed_scale_tcn_mode_destination",
+    "fixed_scale_tcn_mode_destination_replan_phase",
+    "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+    "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
 ]
+
+ORACLE_CANDIDATE_COUNT = 8
 
 
 def variant_uses_operation_modes(variant: str) -> bool:
@@ -48,6 +54,9 @@ def variant_uses_operation_modes(variant: str) -> bool:
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination_replan_phase",
+        "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+        "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
     }
 
 
@@ -61,7 +70,26 @@ def variant_uses_sailing_destinations(variant: str) -> bool:
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
         "fixed_scale_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination_replan_phase",
+        "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+        "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
     }
+
+
+def variant_uses_replan_phase(variant: str) -> bool:
+    return variant in {
+        "fixed_scale_tcn_mode_destination_replan_phase",
+        "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+        "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
+    }
+
+
+def variant_uses_oracle_candidate(variant: str) -> bool:
+    return variant == "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate"
+
+
+def variant_uses_learned_plan_context(variant: str) -> bool:
+    return variant == "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context"
 
 
 def variant_base_encoder(variant: str) -> str:
@@ -81,7 +109,12 @@ def variant_base_encoder(variant: str) -> str:
         return "fixed_scale_edge_gnn"
     if variant == "stable_tcn_mode_destination":
         return "stable_tcn"
-    if variant == "fixed_scale_tcn_mode_destination":
+    if variant in {
+        "fixed_scale_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination_replan_phase",
+        "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
+        "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
+    }:
         return "fixed_scale_tcn"
     if variant in {"state", "flat", "tcn"}:
         return variant
@@ -93,6 +126,8 @@ def forecast_policy_observation(
     variant: ObservationVariant,
     *,
     timeout: bool = False,
+    oracle_candidate_index: int | None = None,
+    learned_plan_context: np.ndarray | None = None,
 ):
     """Return the observation representation selected for a forecast policy."""
     state = np.asarray(current_state_observation(env), dtype=np.float32)
@@ -107,6 +142,26 @@ def forecast_policy_observation(
             dtype=np.float32,
         )
         state = np.concatenate((state, destinations)).astype(np.float32, copy=False)
+    if variant_uses_replan_phase(variant):
+        assert env.simulator is not None
+        phase = np.asarray(
+            replan_phase_observation(env.simulator.state.time_h),
+            dtype=np.float32,
+        )
+        state = np.concatenate((state, phase)).astype(np.float32, copy=False)
+    if variant_uses_oracle_candidate(variant):
+        if oracle_candidate_index is None or not (
+            0 <= int(oracle_candidate_index) < ORACLE_CANDIDATE_COUNT
+        ):
+            raise ValueError("oracle candidate variant requires a valid candidate index")
+        candidate = np.zeros(ORACLE_CANDIDATE_COUNT, dtype=np.float32)
+        candidate[int(oracle_candidate_index)] = 1.0
+        state = np.concatenate((state, candidate)).astype(np.float32, copy=False)
+    if variant_uses_learned_plan_context(variant):
+        context = np.asarray(learned_plan_context, dtype=np.float32)
+        if context.shape != (ORACLE_CANDIDATE_COUNT,) or not np.all(np.isfinite(context)):
+            raise ValueError("learned plan-context variant requires a finite [8] context")
+        state = np.concatenate((state, context)).astype(np.float32, copy=False)
     base_variant = variant_base_encoder(variant)
     if base_variant == "state":
         return state
@@ -158,10 +213,18 @@ class ForecastGymEnv(Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, env: CCSEnv, variant: ObservationVariant):
+    def __init__(
+        self,
+        env: CCSEnv,
+        variant: ObservationVariant,
+        oracle_candidate_index: int | None = None,
+        learned_plan_context: np.ndarray | None = None,
+    ):
         super().__init__()
         self.env = env
         self.variant = variant
+        self.oracle_candidate_index = oracle_candidate_index
+        self.learned_plan_context = learned_plan_context
         self.action_space = spaces.MultiDiscrete(
             env.vessel_action_dims + env.well_rate_action_dims
         )
@@ -172,6 +235,12 @@ class ForecastGymEnv(Env):
             state_size += len(env.vessel_ids) * (
                 len(env.terminal_ids) + len(env.emitter_ids)
             )
+        if variant_uses_replan_phase(variant):
+            state_size += 2
+        if variant_uses_oracle_candidate(variant):
+            state_size += ORACLE_CANDIDATE_COUNT
+        if variant_uses_learned_plan_context(variant):
+            state_size += ORACLE_CANDIDATE_COUNT
         base_variant = variant_base_encoder(variant)
         if base_variant == "state":
             self.observation_space = spaces.Box(
@@ -202,7 +271,12 @@ class ForecastGymEnv(Env):
         super().reset(seed=seed)
         episode_seed = int(self.np_random.integers(0, 2**31 - 1))
         self.env.reset(seed=episode_seed)
-        return forecast_policy_observation(self.env, self.variant), {}
+        return forecast_policy_observation(
+            self.env,
+            self.variant,
+            oracle_candidate_index=self.oracle_candidate_index,
+            learned_plan_context=self.learned_plan_context,
+        ), {}
 
     def step(self, action):
         _observation, reward, terminated, truncated, info = self.env.step(
@@ -213,6 +287,8 @@ class ForecastGymEnv(Env):
                 self.env,
                 self.variant,
                 timeout=truncated,
+                oracle_candidate_index=self.oracle_candidate_index,
+                learned_plan_context=self.learned_plan_context,
             ),
             float(reward),
             terminated,

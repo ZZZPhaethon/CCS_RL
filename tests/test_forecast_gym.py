@@ -107,6 +107,74 @@ def test_tcn_mode_destination_appends_sailing_target_without_changing_legacy_var
     assert tcn_env.observation_space.contains(tcn_obs)
 
 
+def test_replan_phase_variant_matches_live_hour_and_observation_space():
+    native = _native()
+    native.reset(seed=4)
+
+    at_replan = forecast_policy_observation(
+        native,
+        "fixed_scale_tcn_mode_destination_replan_phase",
+    )
+    np.testing.assert_array_equal(at_replan["state"][-2:], [0.0, 1.0])
+
+    native.simulator.state.time_h = 1.0
+    after_replan = forecast_policy_observation(
+        native,
+        "fixed_scale_tcn_mode_destination_replan_phase",
+    )
+    np.testing.assert_allclose(after_replan["state"][-2:], [1.0 / 23.0, 0.0])
+
+    wrapped = ForecastGymEnv(
+        _native(),
+        "fixed_scale_tcn_mode_destination_replan_phase",
+    )
+    observation, _ = wrapped.reset(seed=4)
+    assert wrapped.observation_space["state"].shape == (80,)
+    assert wrapped.observation_space.contains(observation)
+
+
+def test_oracle_candidate_variant_requires_and_appends_candidate_index():
+    native = _native()
+    native.reset(seed=4)
+    variant = "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate"
+
+    with pytest.raises(ValueError, match="candidate index"):
+        forecast_policy_observation(native, variant)
+    observation = forecast_policy_observation(
+        native,
+        variant,
+        oracle_candidate_index=3,
+    )
+
+    np.testing.assert_array_equal(
+        observation["state"][-8:],
+        np.eye(8, dtype=np.float32)[3],
+    )
+    wrapped = ForecastGymEnv(_native(), variant, oracle_candidate_index=3)
+    wrapped_observation, _ = wrapped.reset(seed=4)
+    assert wrapped.observation_space["state"].shape == (88,)
+    assert wrapped.observation_space.contains(wrapped_observation)
+
+
+def test_learned_plan_context_variant_appends_continuous_context():
+    native = _native()
+    native.reset(seed=4)
+    variant = "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context"
+    context = np.linspace(0.0, 1.0, 8, dtype=np.float32)
+
+    observation = forecast_policy_observation(
+        native,
+        variant,
+        learned_plan_context=context,
+    )
+
+    np.testing.assert_array_equal(observation["state"][-8:], context)
+    wrapped = ForecastGymEnv(_native(), variant, learned_plan_context=context)
+    wrapped_observation, _ = wrapped.reset(seed=4)
+    assert wrapped.observation_space["state"].shape == (88,)
+    assert wrapped.observation_space.contains(wrapped_observation)
+
+
 @pytest.mark.parametrize(
     "variant",
     [

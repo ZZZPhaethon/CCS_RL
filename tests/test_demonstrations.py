@@ -92,6 +92,7 @@ class _ExactController:
         assert planning_horizon_h == 168
         self.last_trace_replay_is_exact = True
         self.last_trace_replay_mismatches = ()
+        self.last_candidate_name = "greedy"
 
     def __call__(self, env):
         return {
@@ -181,6 +182,25 @@ def test_v3_cache_round_trip_preserves_vessel_destinations(tmp_path):
     assert loaded.vessel_destinations.dtype == np.float32
 
 
+def test_candidate_cache_round_trip_preserves_indices_and_names(tmp_path):
+    demonstrations = _demonstrations()
+    batch = replace(
+        _batch(
+            operation_modes=_operation_modes(),
+            vessel_destinations=_vessel_destinations(),
+        ),
+        plan_candidates=np.asarray([0, 1], dtype=np.int64),
+        candidate_names=("greedy", "forecast_urgency"),
+    )
+    path = tmp_path / "demo-candidates.npz"
+
+    demonstrations.save_demonstrations(batch, path)
+    loaded = demonstrations.load_demonstrations(path, batch.metadata)
+
+    np.testing.assert_array_equal(loaded.plan_candidates, [0, 1])
+    assert loaded.candidate_names == ("greedy", "forecast_urgency")
+
+
 def test_observation_variants_have_expected_shapes_and_flatten_time_major():
     batch = _batch()
 
@@ -244,6 +264,59 @@ def test_destination_variant_appends_modes_then_sailing_destinations():
             _batch(operation_modes=_operation_modes()).observations(variant)
 
 
+def test_replan_phase_variant_appends_normalized_phase_and_indicator():
+    batch = _batch(
+        operation_modes=_operation_modes(),
+        vessel_destinations=_vessel_destinations(),
+    )
+
+    observation = batch.observations(
+        "fixed_scale_tcn_mode_destination_replan_phase"
+    )
+
+    np.testing.assert_allclose(
+        observation["state"][:, -2:],
+        np.asarray([[0.0, 1.0], [1.0 / 23.0, 0.0]], dtype=np.float32),
+    )
+
+
+def test_oracle_candidate_variant_appends_candidate_one_hot():
+    batch = replace(
+        _batch(
+            operation_modes=_operation_modes(),
+            vessel_destinations=_vessel_destinations(),
+        ),
+        plan_candidates=np.asarray([0, 1], dtype=np.int64),
+        candidate_names=("greedy", "forecast_urgency"),
+    )
+
+    observation = batch.observations(
+        "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate"
+    )
+
+    np.testing.assert_array_equal(
+        observation["state"][:, -2:],
+        np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+    )
+
+
+def test_learned_plan_context_variant_appends_continuous_context():
+    context = np.arange(16, dtype=np.float32).reshape(2, 8) / 16.0
+    batch = replace(
+        _batch(
+            operation_modes=_operation_modes(),
+            vessel_destinations=_vessel_destinations(),
+        ),
+        plan_context=context,
+    )
+
+    observation = batch.observations(
+        "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context"
+    )
+
+    np.testing.assert_array_equal(observation["state"][:, -8:], context)
+
+
 def test_metadata_mismatch_is_rejected(tmp_path):
     demonstrations = _demonstrations()
     path = tmp_path / "demo.npz"
@@ -300,6 +373,9 @@ def test_short_real_collection_returns_feasible_rows_and_exact_forecasts():
     assert batch.seeds.tolist() == [3, 4]
     assert batch.hours.tolist() == [0, 0]
     assert batch.metadata == factory.metadata()
+    assert batch.plan_candidates.shape == (2,)
+    assert batch.candidate_names is not None
+    assert len(batch.candidate_names) == 8
     action_dims = [5, 5, 5, 11]
     offsets = np.cumsum([0, *action_dims])
     for row in range(2):

@@ -3,6 +3,20 @@ from __future__ import annotations
 from .env import CCSEnv
 
 FORECAST_HORIZON_H = 168
+REPLAN_EVERY_H = 24
+REPLAN_PHASE_FEATURE_NAMES = ("hours_since_replan", "is_replan")
+
+
+def replan_phase_observation(
+    time_h: float,
+    replan_every_h: int = REPLAN_EVERY_H,
+) -> tuple[float, float]:
+    """Return normalized plan phase and an explicit replan indicator."""
+    period = int(replan_every_h)
+    if period <= 1:
+        raise ValueError("replan_every_h must be greater than one")
+    phase = int(time_h) % period
+    return phase / float(period - 1), float(phase == 0)
 
 
 def forecast_channel_names(env: CCSEnv) -> tuple[str, ...]:

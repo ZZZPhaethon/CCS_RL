@@ -257,6 +257,31 @@ def decision_only_action_weights(
     return weights
 
 
+def apply_replan_action_weight(
+    weights: np.ndarray,
+    hours: np.ndarray,
+    vessel_count: int,
+    replan_weight: float,
+    replan_every_h: int = 24,
+) -> np.ndarray:
+    """Up-weight non-forced vessel targets at MPC replan rows only."""
+    result = np.asarray(weights, dtype=np.float32).copy()
+    hour_values = np.asarray(hours, dtype=np.int64)
+    if result.ndim != 2 or hour_values.ndim != 1 or len(result) != len(hour_values):
+        raise ValueError("weights and hours must have matching leading dimensions")
+    if vessel_count < 0 or vessel_count > result.shape[1]:
+        raise ValueError("vessel_count must not exceed the number of action dimensions")
+    if replan_weight <= 0.0:
+        raise ValueError("replan_weight must be positive")
+    if replan_every_h <= 0:
+        raise ValueError("replan_every_h must be positive")
+    replan_rows = hour_values % int(replan_every_h) == 0
+    vessel_weights = result[replan_rows, :vessel_count]
+    vessel_weights[vessel_weights > 0.0] *= float(replan_weight)
+    result[replan_rows, :vessel_count] = vessel_weights
+    return result
+
+
 @dataclass(frozen=True)
 class BalancedDecisionTargets:
     row_indices: np.ndarray
