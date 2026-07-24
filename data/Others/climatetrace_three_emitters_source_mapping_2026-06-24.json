@@ -1,0 +1,60 @@
+{
+  "window": {
+    "start": "2021-04",
+    "end": "2026-03"
+  },
+  "gas": "co2",
+  "unit": "metric tonnes CO2 per month",
+  "sources": {
+    "brevik": {
+      "project_name": "Heidelberg Materials Brevik CCS",
+      "ct_source_id": 42546791,
+      "ct_name": "Brevik Cement Plant",
+      "country": "NOR",
+      "status": "matched_source_level"
+    },
+    "celsio": {
+      "project_name": "Hafslund Celsio Oslo CCS / Klemetsrud WtE",
+      "ct_source_id": null,
+      "ct_name": null,
+      "country": "NOR",
+      "status": "not_found_in_climate_trace_source_level"
+    },
+    "yara_sluiskil": {
+      "project_name": "Yara Sluiskil",
+      "ct_source_id": 45257214,
+      "ct_name": "Yara Sluiskil",
+      "country": "NLD",
+      "status": "matched_source_level"
+    }
+  },
+  "climate_trace_details": {
+    "brevik": {
+      "id": 42546791,
+      "name": "Brevik Cement Plant",
+      "country": "NOR",
+      "sector": "manufacturing",
+      "subsector": "cement",
+      "assetType": "integrated dry",
+      "centroid": {
+        "longitude": 9.61886687422738,
+        "latitude": 59.083060109434,
+        "srid": 4326
+      }
+    },
+    "yara_sluiskil": {
+      "id": 45257214,
+      "name": "Yara Sluiskil",
+      "country": "NLD",
+      "sector": "manufacturing",
+      "subsector": "chemicals",
+      "assetType": "ammonia",
+      "centroid": {
+        "longitude": 3.8530853,
+        "latitude": 51.2778267,
+        "srid": 4326
+      }
+    }
+  },
+  "celsio_search_note": "No reliable source-level match for Hafslund Celsio/Klemetsrud found in Norway all_no_forest source search or waste incineration subsector queries on 2026-06-24."
+}

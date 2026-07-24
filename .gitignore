@@ -1,0 +1,28 @@
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local configuration and credentials
+.env
+.env.*
+.vscode/
+.agents/
+
+# Generated training and evaluation artifacts
+logs/
+output/
+*.zip
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.onnx
+
+# Operating-system files
+.DS_Store
+Thumbs.db
