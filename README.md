@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="assets/Logo.png" alt="logo" width="400"/>
+  <img src="assets/logo.png" alt="logo" width="400"/>
 </h1>
 <h3 align="center">
 Physical Simulation, Optimal Control, and Reinforcement Learning for Ship-Based CCS Dispatch
