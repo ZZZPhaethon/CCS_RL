@@ -11,7 +11,13 @@ Physical Simulation, Optimal Control, and Reinforcement Learning for Ship-Based 
 <p align="center">
   <img src="assets/CCUSoverview_research.png" alt="CCUS teaser" width="95%">
 </p>
-
+<p align="center">
+  <a href=""><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue" alt="Hugging Face Spaces"></a>
+  <a href=""><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
+  <a href=""><img src="https://img.shields.io/badge/arXiv-2512.23273-b31b1b.svg" alt="arXiv"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="MIT"></a>
+  <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white" alt="Google Drive Dataset"></a>
+</p>
 **CCS_RL** is a research codebase for ship-based CO2 capture, transport, terminal
 receiving, pipeline transfer, and offshore injection. It uses Northern Lights as
 the primary reference scenario and is built around one design principle: a clean
