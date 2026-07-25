@@ -8,6 +8,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from sim.control.baselines import greedy_shuttle_policy, idle_policy
 from sim.control.replay import ReplaySnapshot
 from sim.train import make_native_env
 
@@ -214,6 +215,9 @@ def test_observation_variants_have_expected_shapes_and_flatten_time_major():
     assert set(tcn) == {"state", "forecast"}
     assert tcn["state"] is batch.state
     assert tcn["forecast"] is batch.forecast
+    future_mlp = batch.observations("future_mlp")
+    assert future_mlp["state"] is batch.state
+    assert future_mlp["forecast"] is batch.forecast
     with pytest.raises(ValueError, match="variant"):
         batch.observations("unknown")
 
@@ -228,6 +232,9 @@ def test_mode_observation_variants_append_flattened_vessel_major_modes():
     tcn_mode = batch.observations("tcn_mode")
     np.testing.assert_array_equal(tcn_mode["state"], state_mode)
     assert tcn_mode["forecast"] is batch.forecast
+    future_mlp_mode = batch.observations("future_mlp_mode")
+    np.testing.assert_array_equal(future_mlp_mode["state"], state_mode)
+    assert future_mlp_mode["forecast"] is batch.forecast
 
     with pytest.raises(ValueError, match="operation mode"):
         _batch().observations("state_mode")
@@ -253,6 +260,8 @@ def test_destination_variant_appends_modes_then_sailing_destinations():
         "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
         "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
@@ -263,6 +272,44 @@ def test_destination_variant_appends_modes_then_sailing_destinations():
         assert destination["forecast"] is batch.forecast
         with pytest.raises(ValueError, match="destination"):
             _batch(operation_modes=_operation_modes()).observations(variant)
+
+
+@pytest.mark.parametrize(
+    ("variant", "zero"),
+    [
+        ("gated_past24_mlp_mode_destination", False),
+        ("past24_mlp_mode_destination", False),
+        ("past24_zero_mlp_mode_destination", True),
+    ],
+)
+def test_past_mlp_variant_reconstructs_strictly_previous_rows(variant, zero):
+    batch = replace(
+        _batch(
+            operation_modes=_operation_modes(),
+            vessel_destinations=_vessel_destinations(),
+        ),
+        seeds=np.asarray([11, 11], dtype=np.int64),
+        hours=np.asarray([0, 1], dtype=np.int64),
+        metadata={"action_dimensions": [2, 4]},
+    )
+
+    observation = batch.observations(variant)
+
+    assert set(observation) == {"state", "past", "forecast"}
+    assert observation["past"].shape == (2, 24, 22)
+    np.testing.assert_array_equal(observation["past"][0], 0.0)
+    if zero:
+        np.testing.assert_array_equal(observation["past"], 0.0)
+    else:
+        np.testing.assert_array_equal(
+            observation["past"][1, -1, :19],
+            observation["state"][0],
+        )
+        np.testing.assert_allclose(
+            observation["past"][1, -1, 19:21],
+            [0.0, 2.0 / 3.0],
+        )
+        assert observation["past"][1, -1, -1] == 1.0
 
 
 def test_replan_phase_variant_appends_normalized_phase_and_indicator():
@@ -382,6 +429,55 @@ def test_short_real_collection_returns_feasible_rows_and_exact_forecasts():
     for row in range(2):
         for dimension, choice in enumerate(batch.actions[row]):
             assert batch.masks[row, offsets[dimension] + choice]
+
+
+def test_short_greedy_collection_has_no_mpc_candidate_labels():
+    demonstrations = _demonstrations()
+    factory = _DemoFactory(env_hours=1)
+
+    batch = demonstrations.collect_mpc_demonstrations(
+        factory,
+        seeds=[3],
+        episode_hours=1,
+        teacher_policy=lambda env: greedy_shuttle_policy(env),
+    )
+
+    assert batch.state.shape[0] == 1
+    assert batch.plan_candidates is None
+    assert batch.candidate_names is None
+
+
+def test_dagger_collection_executes_behavior_but_stores_expert_labels():
+    demonstrations = _demonstrations()
+    factory = _DemoFactory(env_hours=1)
+    behavior_actions = []
+
+    def behavior(env):
+        action = idle_policy(env)
+        action["vessels"] = [
+            next(
+                (index for index, allowed in enumerate(mask) if index > 0 and allowed),
+                0,
+            )
+            for mask in env.vessel_action_mask()
+        ]
+        behavior_actions.append(action)
+        return action
+
+    batch = demonstrations.collect_dagger_demonstrations(
+        factory,
+        seeds=[3],
+        episode_hours=1,
+        behavior_policy=behavior,
+        expert_policy=idle_policy,
+    )
+
+    assert len(behavior_actions) == 1
+    assert any(choice != 0 for choice in behavior_actions[0]["vessels"])
+    np.testing.assert_array_equal(batch.actions[0, :3], np.zeros(3, dtype=np.int64))
+    assert batch.plan_candidates is None
+    assert batch.candidate_names is None
+    assert batch.metadata == factory.metadata()
 
 
 def test_candidate_replay_mismatch_fails_with_seed_and_hour_context():

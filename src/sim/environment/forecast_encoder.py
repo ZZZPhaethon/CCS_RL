@@ -151,6 +151,92 @@ class FutureMLPForecastExtractor(BaseFeaturesExtractor):
         return torch.cat((state_features, forecast_features), dim=1)
 
 
+class PastMLPForecastExtractor(FutureMLPForecastExtractor):
+    """Add a causal flattened-history MLP beside state and future MLPs."""
+
+    PAST_HIDDEN_FEATURES = 35
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        past_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            state_features=state_features,
+            forecast_features=forecast_features,
+        )
+        past_steps, past_channels = observation_space["past"].shape
+        self.past_projection = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(
+                past_steps * past_channels,
+                self.PAST_HIDDEN_FEATURES,
+            ),
+            nn.SiLU(),
+            nn.Linear(self.PAST_HIDDEN_FEATURES, past_features),
+            nn.LayerNorm(
+                past_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
+        self._features_dim = state_features + past_features + forecast_features
+
+    def forward(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
+        state_features = self.state_encoder(observations["state"])
+        past_features = self.past_projection(observations["past"])
+        forecast_features = self.forecast_projection(observations["forecast"])
+        return torch.cat((state_features, past_features, forecast_features), dim=1)
+
+
+class GatedPastMLPForecastExtractor(FutureMLPForecastExtractor):
+    """Add a zero-initialized, feature-wise gated past correction."""
+
+    PAST_HIDDEN_FEATURES = 35
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        past_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            state_features=state_features,
+            forecast_features=forecast_features,
+        )
+        past_steps, past_channels = observation_space["past"].shape
+        self.past_projection = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(
+                past_steps * past_channels,
+                self.PAST_HIDDEN_FEATURES,
+            ),
+            nn.SiLU(),
+            nn.Linear(self.PAST_HIDDEN_FEATURES, past_features),
+            nn.LayerNorm(
+                past_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
+        output_features = state_features + forecast_features
+        self.past_correction = nn.Linear(past_features, output_features)
+        self.past_gate = nn.Parameter(torch.zeros(output_features))
+
+    def forward(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
+        baseline = super().forward(observations)
+        past_features = self.past_projection(observations["past"])
+        correction = self.past_correction(past_features)
+        return baseline + torch.tanh(self.past_gate) * correction
+
+
 class _GraphAttentionBlock(nn.Module):
     def __init__(self, features: int) -> None:
         super().__init__()
@@ -487,8 +573,11 @@ class _EdgeAwareCCSGraphStateEncoder(nn.Module):
         travel_times = state[:, 39:51].reshape(batch_size, 3, 4)
         at_locations = vessel_state[:, :, [2, 4, 5, 6]]
         destinations = state[:, 66:78].reshape(batch_size, 3, 4)
+        remaining_travel_times = travel_times * (
+            1.0 - vessel_state[:, :, 3:4] * destinations
+        )
         dynamic_features = torch.stack(
-            (travel_times, at_locations, destinations),
+            (remaining_travel_times, at_locations, destinations),
             dim=-1,
         )
         for vessel_index, vessel_node in enumerate(range(3, 6)):
@@ -510,6 +599,176 @@ class _EdgeAwareCCSGraphStateEncoder(nn.Module):
         return self.projection(
             torch.cat((encoded.reshape(batch_size, -1), global_features), dim=1)
         )
+
+
+class _TemporalContextEncoder(nn.Module):
+    """Encode one entity-aligned future trajectory without mixing entities."""
+
+    def __init__(
+        self,
+        input_channels: int,
+        forecast_steps: int,
+        output_features: int,
+    ) -> None:
+        super().__init__()
+        self.convolutions = nn.Sequential(
+            nn.Conv1d(input_channels, 16, kernel_size=5, stride=2, padding=2),
+            nn.SiLU(),
+            nn.Conv1d(16, 16, kernel_size=5, stride=2, padding=2),
+            nn.SiLU(),
+            nn.Conv1d(16, 16, kernel_size=5, stride=2, padding=2),
+            nn.SiLU(),
+        )
+        with torch.no_grad():
+            convolution_output = self.convolutions(
+                torch.zeros(1, input_channels, forecast_steps)
+            )
+        flatten_size = convolution_output.shape[1] * convolution_output.shape[2]
+        self.projection = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(flatten_size, output_features),
+            nn.LayerNorm(
+                output_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
+
+    def forward(self, trajectory: torch.Tensor) -> torch.Tensor:
+        return self.projection(self.convolutions(trajectory.transpose(1, 2)))
+
+
+class _FutureConditionedCCSGraphEncoder(_EdgeAwareCCSGraphStateEncoder):
+    """Inject entity-aligned future trajectories before graph message passing."""
+
+    FUTURE_FEATURES = 16
+
+    def __init__(
+        self,
+        state_size: int,
+        forecast_steps: int,
+        output_features: int,
+    ) -> None:
+        super().__init__(state_size, output_features)
+        graph_features = 32
+        self.emitter_future_encoder = _TemporalContextEncoder(
+            2,
+            forecast_steps,
+            self.FUTURE_FEATURES,
+        )
+        self.well_future_encoder = _TemporalContextEncoder(
+            2,
+            forecast_steps,
+            self.FUTURE_FEATURES,
+        )
+        self.weather_future_encoder = _TemporalContextEncoder(
+            1,
+            forecast_steps,
+            self.FUTURE_FEATURES,
+        )
+        self.node_future_fusion = nn.Sequential(
+            nn.Linear(graph_features + self.FUTURE_FEATURES, graph_features),
+            nn.LayerNorm(
+                graph_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
+        conditioned_edge_features = self.EDGE_FEATURES + self.FUTURE_FEATURES
+        self.graph_blocks = nn.ModuleList(
+            [
+                _EdgeAwareAttentionBlock(graph_features, conditioned_edge_features)
+                for _ in range(2)
+            ]
+        )
+        self.projection = nn.Sequential(
+            nn.Linear(self.NODE_COUNT * graph_features + 3, output_features),
+            nn.LayerNorm(
+                output_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
+
+    def _future_contexts(
+        self,
+        forecast: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch_size, forecast_steps, _channels = forecast.shape
+        emitter_trajectories = torch.stack(
+            (forecast[:, :, 0:3], forecast[:, :, 3:6]),
+            dim=-1,
+        ).permute(0, 2, 1, 3)
+        emitter_context = self.emitter_future_encoder(
+            emitter_trajectories.reshape(batch_size * 3, forecast_steps, 2)
+        ).reshape(batch_size, 3, self.FUTURE_FEATURES)
+        well_context = self.well_future_encoder(forecast[:, :, 6:8])
+        weather_context = self.weather_future_encoder(forecast[:, :, 8:9])
+        zeros = forecast.new_zeros
+        node_context = torch.cat(
+            (
+                emitter_context,
+                zeros(batch_size, 3, self.FUTURE_FEATURES),
+                zeros(batch_size, 1, self.FUTURE_FEATURES),
+                well_context[:, None, :],
+                zeros(batch_size, 1, self.FUTURE_FEATURES),
+            ),
+            dim=1,
+        )
+        return node_context, weather_context
+
+    def forward(
+        self,
+        state: torch.Tensor,
+        forecast: torch.Tensor,
+    ) -> torch.Tensor:
+        batch_size = state.shape[0]
+        nodes, edge_features, global_features = self._graph_inputs(state)
+        node_context, weather_context = self._future_contexts(forecast)
+        encoded = self.node_future_fusion(
+            torch.cat((self.node_embedding(nodes), node_context), dim=-1)
+        )
+        vessel_location_edges = self.relation_features[:, :, 4:6].sum(dim=-1)
+        edge_context = (
+            weather_context[:, None, None, :]
+            * vessel_location_edges[None, :, :, None]
+        )
+        conditioned_edges = torch.cat((edge_features, edge_context), dim=-1)
+        for block in self.graph_blocks:
+            encoded = block(encoded, conditioned_edges, self.attention_mask)
+        return self.projection(
+            torch.cat((encoded.reshape(batch_size, -1), global_features), dim=1)
+        )
+
+
+class FutureConditionedEdgeGNNForecastExtractor(BaseFeaturesExtractor):
+    """Fuse current state and entity-aligned futures inside the Edge-GNN."""
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        output_features = state_features + forecast_features
+        super().__init__(observation_space, features_dim=output_features)
+        forecast_steps, forecast_channels = observation_space["forecast"].shape
+        if forecast_channels != 9:
+            raise ValueError(
+                "future-conditioned Edge-GNN requires 9 forecast channels, "
+                f"got {forecast_channels}"
+            )
+        self.graph_encoder = _FutureConditionedCCSGraphEncoder(
+            observation_space["state"].shape[0],
+            forecast_steps,
+            output_features,
+        )
+
+    def forward(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
+        return self.graph_encoder(observations["state"], observations["forecast"])
 
 
 class EdgeGNNForecastExtractor(TCNForecastExtractor):
@@ -550,3 +809,141 @@ class FixedScaleEdgeGNNForecastExtractor(FixedScaleTCNForecastExtractor):
             observation_space["state"].shape[0],
             state_features,
         )
+
+
+class BalancedEdgeGNNForecastExtractor(FixedScaleTCNForecastExtractor):
+    """Normalize both graph-state and forecast modalities before fusion."""
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            state_features=state_features,
+            forecast_features=forecast_features,
+        )
+        self.state_encoder = nn.Sequential(
+            _EdgeAwareCCSGraphStateEncoder(
+                observation_space["state"].shape[0],
+                state_features,
+            ),
+            nn.LayerNorm(
+                state_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
+
+
+class BalancedEdgeGNNFutureMLPForecastExtractor(FutureMLPForecastExtractor):
+    """Pair the normalized edge-aware state graph with the future MLP."""
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            state_features=state_features,
+            forecast_features=forecast_features,
+        )
+        self.state_encoder = nn.Sequential(
+            _EdgeAwareCCSGraphStateEncoder(
+                observation_space["state"].shape[0],
+                state_features,
+            ),
+            nn.LayerNorm(
+                state_features,
+                eps=1e-8,
+                elementwise_affine=False,
+            ),
+            nn.SiLU(),
+        )
+
+
+class GatedResidualEdgeGNNForecastExtractor(BalancedEdgeGNNForecastExtractor):
+    """Preserve both balanced branches while future-gating the graph state."""
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            state_features=state_features,
+            forecast_features=forecast_features,
+        )
+        self.future_to_state = nn.Linear(forecast_features, state_features)
+        self.interaction_gate = nn.Sequential(
+            nn.Linear(state_features + forecast_features, state_features),
+            nn.Sigmoid(),
+        )
+        self.fusion_norm = nn.LayerNorm(
+            state_features,
+            eps=1e-8,
+            elementwise_affine=False,
+        )
+        self.fusion_activation = nn.SiLU()
+
+    def forward(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
+        state_features = self.state_encoder(observations["state"])
+        forecast = observations["forecast"].transpose(1, 2)
+        forecast_features = self.forecast_projection(
+            self.forecast_convolutions(forecast)
+        )
+        gate = self.interaction_gate(
+            torch.cat((state_features, forecast_features), dim=1)
+        )
+        fused_state = self.fusion_activation(
+            self.fusion_norm(
+                state_features + gate * self.future_to_state(forecast_features)
+            )
+        )
+        return torch.cat((fused_state, forecast_features), dim=1)
+
+
+class EntityResidualEdgeGNNForecastExtractor(FixedScaleTCNForecastExtractor):
+    """Keep a direct future path beside an entity-conditioned graph path."""
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        state_features: int = 64,
+        forecast_features: int = 64,
+    ) -> None:
+        super().__init__(
+            observation_space,
+            state_features=state_features,
+            forecast_features=forecast_features,
+        )
+        del self.state_encoder
+        forecast_steps, forecast_channels = observation_space["forecast"].shape
+        if forecast_channels != 9:
+            raise ValueError(
+                "entity-residual Edge-GNN requires 9 forecast channels, "
+                f"got {forecast_channels}"
+            )
+        self.graph_encoder = _FutureConditionedCCSGraphEncoder(
+            observation_space["state"].shape[0],
+            forecast_steps,
+            state_features,
+        )
+
+    def forward(self, observations: dict[str, torch.Tensor]) -> torch.Tensor:
+        graph_features = self.graph_encoder(
+            observations["state"],
+            observations["forecast"],
+        )
+        forecast = observations["forecast"].transpose(1, 2)
+        forecast_features = self.forecast_projection(
+            self.forecast_convolutions(forecast)
+        )
+        return torch.cat((graph_features, forecast_features), dim=1)

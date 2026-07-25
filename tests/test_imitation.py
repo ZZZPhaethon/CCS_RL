@@ -238,6 +238,54 @@ def test_structured_behavior_clone_updates_real_tcn_with_dimension_weights():
     assert all(torch.isfinite(parameter).all() for parameter in model.policy.parameters())
 
 
+def test_masked_label_smoothing_spreads_only_over_legal_actions():
+    model = _tcn_model()
+    observations, actions, masks, _weights = _structured_demonstrations()
+    masks[:, :2] = np.asarray([True, False])
+    actions[:, 0] = 0
+    observation_tensors = imitation._tensor_observations(
+        observations,
+        model.policy.device,
+    )
+    action_tensors = torch.as_tensor(actions, device=model.policy.device)
+    mask_tensors = torch.as_tensor(masks, device=model.policy.device)
+
+    plain = imitation._masked_action_log_probs(
+        model.policy,
+        observation_tensors,
+        action_tensors,
+        mask_tensors,
+    )
+    smoothed = imitation._masked_action_log_probs(
+        model.policy,
+        observation_tensors,
+        action_tensors,
+        mask_tensors,
+        label_smoothing=0.05,
+    )
+
+    torch.testing.assert_close(smoothed[:, 0], plain[:, 0])
+    assert torch.isfinite(smoothed).all()
+    assert not torch.allclose(smoothed[:, 1], plain[:, 1])
+
+
+def test_behavior_clone_rejects_invalid_label_smoothing():
+    model = _tcn_model()
+    observations, actions, masks, weights = _structured_demonstrations()
+
+    with pytest.raises(ValueError, match="label_smoothing"):
+        imitation.behavior_clone(
+            model,
+            observations,
+            actions,
+            masks=masks,
+            weights=weights,
+            epochs=1,
+            label_smoothing=1.0,
+            log=False,
+        )
+
+
 def test_balanced_decision_training_updates_policy_and_returns_audit():
     model = _tcn_model()
     observations, actions, masks, _weights = _structured_demonstrations()

@@ -93,6 +93,7 @@ def behavior_clone(
     epochs: int = 10,
     batch_size: int = 256,
     lr: float = 1e-3,
+    label_smoothing: float = 0.0,
     log: bool = True,
 ) -> None:
     """Supervise ``model.policy`` to imitate the demonstrator's actions in place.
@@ -105,6 +106,9 @@ def behavior_clone(
     drowned by the WAIT-dominated majority.
     """
     import torch
+
+    if not 0.0 <= label_smoothing < 1.0:
+        raise ValueError("label_smoothing must be in [0, 1)")
 
     policy = model.policy
     device = policy.device
@@ -132,7 +136,13 @@ def behavior_clone(
             batch_obs = _index_observations(obs_t, idx)
             batch_masks = mask_t[idx] if mask_t is not None else None
             if w_t is not None and w_t.ndim == 2:
-                log_prob = _masked_action_log_probs(policy, batch_obs, act_t[idx], batch_masks)
+                log_prob = _masked_action_log_probs(
+                    policy,
+                    batch_obs,
+                    act_t[idx],
+                    batch_masks,
+                    label_smoothing=label_smoothing,
+                )
                 nll = -log_prob
             else:
                 _values, log_prob, _entropy = policy.evaluate_actions(
@@ -153,7 +163,14 @@ def behavior_clone(
     policy.set_training_mode(False)
 
 
-def _masked_action_log_probs(policy, obs, actions, action_masks=None):
+def _masked_action_log_probs(
+    policy,
+    obs,
+    actions,
+    action_masks=None,
+    *,
+    label_smoothing: float = 0.0,
+):
     """Per-action-dimension log probabilities under the masked policy."""
     import torch
 
@@ -167,15 +184,42 @@ def _masked_action_log_probs(policy, obs, actions, action_masks=None):
     if action_masks is not None:
         distribution.apply_masking(action_masks)
     if not hasattr(distribution, "distributions"):
+        if label_smoothing:
+            raise TypeError("label smoothing requires a MultiCategorical policy")
         return distribution.log_prob(actions).reshape(-1, 1)
     actions = actions.view(-1, len(distribution.action_dims))
-    return torch.stack(
-        [
-            dist.log_prob(action)
-            for dist, action in zip(distribution.distributions, torch.unbind(actions, dim=1))
-        ],
-        dim=1,
+    target_log_probs = [
+        dist.log_prob(action)
+        for dist, action in zip(
+            distribution.distributions,
+            torch.unbind(actions, dim=1),
+        )
+    ]
+    if not label_smoothing:
+        return torch.stack(target_log_probs, dim=1)
+    if not 0.0 <= label_smoothing < 1.0:
+        raise ValueError("label_smoothing must be in [0, 1)")
+    legal_masks = (
+        torch.split(action_masks, distribution.action_dims, dim=1)
+        if action_masks is not None
+        else [torch.ones_like(dist.logits, dtype=torch.bool) for dist in distribution.distributions]
     )
+    smoothed_log_probs = []
+    for target, dist, legal in zip(
+        target_log_probs,
+        distribution.distributions,
+        legal_masks,
+    ):
+        legal = legal.to(dtype=torch.bool)
+        uniform_log_prob = (
+            dist.logits.masked_fill(~legal, 0.0).sum(dim=1)
+            / legal.sum(dim=1).clamp_min(1)
+        )
+        smoothed_log_probs.append(
+            (1.0 - label_smoothing) * target
+            + label_smoothing * uniform_log_prob
+        )
+    return torch.stack(smoothed_log_probs, dim=1)
 
 
 def decision_step_weights(
@@ -507,6 +551,7 @@ def make_kickstart_callback(
     weights: np.ndarray | None,
     total_timesteps: int,
     coef0: float = 1.0,
+    coef_final: float = 0.0,
     n_batches: int = 4,
     batch_size: int = 256,
     lr: float = 3e-4,
@@ -515,9 +560,9 @@ def make_kickstart_callback(
     """A callback that interleaves decaying BC updates into PPO fine-tuning.
 
     Kickstarting: before each PPO update, take a few weighted behavior-cloning
-    gradient steps toward the demonstrator, with a coefficient that decays
-    linearly to 0 over training. This anchors the policy to the teacher so RL
-    refines it instead of drifting away (which degraded plain BC+PPO).
+    gradient steps toward the demonstrator, with a coefficient that moves
+    linearly from ``coef0`` to ``coef_final``. This anchors the policy to the
+    teacher so RL refines it instead of drifting away.
     """
     import torch
     from stable_baselines3.common.callbacks import BaseCallback
@@ -548,7 +593,7 @@ def make_kickstart_callback(
 
         def _on_rollout_end(self) -> None:
             progress = min(1.0, self.num_timesteps / max(1, total_timesteps))
-            coef = coef0 * (1.0 - progress)
+            coef = coef0 + (coef_final - coef0) * progress
             if coef <= 1e-6:
                 return
             policy = self.model.policy

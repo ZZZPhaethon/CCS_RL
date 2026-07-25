@@ -55,6 +55,40 @@ def _future_mlp_extractor_class():
     return importlib.import_module(module_name).FutureMLPForecastExtractor
 
 
+def _past_mlp_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(module_name).PastMLPForecastExtractor
+
+
+def _gated_past_mlp_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(module_name).GatedPastMLPForecastExtractor
+
+
+def _balanced_edge_gnn_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(module_name).BalancedEdgeGNNForecastExtractor
+
+
+def _balanced_edge_gnn_future_mlp_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(
+        module_name
+    ).BalancedEdgeGNNFutureMLPForecastExtractor
+
+
+def _future_conditioned_edge_gnn_extractor_class():
+    module_name = "sim.environment.forecast_encoder"
+    assert importlib.util.find_spec(module_name) is not None
+    return importlib.import_module(
+        module_name
+    ).FutureConditionedEdgeGNNForecastExtractor
+
+
 def _fixed_scale_larger_mlp_extractor_class():
     module_name = "sim.environment.forecast_encoder"
     assert importlib.util.find_spec(module_name) is not None
@@ -274,9 +308,9 @@ def test_edge_gnn_places_route_state_on_vessel_location_edges():
     state[:, 39:51] = travel_times.reshape(1, -1)
     state[:, 11:32] = torch.tensor(
         [
-            0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0, 0.25, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.50, 1.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.75, 0.0, 1.0, 0.0,
         ]
     )
     state[:, 66:78] = torch.tensor(
@@ -287,13 +321,15 @@ def test_edge_gnn_places_route_state_on_vessel_location_edges():
 
     destination_nodes = (6, 0, 1, 2)  # terminal, Brevik, Celsio, Yara
     expected_locations = (0, 1, 2)
+    progress = (0.25, 0.50, 0.75)
     for vessel_index, vessel_node in enumerate(range(3, 6)):
         for slot, destination_node in enumerate(destination_nodes):
             forward = edge_features[0, destination_node, vessel_node, :3]
             reverse = edge_features[0, vessel_node, destination_node, :3]
             expected = torch.tensor(
                 [
-                    travel_times[vessel_index, slot],
+                    travel_times[vessel_index, slot]
+                    * (1.0 - progress[vessel_index] * float(slot == 3)),
                     float(slot == expected_locations[vessel_index]),
                     float(slot == 3),
                 ]
@@ -389,6 +425,194 @@ def test_future_mlp_is_parameter_matched_and_keeps_forecast_gradients_active():
         assert parameter.grad is not None
         assert torch.isfinite(parameter.grad).all()
         assert torch.count_nonzero(parameter.grad) > 0
+
+
+def test_past_mlp_encodes_three_modalities_and_keeps_history_gradients_active():
+    torch.manual_seed(11)
+    observation_space = _destination_env(
+        "past24_mlp_mode_destination"
+    ).observation_space
+    extractor = _past_mlp_extractor_class()(observation_space)
+    batch = {
+        key: torch.randn(4, *space.shape)
+        for key, space in observation_space.spaces.items()
+    }
+
+    features = extractor(batch)
+    features[:, 64:128].square().mean().backward()
+
+    assert batch["state"].shape == (4, 78)
+    assert batch["past"].shape == (4, 24, 83)
+    assert batch["forecast"].shape == (4, 168, 9)
+    assert extractor.features_dim == 192
+    assert features.shape == (4, 192)
+    for parameter in extractor.past_projection.parameters():
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert torch.count_nonzero(parameter.grad) > 0
+
+
+def test_gated_past_mlp_starts_as_exact_baseline_then_opens_history_path():
+    torch.manual_seed(11)
+    observation_space = _destination_env(
+        "gated_past24_mlp_mode_destination"
+    ).observation_space
+    extractor = _gated_past_mlp_extractor_class()(observation_space)
+    batch = {
+        key: torch.randn(4, *space.shape)
+        for key, space in observation_space.spaces.items()
+    }
+
+    features = extractor(batch)
+    baseline = torch.cat(
+        (
+            extractor.state_encoder(batch["state"]),
+            extractor.forecast_projection(batch["forecast"]),
+        ),
+        dim=1,
+    )
+
+    torch.testing.assert_close(features, baseline)
+    assert extractor.features_dim == 128
+    torch.testing.assert_close(extractor.past_gate, torch.zeros(128))
+    features.square().mean().backward()
+    assert extractor.past_gate.grad is not None
+    assert torch.count_nonzero(extractor.past_gate.grad) > 0
+
+    extractor.zero_grad()
+    with torch.no_grad():
+        extractor.past_gate.fill_(0.1)
+    extractor(batch).square().mean().backward()
+    for parameter in extractor.past_projection.parameters():
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert torch.count_nonzero(parameter.grad) > 0
+
+
+def test_balanced_edge_gnn_normalizes_state_without_adding_parameters():
+    torch.manual_seed(11)
+    observation_space = _destination_env(
+        "balanced_edge_gnn_mode_destination"
+    ).observation_space
+    balanced = _balanced_edge_gnn_extractor_class()(observation_space)
+    unbalanced = _fixed_scale_edge_gnn_extractor_class()(observation_space)
+    batch = {
+        "state": torch.randn(4, *observation_space["state"].shape),
+        "forecast": torch.randn(4, *observation_space["forecast"].shape),
+    }
+
+    features = balanced(batch)
+    state_l2 = torch.linalg.vector_norm(features[:, :64], dim=1).mean()
+    forecast_l2 = torch.linalg.vector_norm(features[:, 64:], dim=1).mean()
+    normalizations = [
+        module
+        for module in balanced.state_encoder
+        if isinstance(module, nn.LayerNorm)
+    ]
+
+    assert len(normalizations) == 1
+    assert not normalizations[0].elementwise_affine
+    assert 0.25 < float(state_l2 / forecast_l2) < 4.0
+    assert sum(parameter.numel() for parameter in balanced.parameters()) == sum(
+        parameter.numel() for parameter in unbalanced.parameters()
+    )
+
+
+def test_balanced_edge_gnn_future_mlp_keeps_both_modalities_active():
+    torch.manual_seed(11)
+    observation_space = _destination_env(
+        "balanced_edge_gnn_future_mlp_mode_destination"
+    ).observation_space
+    extractor = _balanced_edge_gnn_future_mlp_extractor_class()(
+        observation_space
+    )
+    batch = {
+        "state": torch.randn(4, *observation_space["state"].shape),
+        "forecast": torch.randn(4, *observation_space["forecast"].shape),
+    }
+
+    features = extractor(batch)
+    features[:, 64:].square().mean().backward()
+    state_l2 = torch.linalg.vector_norm(features[:, :64], dim=1).mean()
+    forecast_l2 = torch.linalg.vector_norm(features[:, 64:], dim=1).mean()
+
+    assert features.shape == (4, 128)
+    assert 0.25 < float(state_l2 / forecast_l2) < 4.0
+    assert sum(parameter.numel() for parameter in extractor.parameters()) == 92_763
+    assert not hasattr(extractor, "forecast_convolutions")
+    for parameter in extractor.forecast_projection.parameters():
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert torch.count_nonzero(parameter.grad) > 0
+
+
+def test_future_conditioned_edge_gnn_routes_every_forecast_channel_into_graph():
+    torch.manual_seed(11)
+    observation_space = _destination_env(
+        "future_conditioned_edge_gnn_mode_destination"
+    ).observation_space
+    extractor = _future_conditioned_edge_gnn_extractor_class()(observation_space)
+    state = torch.randn(4, *observation_space["state"].shape)
+    forecast = torch.randn(
+        4,
+        *observation_space["forecast"].shape,
+        requires_grad=True,
+    )
+
+    features = extractor({"state": state, "forecast": forecast})
+    features.square().mean().backward()
+
+    assert state.shape == (4, 78)
+    assert forecast.shape == (4, 168, 9)
+    assert features.shape == (4, 128)
+    assert forecast.grad is not None
+    channel_gradient = forecast.grad.abs().sum(dim=(0, 1))
+    assert torch.all(channel_gradient > 0.0)
+    for encoder in (
+        extractor.graph_encoder.emitter_future_encoder,
+        extractor.graph_encoder.well_future_encoder,
+        extractor.graph_encoder.weather_future_encoder,
+    ):
+        for parameter in encoder.parameters():
+            assert parameter.grad is not None
+            assert torch.isfinite(parameter.grad).all()
+
+
+@pytest.mark.parametrize(
+    ("class_name", "variant"),
+    [
+        (
+            "GatedResidualEdgeGNNForecastExtractor",
+            "gated_residual_edge_gnn_mode_destination",
+        ),
+        (
+            "EntityResidualEdgeGNNForecastExtractor",
+            "entity_residual_edge_gnn_mode_destination",
+        ),
+    ],
+)
+def test_residual_fusions_preserve_direct_future_path(class_name, variant):
+    torch.manual_seed(11)
+    module = importlib.import_module("sim.environment.forecast_encoder")
+    observation_space = _destination_env(variant).observation_space
+    extractor = getattr(module, class_name)(observation_space)
+    state = torch.randn(4, *observation_space["state"].shape)
+    forecast = torch.randn(
+        4,
+        *observation_space["forecast"].shape,
+        requires_grad=True,
+    )
+
+    features = extractor({"state": state, "forecast": forecast})
+    expected_future = extractor.forecast_projection(
+        extractor.forecast_convolutions(forecast.transpose(1, 2))
+    )
+    features.square().mean().backward()
+
+    assert features.shape == (4, 128)
+    torch.testing.assert_close(features[:, 64:].detach(), expected_future.detach())
+    assert forecast.grad is not None
+    assert torch.all(forecast.grad.abs().sum(dim=(0, 1)) > 0.0)
 
 
 @pytest.mark.parametrize(

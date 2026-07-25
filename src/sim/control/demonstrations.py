@@ -16,6 +16,7 @@ from ..environment.forecast import (
     replan_phase_observation,
 )
 from ..environment.gym_adapter import flat_action_from_native, flat_action_mask
+from ..environment.past import PAST_HOURS, demonstration_past_observation
 from ..environment.vessel_mode import (
     vessel_operation_mode_observation,
     vessel_sailing_destination_observation,
@@ -51,7 +52,17 @@ class MpcDemonstrationBatch:
             "gnn_mode_destination",
             "larger_mlp_mode_destination",
             "edge_gnn_mode_destination",
+            "future_mlp",
+            "future_mlp_mode",
             "future_mlp_mode_destination",
+            "gated_past24_mlp_mode_destination",
+            "past24_mlp_mode_destination",
+            "past24_zero_mlp_mode_destination",
+            "balanced_edge_gnn_mode_destination",
+            "balanced_edge_gnn_future_mlp_mode_destination",
+            "future_conditioned_edge_gnn_mode_destination",
+            "gated_residual_edge_gnn_mode_destination",
+            "entity_residual_edge_gnn_mode_destination",
             "fixed_scale_larger_mlp_mode_destination",
             "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
@@ -68,7 +79,7 @@ class MpcDemonstrationBatch:
                 (self.state, self.forecast.reshape(len(self.state), -1)),
                 axis=1,
             ).astype(np.float32, copy=False)
-        if variant == "tcn":
+        if variant in {"tcn", "future_mlp"}:
             return {"state": self.state, "forecast": self.forecast}
         if variant in {
             "state_mode",
@@ -77,7 +88,16 @@ class MpcDemonstrationBatch:
             "gnn_mode_destination",
             "larger_mlp_mode_destination",
             "edge_gnn_mode_destination",
+            "future_mlp_mode",
             "future_mlp_mode_destination",
+            "gated_past24_mlp_mode_destination",
+            "past24_mlp_mode_destination",
+            "past24_zero_mlp_mode_destination",
+            "balanced_edge_gnn_mode_destination",
+            "balanced_edge_gnn_future_mlp_mode_destination",
+            "future_conditioned_edge_gnn_mode_destination",
+            "gated_residual_edge_gnn_mode_destination",
+            "entity_residual_edge_gnn_mode_destination",
             "fixed_scale_larger_mlp_mode_destination",
             "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
@@ -102,6 +122,14 @@ class MpcDemonstrationBatch:
                 "larger_mlp_mode_destination",
                 "edge_gnn_mode_destination",
                 "future_mlp_mode_destination",
+                "gated_past24_mlp_mode_destination",
+                "past24_mlp_mode_destination",
+                "past24_zero_mlp_mode_destination",
+                "balanced_edge_gnn_mode_destination",
+                "balanced_edge_gnn_future_mlp_mode_destination",
+                "future_conditioned_edge_gnn_mode_destination",
+                "gated_residual_edge_gnn_mode_destination",
+                "entity_residual_edge_gnn_mode_destination",
                 "fixed_scale_larger_mlp_mode_destination",
                 "fixed_scale_edge_gnn_mode_destination",
                 "stable_tcn_mode_destination",
@@ -156,7 +184,27 @@ class MpcDemonstrationBatch:
                     np.float32,
                     copy=False,
                 )
-            return {"state": enriched, "forecast": self.forecast}
+            observation = {"state": enriched, "forecast": self.forecast}
+            if variant in {
+                "gated_past24_mlp_mode_destination",
+                "past24_mlp_mode_destination",
+                "past24_zero_mlp_mode_destination",
+            }:
+                action_dimensions = self.metadata.get("action_dimensions")
+                if not isinstance(action_dimensions, list):
+                    raise ValueError(
+                        "past observations require action_dimensions metadata"
+                    )
+                observation["past"] = demonstration_past_observation(
+                    enriched,
+                    self.actions,
+                    self.seeds,
+                    self.hours,
+                    action_dimensions,
+                    history_hours=PAST_HOURS,
+                    zero=variant == "past24_zero_mlp_mode_destination",
+                )
+            return observation
         raise ValueError(f"unknown demonstration observation variant: {variant}")
 
 
@@ -344,8 +392,14 @@ def collect_mpc_demonstrations(
     env_factory: Callable,
     seeds,
     episode_hours: int = 720,
+    teacher_policy: Callable | None = None,
+    mpc_objective_mode: str | None = None,
 ) -> MpcDemonstrationBatch:
-    """Collect exact native-MPC actions and validate each complete trace twice."""
+    """Collect native teacher actions and validate each complete trace twice.
+
+    The default teacher is rolling MPC. ``teacher_policy`` supports deterministic
+    native baselines, which do not expose MPC candidate-plan labels.
+    """
 
     seed_values = [int(seed) for seed in seeds]
     if not seed_values:
@@ -367,19 +421,28 @@ def collect_mpc_demonstrations(
     for seed in seed_values:
         env = env_factory(demonstration=True)
         env.reset(seed=seed)
-        seed_candidate_names = native_mpc_candidate_names(env)
-        if candidate_names is None:
-            candidate_names = seed_candidate_names
-        elif candidate_names != seed_candidate_names:
-            raise RuntimeError("MPC candidate names changed across demonstration seeds")
-        candidate_index = {
-            name: index for index, name in enumerate(seed_candidate_names)
-        }
+        if teacher_policy is None:
+            seed_candidate_names = native_mpc_candidate_names(env)
+            if candidate_names is None:
+                candidate_names = seed_candidate_names
+            elif candidate_names != seed_candidate_names:
+                raise RuntimeError("MPC candidate names changed across demonstration seeds")
+            candidate_index = {
+                name: index for index, name in enumerate(seed_candidate_names)
+            }
+        else:
+            candidate_index = None
         replay_env = copy.deepcopy(env)
-        controller = RollingNativeMpcController(
-            env,
-            replan_every=24,
-            planning_horizon_h=168,
+        controller_kwargs = {
+            "replan_every": 24,
+            "planning_horizon_h": 168,
+        }
+        if mpc_objective_mode is not None:
+            controller_kwargs["objective_mode"] = mpc_objective_mode
+        controller = (
+            RollingNativeMpcController(env, **controller_kwargs)
+            if teacher_policy is None
+            else None
         )
         native_actions: list[dict[str, list[int]]] = []
 
@@ -409,20 +472,23 @@ def collect_mpc_demonstrations(
                 )
             )
 
-            native_action = controller(env)
-            if not controller.last_trace_replay_is_exact:
+            native_action = (
+                controller(env) if controller is not None else teacher_policy(env)
+            )
+            if controller is not None and not controller.last_trace_replay_is_exact:
                 details = _mismatch_details(controller.last_trace_replay_mismatches)
                 raise RuntimeError(
                     f"MPC candidate replay mismatch at seed={seed}, hour={hour}: {details}"
                 )
             actions.append(flat_action_from_native(env, native_action))
-            try:
-                plan_candidates.append(candidate_index[controller.last_candidate_name])
-            except KeyError as error:
-                raise RuntimeError(
-                    f"unknown MPC candidate at seed={seed}, hour={hour}: "
-                    f"{controller.last_candidate_name!r}"
-                ) from error
+            if controller is not None:
+                try:
+                    plan_candidates.append(candidate_index[controller.last_candidate_name])
+                except KeyError as error:
+                    raise RuntimeError(
+                        f"unknown MPC candidate at seed={seed}, hour={hour}: "
+                        f"{controller.last_candidate_name!r}"
+                    ) from error
             native_actions.append(copy.deepcopy(native_action))
             recorded_seeds.append(seed)
             hours.append(hour)
@@ -467,8 +533,127 @@ def collect_mpc_demonstrations(
         metadata=env_factory.metadata(),
         operation_modes=np.asarray(operation_modes, dtype=np.float32),
         vessel_destinations=np.asarray(vessel_destinations, dtype=np.float32),
-        plan_candidates=np.asarray(plan_candidates, dtype=np.int64),
+        plan_candidates=(
+            np.asarray(plan_candidates, dtype=np.int64)
+            if teacher_policy is None
+            else None
+        ),
         candidate_names=candidate_names,
+    )
+
+
+def collect_dagger_demonstrations(
+    env_factory: Callable,
+    seeds,
+    *,
+    behavior_policy: Callable,
+    expert_policy: Callable,
+    episode_hours: int = 720,
+) -> MpcDemonstrationBatch:
+    """Label states visited by ``behavior_policy`` with ``expert_policy`` actions.
+
+    The environment advances with the behavior action.  The stored ``actions`` are
+    expert labels, which is the defining distinction between DAgger and ordinary
+    expert demonstration collection.  Each behavior trace is replay-validated
+    before its labelled rows are returned.
+    """
+
+    seed_values = [int(seed) for seed in seeds]
+    if not seed_values:
+        raise ValueError("seeds must contain at least one value")
+    if episode_hours <= 0:
+        raise ValueError("episode_hours must be positive")
+
+    states: list[np.ndarray] = []
+    forecasts: list[np.ndarray] = []
+    expert_actions: list[np.ndarray] = []
+    masks: list[np.ndarray] = []
+    recorded_seeds: list[int] = []
+    hours: list[int] = []
+    operation_modes: list[np.ndarray] = []
+    vessel_destinations: list[np.ndarray] = []
+
+    for seed in seed_values:
+        env = env_factory(demonstration=True)
+        env.reset(seed=seed)
+        replay_env = copy.deepcopy(env)
+        behavior_actions: list[dict[str, list[int]]] = []
+
+        for hour in range(int(episode_hours)):
+            states.append(np.asarray(current_state_observation(env), dtype=np.float32))
+            operation_modes.append(
+                np.asarray(vessel_operation_mode_observation(env), dtype=np.float32).reshape(
+                    len(env.vessel_ids), 5
+                )
+            )
+            vessel_destinations.append(
+                np.asarray(
+                    vessel_sailing_destination_observation(env),
+                    dtype=np.float32,
+                ).reshape(
+                    len(env.vessel_ids),
+                    len(env.terminal_ids) + len(env.emitter_ids),
+                )
+            )
+            forecasts.append(
+                np.asarray(future_forecast_observation(env), dtype=np.float32)
+            )
+            masks.append(
+                flat_action_mask(
+                    env.vessel_action_mask(),
+                    env.well_rate_action_mask(),
+                )
+            )
+
+            expert_action = expert_policy(env)
+            behavior_action = behavior_policy(env)
+            expert_actions.append(flat_action_from_native(env, expert_action))
+            behavior_actions.append(copy.deepcopy(behavior_action))
+            recorded_seeds.append(seed)
+            hours.append(hour)
+
+            _observation, _reward, terminated, truncated, _info = env.step(
+                behavior_action
+            )
+            if (terminated or truncated) and hour + 1 < episode_hours:
+                raise RuntimeError(
+                    f"seed={seed}, hour={hour}: premature episode completion; "
+                    f"expected {episode_hours} rows"
+                )
+
+        initial_replay = replay_native_actions(
+            replay_env,
+            behavior_actions,
+            horizon_h=episode_hours,
+        )
+        if not initial_replay.is_executable:
+            raise RuntimeError(
+                f"DAgger behavior replay is not executable for seed={seed}: "
+                f"{_mismatch_details(initial_replay.mismatches)}"
+            )
+        expectation = _expectation_from_snapshot(initial_replay.actual)
+        exact_replay = replay_native_actions(
+            replay_env,
+            behavior_actions,
+            horizon_h=episode_hours,
+            expected=expectation,
+        )
+        if not exact_replay.is_exact:
+            raise RuntimeError(
+                f"DAgger behavior replay is not exact for seed={seed}: "
+                f"{_mismatch_details(exact_replay.mismatches)}"
+            )
+
+    return MpcDemonstrationBatch(
+        state=np.asarray(states, dtype=np.float32),
+        forecast=np.asarray(forecasts, dtype=np.float32),
+        actions=np.asarray(expert_actions, dtype=np.int64),
+        masks=np.asarray(masks, dtype=bool),
+        seeds=np.asarray(recorded_seeds, dtype=np.int64),
+        hours=np.asarray(hours, dtype=np.int64),
+        metadata=env_factory.metadata(),
+        operation_modes=np.asarray(operation_modes, dtype=np.float32),
+        vessel_destinations=np.asarray(vessel_destinations, dtype=np.float32),
     )
 
 

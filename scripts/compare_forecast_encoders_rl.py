@@ -32,20 +32,22 @@ from sim.control.imitation import (
     make_kickstart_callback,
 )
 from sim.control.native_mpc import RollingNativeMpcController
-from sim.control.vessel_diagnostics import (
-    VesselRolloutDiagnostics,
-    demonstration_mode_diagnostics,
-    masked_vessel_action_probabilities,
-)
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
 from sim.environment.forecast_encoder import (
+    BalancedEdgeGNNForecastExtractor,
+    BalancedEdgeGNNFutureMLPForecastExtractor,
     EdgeGNNForecastExtractor,
+    EntityResidualEdgeGNNForecastExtractor,
     FixedScaleEdgeGNNForecastExtractor,
     FixedScaleLargerMLPForecastExtractor,
     FixedScaleTCNForecastExtractor,
+    FutureConditionedEdgeGNNForecastExtractor,
     FutureMLPForecastExtractor,
     GNNForecastExtractor,
+    GatedPastMLPForecastExtractor,
+    GatedResidualEdgeGNNForecastExtractor,
     LargerMLPForecastExtractor,
+    PastMLPForecastExtractor,
     StableTCNForecastExtractor,
     TCNForecastExtractor,
 )
@@ -56,8 +58,11 @@ from sim.environment.forecast_gym import (
     variant_uses_learned_plan_context,
     variant_uses_oracle_candidate,
     variant_uses_operation_modes,
+    variant_uses_past,
+    variant_uses_zero_past,
 )
 from sim.environment.gym_adapter import flat_action_mask, native_action_from_flat
+from sim.environment.past import PAST_HOURS, PastObservationBuffer
 from sim.environment.vessel_mode import (
     VESSEL_OPERATION_MODES,
     vessel_operation_mode_feature_names,
@@ -178,10 +183,11 @@ def _add_locked_protocol_defaults(parser: argparse.ArgumentParser) -> None:
         scenario=FORMAL_SCENARIO,
         forecast_horizon_h=FORECAST_HORIZON_H,
         weather_mode="block",
-        reward_mode="vent_first",
-        vent_first_vent_eur_per_t=10_000.0,
-        overflow_risk_eur_per_t=100.0,
-        overflow_risk_lookahead_h=24.0,
+        reward_mode="economic",
+        mpc_objective_mode="economic",
+        carbon_price_eur_per_t=80.0,
+        store_reward_eur_per_t=0.0,
+        vent_penalty_weight=1.0,
         operating_cost_weight=1.0,
         enforce_full_load_dispatch=False,
         require_empty_terminal_departure=True,
@@ -200,6 +206,7 @@ def parse_args(argv=None):
     demos = commands.add_parser("generate-demos")
     demos.add_argument("--demo-cache", required=True)
     demos.add_argument("--demo-seeds", type=int, nargs="+", required=True)
+    demos.add_argument("--teacher", choices=("mpc", "greedy"), default="mpc")
     _add_locked_protocol_defaults(demos)
 
     merge = commands.add_parser("merge-demos")
@@ -221,7 +228,17 @@ def parse_args(argv=None):
             "gnn_mode_destination",
             "larger_mlp_mode_destination",
             "edge_gnn_mode_destination",
+            "future_mlp",
+            "future_mlp_mode",
             "future_mlp_mode_destination",
+            "gated_past24_mlp_mode_destination",
+            "past24_mlp_mode_destination",
+            "past24_zero_mlp_mode_destination",
+            "balanced_edge_gnn_mode_destination",
+            "balanced_edge_gnn_future_mlp_mode_destination",
+            "future_conditioned_edge_gnn_mode_destination",
+            "gated_residual_edge_gnn_mode_destination",
+            "entity_residual_edge_gnn_mode_destination",
             "fixed_scale_larger_mlp_mode_destination",
             "fixed_scale_edge_gnn_mode_destination",
             "stable_tcn_mode_destination",
@@ -245,6 +262,8 @@ def parse_args(argv=None):
     train.add_argument("--n-steps", type=int, default=512)
     train.add_argument("--batch-size", type=int, default=64)
     train.add_argument("--bc-batch-size", type=int, default=256)
+    train.add_argument("--bc-lr", type=float, default=1e-3)
+    train.add_argument("--bc-label-smoothing", type=float, default=0.0)
     train.add_argument("--model-seed", type=int, default=0)
     train.add_argument("--eval-seeds", type=int, nargs="+", default=[101, 102, 103, 104, 105])
     train.add_argument("--device", default="auto")
@@ -256,7 +275,6 @@ def parse_args(argv=None):
     train.set_defaults(
         gamma=0.999,
         learning_rate=3e-4,
-        bc_lr=1e-3,
         nonwait_weight=10.0,
         replan_action_weight=1.0,
         kickstart_coef=1.0,
@@ -280,10 +298,10 @@ def make_experiment_env(args, demonstration: bool = False):
         scenario=FORMAL_SCENARIO,
         weather_mode="block",
         include_weather_obs=False,
-        reward_mode="vent_first",
-        vent_first_vent_eur_per_t=10_000.0,
-        overflow_risk_eur_per_t=100.0,
-        overflow_risk_lookahead_h=24.0,
+        reward_mode="economic",
+        carbon_price_eur_per_t=80.0,
+        store_reward_eur_per_t=0.0,
+        vent_penalty_weight=1.0,
         operating_cost_weight=1.0,
         enforce_full_load_dispatch=False,
         require_empty_terminal_departure=True,
@@ -329,10 +347,10 @@ class ExperimentEnvFactory:
             "weather_observation_layout": env.config.weather_observation_layout,
             "include_weather_obs": False,
             "reward": {
-                "mode": "vent_first",
-                "vent_eur_per_t": 10_000.0,
-                "overflow_risk_eur_per_t": 100.0,
-                "overflow_risk_lookahead_h": 24.0,
+                "mode": "economic",
+                "carbon_price_eur_per_t": 80.0,
+                "store_reward_eur_per_t": 0.0,
+                "vent_penalty_weight": 1.0,
                 "operating_cost_weight": 1.0,
             },
             "partial_load_dispatch": True,
@@ -359,6 +377,13 @@ def model_policy_config(variant: str):
         "larger_mlp": LargerMLPForecastExtractor,
         "edge_gnn": EdgeGNNForecastExtractor,
         "future_mlp": FutureMLPForecastExtractor,
+        "gated_past_mlp": GatedPastMLPForecastExtractor,
+        "past_mlp": PastMLPForecastExtractor,
+        "balanced_edge_gnn": BalancedEdgeGNNForecastExtractor,
+        "balanced_edge_gnn_future_mlp": BalancedEdgeGNNFutureMLPForecastExtractor,
+        "future_conditioned_edge_gnn": FutureConditionedEdgeGNNForecastExtractor,
+        "gated_residual_edge_gnn": GatedResidualEdgeGNNForecastExtractor,
+        "entity_residual_edge_gnn": EntityResidualEdgeGNNForecastExtractor,
         "fixed_scale_larger_mlp": FixedScaleLargerMLPForecastExtractor,
         "fixed_scale_edge_gnn": FixedScaleEdgeGNNForecastExtractor,
         "stable_tcn": StableTCNForecastExtractor,
@@ -366,12 +391,15 @@ def model_policy_config(variant: str):
     }
     base_encoder = variant_base_encoder(variant)
     if base_encoder in extractor_classes:
+        extractor_kwargs = {
+            "state_features": 64,
+            "forecast_features": 64,
+        }
+        if base_encoder in {"gated_past_mlp", "past_mlp"}:
+            extractor_kwargs["past_features"] = 64
         return "MultiInputPolicy", {
             "features_extractor_class": extractor_classes[base_encoder],
-            "features_extractor_kwargs": {
-                "state_features": 64,
-                "forecast_features": 64,
-            },
+            "features_extractor_kwargs": extractor_kwargs,
         }
     if base_encoder == "tcn":
         return "MultiInputPolicy", {
@@ -417,27 +445,6 @@ def run_manifest_path(args) -> Path:
     )
 
 
-def demo_diagnostics_path(args) -> Path:
-    return Path(args.out_dir) / (
-        f"demo_mode_diagnostics_{args.variant}{_bc_objective_suffix(args)}_seed"
-        f"{args.model_seed}.csv"
-    )
-
-
-def heldout_demo_diagnostics_path(args) -> Path:
-    return Path(args.out_dir) / (
-        f"heldout_demo_mode_diagnostics_{args.variant}{_bc_objective_suffix(args)}_seed"
-        f"{args.model_seed}.csv"
-    )
-
-
-def rollout_diagnostics_path(args) -> Path:
-    return Path(args.out_dir) / (
-        f"rollout_mode_diagnostics_{args.variant}{_bc_objective_suffix(args)}_seed"
-        f"{args.model_seed}.csv"
-    )
-
-
 def _bc_objective_suffix(args) -> str:
     objective = getattr(args, "bc_objective", "current")
     return "" if objective == "current" else f"_{objective}"
@@ -452,35 +459,6 @@ def normalize_demo_cache_path(path) -> Path:
     if cache_path.suffix != ".npz":
         cache_path = Path(f"{cache_path}.npz")
     return cache_path
-
-
-def heldout_demonstration_diagnostics(
-    model,
-    batch,
-    *,
-    variant: str,
-    vessel_count: int,
-    stage: str,
-    model_seed: int,
-) -> list[dict[str, object]]:
-    if batch.operation_modes is None:
-        raise ValueError("held-out diagnostics require operation mode observations")
-    observations = batch.observations(variant)
-    return [
-        {
-            "stage": stage,
-            "model_seed": int(model_seed),
-            **row,
-        }
-        for row in demonstration_mode_diagnostics(
-            model,
-            observations,
-            batch.actions,
-            batch.masks,
-            batch.operation_modes,
-            vessel_count,
-        )
-    ]
 
 
 def file_sha256(path: Path) -> str:
@@ -534,27 +512,6 @@ def write_results_csv(path: Path, rows: list[dict[str, object]]) -> None:
     _write_bytes_immutable(path, buffer.getvalue().encode("utf-8"))
 
 
-def write_diagnostics_csv(path: Path, rows: list[dict[str, object]]) -> None:
-    if not rows:
-        raise ValueError(f"cannot write empty diagnostic CSV: {path}")
-    fields = list(rows[0])
-    if any(list(row) != fields for row in rows):
-        raise ValueError("diagnostic rows do not share a stable schema")
-    buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n")
-    writer.writeheader()
-    for row in rows:
-        writer.writerow(
-            {
-                key: ""
-                if isinstance(value, (float, np.floating)) and not np.isfinite(value)
-                else value
-                for key, value in row.items()
-            }
-        )
-    _write_bytes_immutable(Path(path), buffer.getvalue().encode("utf-8"))
-
-
 def generate_demos(args) -> dict[str, object]:
     cache_path = normalize_demo_cache_path(args.demo_cache)
     if cache_path.exists():
@@ -563,12 +520,14 @@ def generate_demos(args) -> dict[str, object]:
         ExperimentEnvFactory(args),
         seeds=args.demo_seeds,
         episode_hours=args.episode_hours,
+        teacher_policy=(greedy_shuttle_policy if args.teacher == "greedy" else None),
+        mpc_objective_mode=args.mpc_objective_mode,
     )
     save_demonstrations(batch, cache_path)
     if not cache_path.exists():
         raise RuntimeError(f"demonstration writer did not create requested cache: {cache_path}")
     manifest = {
-        "kind": "mpc_demonstration_cache",
+        "kind": f"{args.teacher}_demonstration_cache",
         "cache_path": str(cache_path.resolve()),
         "cache_sha256": file_sha256(cache_path),
         "git_commit": git_commit(),
@@ -579,9 +538,16 @@ def generate_demos(args) -> dict[str, object]:
             "forecast_horizon_h": int(args.forecast_horizon_h),
             "demonstration_native_episode_hours": int(args.episode_hours + args.forecast_horizon_h + 1),
             "scenario_context_hours": 0,
-            "teacher": "RollingNativeMpcController",
-            "replan_every_h": 24,
-            "planning_horizon_h": 168,
+            "teacher": (
+                "RollingNativeMpcController"
+                if args.teacher == "mpc"
+                else "greedy_shuttle_policy"
+            ),
+            "teacher_objective_mode": (
+                args.mpc_objective_mode if args.teacher == "mpc" else None
+            ),
+            "replan_every_h": 24 if args.teacher == "mpc" else None,
+            "planning_horizon_h": 168 if args.teacher == "mpc" else None,
             "replay_validation": "exact",
         },
     }
@@ -659,11 +625,12 @@ def demonstration_accuracy(model, observations, actions, masks) -> tuple[float, 
 
 
 def should_emit_baselines(args) -> bool:
-    return (
-        args.variant == "state"
-        and int(args.model_seed) == 0
-        and getattr(args, "bc_objective", "current") == "current"
+    objective = getattr(args, "bc_objective", "current")
+    is_primary_run = (
+        (args.variant == "state" and objective == "current")
+        or (args.variant == "future_mlp" and objective == "decision_only")
     )
+    return is_primary_run and int(args.model_seed) == 0
 
 
 def metric_result_row(
@@ -748,7 +715,6 @@ def evaluate_learned_stage(
     trainable_parameters: int,
     demonstration_exact_match: float,
     demonstration_action_accuracy: list[float],
-    rollout_diagnostic_rows: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     rows = []
     for deterministic in (False, True):
@@ -756,23 +722,33 @@ def evaluate_learned_stage(
             if hasattr(model, "set_random_seed"):
                 model.set_random_seed(int(eval_seed))
             env = ExperimentEnvFactory(args)()
-            tracker = VesselRolloutDiagnostics()
+            past_buffer = (
+                PastObservationBuffer(
+                    len(current_state_feature_names(env))
+                    + 5 * len(env.vessel_ids)
+                    + len(env.vessel_ids)
+                    * (len(env.terminal_ids) + len(env.emitter_ids)),
+                    [*env.vessel_action_dims, *env.well_rate_action_dims],
+                    hours=PAST_HOURS,
+                )
+                if variant_uses_past(args.variant)
+                else None
+            )
 
             def policy(native_env):
-                observation = forecast_policy_observation(native_env, args.variant)
+                observation = forecast_policy_observation(
+                    native_env,
+                    args.variant,
+                    past_observation=(
+                        past_buffer.observation(
+                            zero=variant_uses_zero_past(args.variant)
+                        )
+                        if past_buffer is not None
+                        else None
+                    ),
+                )
                 masks = flat_action_mask(
                     native_env.vessel_action_mask(), native_env.well_rate_action_mask()
-                )
-                observation_batch = (
-                    {key: np.asarray(value)[None, ...] for key, value in observation.items()}
-                    if isinstance(observation, dict)
-                    else np.asarray(observation)[None, ...]
-                )
-                probabilities = masked_vessel_action_probabilities(
-                    model,
-                    observation_batch,
-                    masks[None, ...],
-                    len(native_env.vessel_ids),
                 )
                 action, _state = model.predict(
                     observation,
@@ -780,11 +756,8 @@ def evaluate_learned_stage(
                     action_masks=masks,
                 )
                 native_action = native_action_from_flat(native_env, action)
-                tracker.observe(
-                    native_env,
-                    native_action["vessels"],
-                    wait_probabilities=[float(values[0, 0]) for values in probabilities],
-                )
+                if past_buffer is not None:
+                    past_buffer.append(observation["state"], np.asarray(action))
                 return native_action
 
             metrics, runtime, latency = _timed_episode(env, policy, int(eval_seed))
@@ -805,15 +778,6 @@ def evaluate_learned_stage(
                     demonstration_action_accuracy=demonstration_action_accuracy,
                 )
             )
-            if rollout_diagnostic_rows is not None:
-                rollout_diagnostic_rows.extend(
-                    tracker.rows(
-                        stage=stage,
-                        deterministic=bool(deterministic),
-                        model_seed=int(args.model_seed),
-                        eval_seed=int(eval_seed),
-                    )
-                )
     return rows
 
 
@@ -833,6 +797,7 @@ def evaluate_reference_rows(args) -> list[dict[str, object]]:
                     env,
                     replan_every=24,
                     planning_horizon_h=168,
+                    objective_mode=args.mpc_objective_mode,
                 )
             metrics, runtime, latency = _timed_episode(env, policy, int(eval_seed))
             rows.append(
@@ -860,11 +825,7 @@ def _ensure_new_run_outputs(args) -> None:
         checkpoint_path(args, "bc"),
         results_path(args),
         run_manifest_path(args),
-        demo_diagnostics_path(args),
-        rollout_diagnostics_path(args),
     ]
-    if args.heldout_demo_cache:
-        paths.append(heldout_demo_diagnostics_path(args))
     if not args.bc_only:
         paths.append(checkpoint_path(args, "ppo"))
     collisions = [str(path) for path in paths if path.exists()]
@@ -921,6 +882,12 @@ def _train_loaded_batch(
         raise ValueError("replan action weighting requires --bc-objective decision_only")
     if args.imitation_only and not args.bc_only:
         raise ValueError("--imitation-only requires --bc-only")
+    if not 0.0 <= args.bc_label_smoothing < 1.0:
+        raise ValueError("--bc-label-smoothing must be in [0, 1)")
+    if args.bc_label_smoothing and args.bc_objective == "decision_balanced":
+        raise ValueError(
+            "label smoothing is not implemented for decision-balanced BC"
+        )
     if (
         variant_uses_oracle_candidate(args.variant)
         or variant_uses_learned_plan_context(args.variant)
@@ -978,6 +945,7 @@ def _train_loaded_batch(
             epochs=args.bc_epochs,
             batch_size=args.bc_batch_size,
             lr=args.bc_lr,
+            label_smoothing=args.bc_label_smoothing,
             log=bool(args.verbose),
         )
     elif args.bc_objective == "decision_only":
@@ -1004,6 +972,7 @@ def _train_loaded_batch(
             epochs=args.bc_epochs,
             batch_size=args.bc_batch_size,
             lr=args.bc_lr,
+            label_smoothing=args.bc_label_smoothing,
             log=bool(args.verbose),
         )
     else:
@@ -1025,37 +994,6 @@ def _train_loaded_batch(
     bc_accuracy, bc_dimension_accuracy = demonstration_accuracy(
         model, observations, batch.actions, batch.masks
     )
-    demo_diagnostic_rows = []
-    heldout_diagnostic_rows = []
-    rollout_diagnostic_rows = []
-    operation_modes = getattr(batch, "operation_modes", None)
-    if operation_modes is not None:
-        demo_diagnostic_rows.extend(
-            {
-                "stage": "bc",
-                "model_seed": int(args.model_seed),
-                **row,
-            }
-            for row in demonstration_mode_diagnostics(
-                model,
-                observations,
-                batch.actions,
-                batch.masks,
-                operation_modes,
-                len(native_env.vessel_ids),
-            )
-        )
-    if heldout_batch is not None:
-        heldout_diagnostic_rows.extend(
-            heldout_demonstration_diagnostics(
-                model,
-                heldout_batch,
-                variant=args.variant,
-                vessel_count=len(native_env.vessel_ids),
-                stage="bc",
-                model_seed=args.model_seed,
-            )
-        )
     bc_path = checkpoint_path(args, "bc")
     model.save(str(bc_path))
     rows = []
@@ -1067,7 +1005,6 @@ def _train_loaded_batch(
             trainable_parameters=parameter_count,
             demonstration_exact_match=bc_accuracy,
             demonstration_action_accuracy=bc_dimension_accuracy,
-            rollout_diagnostic_rows=rollout_diagnostic_rows,
         )
 
     ppo_accuracy = None
@@ -1096,33 +1033,6 @@ def _train_loaded_batch(
         ppo_accuracy, ppo_dimension_accuracy = demonstration_accuracy(
             model, observations, batch.actions, batch.masks
         )
-        if operation_modes is not None:
-            demo_diagnostic_rows.extend(
-                {
-                    "stage": "ppo",
-                    "model_seed": int(args.model_seed),
-                    **row,
-                }
-                for row in demonstration_mode_diagnostics(
-                    model,
-                    observations,
-                    batch.actions,
-                    batch.masks,
-                    operation_modes,
-                    len(native_env.vessel_ids),
-                )
-            )
-        if heldout_batch is not None:
-            heldout_diagnostic_rows.extend(
-                heldout_demonstration_diagnostics(
-                    model,
-                    heldout_batch,
-                    variant=args.variant,
-                    vessel_count=len(native_env.vessel_ids),
-                    stage="ppo",
-                    model_seed=args.model_seed,
-                )
-            )
         ppo_path = checkpoint_path(args, "ppo")
         model.save(str(ppo_path))
         rows.extend(
@@ -1133,21 +1043,11 @@ def _train_loaded_batch(
                 trainable_parameters=parameter_count,
                 demonstration_exact_match=ppo_accuracy,
                 demonstration_action_accuracy=ppo_dimension_accuracy,
-                rollout_diagnostic_rows=rollout_diagnostic_rows,
             )
         )
     if not args.imitation_only:
         rows.extend(evaluate_reference_rows(args))
     write_results_csv(results_path(args), rows)
-    if demo_diagnostic_rows:
-        write_diagnostics_csv(demo_diagnostics_path(args), demo_diagnostic_rows)
-    if heldout_diagnostic_rows:
-        write_diagnostics_csv(
-            heldout_demo_diagnostics_path(args),
-            heldout_diagnostic_rows,
-        )
-    if rollout_diagnostic_rows:
-        write_diagnostics_csv(rollout_diagnostics_path(args), rollout_diagnostic_rows)
 
     demo_seeds = sorted({int(seed) for seed in np.asarray(batch.seeds).tolist()})
     manifest = {
@@ -1170,19 +1070,6 @@ def _train_loaded_batch(
             "ppo": str(ppo_path) if ppo_path is not None else None,
         },
         "results_csv": str(results_path(args)),
-        "diagnostics": {
-            "demonstration_mode_csv": (
-                str(demo_diagnostics_path(args)) if demo_diagnostic_rows else None
-            ),
-            "heldout_demonstration_mode_csv": (
-                str(heldout_demo_diagnostics_path(args))
-                if heldout_diagnostic_rows
-                else None
-            ),
-            "rollout_mode_csv": (
-                str(rollout_diagnostics_path(args)) if rollout_diagnostic_rows else None
-            ),
-        },
         "environment": metadata,
         "policy": policy_manifest(args.variant),
         "bc": {
@@ -1190,6 +1077,7 @@ def _train_loaded_batch(
             "epochs": int(args.bc_epochs),
             "batch_size": int(args.bc_batch_size),
             "learning_rate": float(args.bc_lr),
+            "label_smoothing": float(args.bc_label_smoothing),
             "nonwait_action_dimension_weight": (
                 1.0 if args.bc_objective == "decision_balanced"
                 else float(args.nonwait_weight)

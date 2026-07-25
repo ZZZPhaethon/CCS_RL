@@ -44,6 +44,8 @@ def test_operation_mode_variants_append_modes_to_current_state_only():
     base_state = forecast_policy_observation(native, "state")
     state_mode = forecast_policy_observation(native, "state_mode")
     tcn_mode = forecast_policy_observation(native, "tcn_mode")
+    future_mlp = forecast_policy_observation(native, "future_mlp")
+    future_mlp_mode = forecast_policy_observation(native, "future_mlp_mode")
     mode_size = len(native.vessel_ids) * 5
 
     assert state_mode.shape == (len(base_state) + mode_size,)
@@ -51,7 +53,10 @@ def test_operation_mode_variants_append_modes_to_current_state_only():
     modes = state_mode[-mode_size:].reshape(len(native.vessel_ids), 5)
     np.testing.assert_array_equal(modes.sum(axis=1), np.ones(len(native.vessel_ids)))
     np.testing.assert_array_equal(tcn_mode["state"], state_mode)
+    np.testing.assert_array_equal(future_mlp["state"], base_state)
+    np.testing.assert_array_equal(future_mlp_mode["state"], state_mode)
     assert tcn_mode["forecast"].shape == (168, 9)
+    assert future_mlp_mode["forecast"].shape == (168, 9)
 
 
 def test_tcn_mode_destination_appends_sailing_target_without_changing_legacy_variant():
@@ -176,12 +181,46 @@ def test_learned_plan_context_variant_appends_continuous_context():
 
 
 @pytest.mark.parametrize(
+    ("variant", "zero"),
+    [
+        ("gated_past24_mlp_mode_destination", False),
+        ("past24_mlp_mode_destination", False),
+        ("past24_zero_mlp_mode_destination", True),
+    ],
+)
+def test_past_mlp_observation_is_strictly_pre_action_and_padded(variant, zero):
+    wrapped = ForecastGymEnv(_native(), variant)
+    observation, _ = wrapped.reset(seed=4)
+
+    assert set(observation) == {"state", "past", "forecast"}
+    assert observation["state"].shape == (78,)
+    assert observation["past"].shape == (24, 83)
+    np.testing.assert_array_equal(observation["past"], 0.0)
+    initial_state = observation["state"].copy()
+
+    action = np.zeros(len(wrapped.action_space.nvec), dtype=np.int64)
+    observation, *_ = wrapped.step(action)
+
+    if zero:
+        np.testing.assert_array_equal(observation["past"], 0.0)
+    else:
+        np.testing.assert_array_equal(observation["past"][:-1], 0.0)
+        np.testing.assert_array_equal(observation["past"][-1, :78], initial_state)
+        np.testing.assert_array_equal(observation["past"][-1, 78:82], 0.0)
+        assert observation["past"][-1, -1] == 1.0
+    assert wrapped.observation_space.contains(observation)
+
+
+@pytest.mark.parametrize(
     "variant",
     [
         "state", "flat", "tcn", "state_mode", "tcn_mode",
+        "future_mlp", "future_mlp_mode",
         "gnn_mode_destination", "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
         "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
@@ -199,9 +238,12 @@ def test_terminal_observation_retains_declared_shape(variant):
     if variant == "flat":
         assert np.any(observation[51:] != 0.0)
     elif variant in {
-        "tcn", "tcn_mode", "gnn_mode_destination",
+        "tcn", "tcn_mode", "future_mlp", "future_mlp_mode",
+        "gnn_mode_destination",
         "larger_mlp_mode_destination", "edge_gnn_mode_destination",
         "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
@@ -216,9 +258,12 @@ def test_terminal_observation_retains_declared_shape(variant):
     if variant == "flat":
         assert np.any(observation[51:] != 0.0)
     elif variant in {
-        "tcn", "tcn_mode", "gnn_mode_destination",
+        "tcn", "tcn_mode", "future_mlp", "future_mlp_mode",
+        "gnn_mode_destination",
         "larger_mlp_mode_destination", "edge_gnn_mode_destination",
         "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
@@ -290,9 +335,12 @@ def test_action_masks_preserve_native_multidiscrete_order():
     "variant",
     [
         "state", "flat", "tcn", "state_mode", "tcn_mode",
+        "future_mlp", "future_mlp_mode",
         "gnn_mode_destination", "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
         "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
@@ -331,10 +379,14 @@ def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
         expected_state = {
             "tcn": 51,
             "tcn_mode": 66,
+            "future_mlp": 51,
+            "future_mlp_mode": 66,
             "gnn_mode_destination": 78,
             "larger_mlp_mode_destination": 78,
             "edge_gnn_mode_destination": 78,
             "future_mlp_mode_destination": 78,
+            "balanced_edge_gnn_mode_destination": 78,
+            "balanced_edge_gnn_future_mlp_mode_destination": 78,
             "fixed_scale_larger_mlp_mode_destination": 78,
             "fixed_scale_edge_gnn_mode_destination": 78,
             "stable_tcn_mode_destination": 78,
@@ -342,6 +394,13 @@ def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
         }[variant]
         assert captured["observation"]["state"].shape == (expected_state,)
         assert captured["observation"]["forecast"].shape == (168, 9)
+
+
+def test_policy_wrapper_rejects_nonpositive_temperature():
+    from sim.environment.forecast_gym import make_forecast_ppo_policy
+
+    with pytest.raises(ValueError, match="temperature"):
+        make_forecast_ppo_policy(object(), "tcn", temperature=0.0)
 
 
 def test_forecast_gym_interfaces_are_exported():

@@ -15,6 +15,7 @@ from .forecast import (
     replan_phase_observation,
 )
 from .gym_adapter import flat_action_mask, native_action_from_flat
+from .past import PAST_HOURS, PastObservationBuffer
 from .vessel_mode import (
     vessel_operation_mode_observation,
     vessel_sailing_destination_observation,
@@ -30,7 +31,17 @@ ObservationVariant = Literal[
     "gnn_mode_destination",
     "larger_mlp_mode_destination",
     "edge_gnn_mode_destination",
+    "future_mlp",
+    "future_mlp_mode",
     "future_mlp_mode_destination",
+    "gated_past24_mlp_mode_destination",
+    "past24_mlp_mode_destination",
+    "past24_zero_mlp_mode_destination",
+    "balanced_edge_gnn_mode_destination",
+    "balanced_edge_gnn_future_mlp_mode_destination",
+    "future_conditioned_edge_gnn_mode_destination",
+    "gated_residual_edge_gnn_mode_destination",
+    "entity_residual_edge_gnn_mode_destination",
     "fixed_scale_larger_mlp_mode_destination",
     "fixed_scale_edge_gnn_mode_destination",
     "stable_tcn_mode_destination",
@@ -51,7 +62,16 @@ def variant_uses_operation_modes(variant: str) -> bool:
         "gnn_mode_destination",
         "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
+        "future_mlp_mode",
         "future_mlp_mode_destination",
+        "gated_past24_mlp_mode_destination",
+        "past24_mlp_mode_destination",
+        "past24_zero_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
+        "future_conditioned_edge_gnn_mode_destination",
+        "gated_residual_edge_gnn_mode_destination",
+        "entity_residual_edge_gnn_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
@@ -69,6 +89,14 @@ def variant_uses_sailing_destinations(variant: str) -> bool:
         "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
         "future_mlp_mode_destination",
+        "gated_past24_mlp_mode_destination",
+        "past24_mlp_mode_destination",
+        "past24_zero_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
+        "future_conditioned_edge_gnn_mode_destination",
+        "gated_residual_edge_gnn_mode_destination",
+        "entity_residual_edge_gnn_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
@@ -85,6 +113,18 @@ def variant_uses_replan_phase(variant: str) -> bool:
         "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate",
         "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context",
     }
+
+
+def variant_uses_past(variant: str) -> bool:
+    return variant in {
+        "gated_past24_mlp_mode_destination",
+        "past24_mlp_mode_destination",
+        "past24_zero_mlp_mode_destination",
+    }
+
+
+def variant_uses_zero_past(variant: str) -> bool:
+    return variant == "past24_zero_mlp_mode_destination"
 
 
 def variant_uses_oracle_candidate(variant: str) -> bool:
@@ -106,8 +146,29 @@ def variant_base_encoder(variant: str) -> str:
         return "larger_mlp"
     if variant == "edge_gnn_mode_destination":
         return "edge_gnn"
-    if variant == "future_mlp_mode_destination":
+    if variant in {
+        "future_mlp",
+        "future_mlp_mode",
+        "future_mlp_mode_destination",
+    }:
         return "future_mlp"
+    if variant == "gated_past24_mlp_mode_destination":
+        return "gated_past_mlp"
+    if variant in {
+        "past24_mlp_mode_destination",
+        "past24_zero_mlp_mode_destination",
+    }:
+        return "past_mlp"
+    if variant == "balanced_edge_gnn_mode_destination":
+        return "balanced_edge_gnn"
+    if variant == "balanced_edge_gnn_future_mlp_mode_destination":
+        return "balanced_edge_gnn_future_mlp"
+    if variant == "future_conditioned_edge_gnn_mode_destination":
+        return "future_conditioned_edge_gnn"
+    if variant == "gated_residual_edge_gnn_mode_destination":
+        return "gated_residual_edge_gnn"
+    if variant == "entity_residual_edge_gnn_mode_destination":
+        return "entity_residual_edge_gnn"
     if variant == "fixed_scale_larger_mlp_mode_destination":
         return "fixed_scale_larger_mlp"
     if variant == "fixed_scale_edge_gnn_mode_destination":
@@ -133,6 +194,7 @@ def forecast_policy_observation(
     timeout: bool = False,
     oracle_candidate_index: int | None = None,
     learned_plan_context: np.ndarray | None = None,
+    past_observation: np.ndarray | None = None,
 ):
     """Return the observation representation selected for a forecast policy."""
     state = np.asarray(current_state_observation(env), dtype=np.float32)
@@ -180,12 +242,31 @@ def forecast_policy_observation(
         "larger_mlp",
         "edge_gnn",
         "future_mlp",
+        "gated_past_mlp",
+        "past_mlp",
+        "balanced_edge_gnn",
+        "balanced_edge_gnn_future_mlp",
+        "future_conditioned_edge_gnn",
+        "gated_residual_edge_gnn",
+        "entity_residual_edge_gnn",
         "fixed_scale_larger_mlp",
         "fixed_scale_edge_gnn",
         "stable_tcn",
         "fixed_scale_tcn",
     }:
-        return {"state": state, "forecast": forecast}
+        observation = {"state": state, "forecast": forecast}
+        if base_variant in {"gated_past_mlp", "past_mlp"}:
+            expected_shape = (
+                PAST_HOURS,
+                len(state) + len(env.vessel_action_dims) + len(env.well_rate_action_dims) + 1,
+            )
+            past = np.asarray(past_observation, dtype=np.float32)
+            if past.shape != expected_shape or not np.all(np.isfinite(past)):
+                raise ValueError(
+                    f"past observation must be finite with shape {expected_shape}"
+                )
+            observation["past"] = past
+        return observation
     raise AssertionError(f"unhandled forecast observation variant: {variant}")
 
 
@@ -231,6 +312,8 @@ class ForecastGymEnv(Env):
         self.variant = variant
         self.oracle_candidate_index = oracle_candidate_index
         self.learned_plan_context = learned_plan_context
+        self._past_buffer: PastObservationBuffer | None = None
+        self._current_policy_state: np.ndarray | None = None
         self.action_space = spaces.MultiDiscrete(
             env.vessel_action_dims + env.well_rate_action_dims
         )
@@ -262,41 +345,91 @@ class ForecastGymEnv(Env):
             "larger_mlp",
             "edge_gnn",
             "future_mlp",
+            "gated_past_mlp",
+            "past_mlp",
+            "balanced_edge_gnn",
+            "balanced_edge_gnn_future_mlp",
+            "future_conditioned_edge_gnn",
+            "gated_residual_edge_gnn",
+            "entity_residual_edge_gnn",
             "fixed_scale_larger_mlp",
             "fixed_scale_edge_gnn",
             "stable_tcn",
             "fixed_scale_tcn",
         }:
-            self.observation_space = spaces.Dict(
-                {
-                    "state": spaces.Box(-10.0, 10.0, (state_size,), np.float32),
-                    "forecast": spaces.Box(-10.0, 10.0, (168, 9), np.float32),
-                }
-            )
+            observation_spaces = {
+                "state": spaces.Box(-10.0, 10.0, (state_size,), np.float32),
+                "forecast": spaces.Box(-10.0, 10.0, (168, 9), np.float32),
+            }
+            if base_variant in {"gated_past_mlp", "past_mlp"}:
+                action_dimensions = [
+                    *env.vessel_action_dims,
+                    *env.well_rate_action_dims,
+                ]
+                self._past_buffer = PastObservationBuffer(
+                    state_size,
+                    action_dimensions,
+                    hours=PAST_HOURS,
+                )
+                observation_spaces["past"] = spaces.Box(
+                    -10.0,
+                    10.0,
+                    (PAST_HOURS, self._past_buffer.row_size),
+                    np.float32,
+                )
+            self.observation_space = spaces.Dict(observation_spaces)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         episode_seed = int(self.np_random.integers(0, 2**31 - 1))
         self.env.reset(seed=episode_seed)
-        return forecast_policy_observation(
+        if self._past_buffer is not None:
+            self._past_buffer.reset()
+        observation = forecast_policy_observation(
             self.env,
             self.variant,
             oracle_candidate_index=self.oracle_candidate_index,
             learned_plan_context=self.learned_plan_context,
-        ), {}
+            past_observation=(
+                self._past_buffer.observation(zero=variant_uses_zero_past(self.variant))
+                if self._past_buffer is not None
+                else None
+            ),
+        )
+        self._current_policy_state = (
+            np.asarray(observation["state"], dtype=np.float32)
+            if self._past_buffer is not None
+            else None
+        )
+        return observation, {}
 
     def step(self, action):
+        if self._past_buffer is not None:
+            if self._current_policy_state is None:
+                raise RuntimeError("Call reset() before step().")
+            self._past_buffer.append(self._current_policy_state, np.asarray(action))
         _observation, reward, terminated, truncated, info = self.env.step(
             native_action_from_flat(self.env, action)
         )
-        return (
-            forecast_policy_observation(
-                self.env,
-                self.variant,
-                timeout=truncated,
-                oracle_candidate_index=self.oracle_candidate_index,
-                learned_plan_context=self.learned_plan_context,
+        observation = forecast_policy_observation(
+            self.env,
+            self.variant,
+            timeout=truncated,
+            oracle_candidate_index=self.oracle_candidate_index,
+            learned_plan_context=self.learned_plan_context,
+            past_observation=(
+                self._past_buffer.observation(zero=variant_uses_zero_past(self.variant))
+                if self._past_buffer is not None
+                else None
             ),
+        )
+        self._current_policy_state = (
+            np.asarray(observation["state"], dtype=np.float32)
+            if self._past_buffer is not None
+            else None
+        )
+        return (
+            observation,
             float(reward),
             terminated,
             truncated,
@@ -313,19 +446,92 @@ def make_forecast_ppo_policy(
     model,
     variant: ObservationVariant,
     deterministic: bool = False,
+    temperature: float = 1.0,
+    rng: np.random.Generator | None = None,
 ):
     """Wrap a forecast PPO model as a native ``policy(env) -> action``."""
 
+    if temperature <= 0.0:
+        raise ValueError("temperature must be positive")
+    sampling_rng = rng or np.random.default_rng()
+    past_buffer: PastObservationBuffer | None = None
+    last_time_h: float | None = None
+
     def policy(env: CCSEnv):
-        observation = forecast_policy_observation(env, variant)
+        nonlocal past_buffer, last_time_h
+        assert env.simulator is not None
+        time_h = float(env.simulator.state.time_h)
+        if variant_uses_past(variant):
+            state_size = (
+                len(current_state_feature_names(env))
+                + 5 * len(env.vessel_ids)
+                + len(env.vessel_ids)
+                * (len(env.terminal_ids) + len(env.emitter_ids))
+            )
+            if past_buffer is None:
+                past_buffer = PastObservationBuffer(
+                    state_size,
+                    [*env.vessel_action_dims, *env.well_rate_action_dims],
+                    hours=PAST_HOURS,
+                )
+            if last_time_h is None or time_h <= last_time_h:
+                past_buffer.reset()
+        observation = forecast_policy_observation(
+            env,
+            variant,
+            past_observation=(
+                past_buffer.observation(zero=variant_uses_zero_past(variant))
+                if past_buffer is not None
+                else None
+            ),
+        )
         masks = flat_action_mask(
             env.vessel_action_mask(), env.well_rate_action_mask()
         )
-        action, _state = model.predict(
-            observation,
-            deterministic=deterministic,
-            action_masks=masks,
-        )
+        if deterministic or temperature == 1.0:
+            action, _state = model.predict(
+                observation,
+                deterministic=deterministic,
+                action_masks=masks,
+            )
+        else:
+            import torch
+
+            policy_module = model.policy
+            observation_tensor, _vectorized = policy_module.obs_to_tensor(observation)
+            mask_tensor = torch.as_tensor(
+                masks[None, ...],
+                device=policy_module.device,
+            )
+            with torch.no_grad():
+                features = policy_module.extract_features(observation_tensor)
+                if policy_module.share_features_extractor:
+                    latent_pi, _latent_vf = policy_module.mlp_extractor(features)
+                else:
+                    policy_features, _value_features = features
+                    latent_pi = policy_module.mlp_extractor.forward_actor(
+                        policy_features
+                    )
+                distribution = policy_module._get_action_dist_from_latent(latent_pi)
+                distribution.apply_masking(mask_tensor)
+                probabilities = [
+                    categorical.probs[0].detach().cpu().numpy()
+                    for categorical in distribution.distributions
+                ]
+            sharpened = []
+            for values in probabilities:
+                values = np.power(values, 1.0 / temperature)
+                sharpened.append(values / values.sum())
+            action = np.asarray(
+                [
+                    sampling_rng.choice(len(values), p=values)
+                    for values in sharpened
+                ],
+                dtype=np.int64,
+            )
+        if past_buffer is not None:
+            past_buffer.append(observation["state"], np.asarray(action))
+            last_time_h = time_h
         return native_action_from_flat(env, action)
 
     return policy

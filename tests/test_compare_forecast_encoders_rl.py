@@ -11,13 +11,17 @@ import pytest
 from scripts import compare_forecast_encoders_rl as compare
 from sim.environment.forecast import current_state_feature_names, forecast_channel_names
 from sim.environment.forecast_encoder import (
+    BalancedEdgeGNNForecastExtractor,
+    BalancedEdgeGNNFutureMLPForecastExtractor,
     EdgeGNNForecastExtractor,
     FixedScaleEdgeGNNForecastExtractor,
     FixedScaleLargerMLPForecastExtractor,
     FixedScaleTCNForecastExtractor,
     FutureMLPForecastExtractor,
     GNNForecastExtractor,
+    GatedPastMLPForecastExtractor,
     LargerMLPForecastExtractor,
+    PastMLPForecastExtractor,
     StableTCNForecastExtractor,
     TCNForecastExtractor,
 )
@@ -76,7 +80,11 @@ def test_cli_has_all_subcommands_and_locks_formal_defaults(tmp_path):
     assert train.episode_hours == 720
     assert train.forecast_horizon_h == 168
     assert train.weather_mode == "block"
-    assert train.reward_mode == "vent_first"
+    assert train.reward_mode == "economic"
+    assert train.mpc_objective_mode == "economic"
+    assert train.carbon_price_eur_per_t == 80.0
+    assert train.store_reward_eur_per_t == 0.0
+    assert train.vent_penalty_weight == 1.0
     assert train.timesteps == 100_000
     assert train.gamma == 0.999
     assert train.n_steps == 512
@@ -197,10 +205,10 @@ def test_environment_factory_uses_demo_and_training_context_contract(tmp_path):
         assert call["scenario"] == "northern_lights_phase1_3vessels"
         assert call["weather_mode"] == "block"
         assert call["include_weather_obs"] is False
-        assert call["reward_mode"] == "vent_first"
-        assert call["vent_first_vent_eur_per_t"] == 10_000.0
-        assert call["overflow_risk_eur_per_t"] == 100.0
-        assert call["overflow_risk_lookahead_h"] == 24.0
+        assert call["reward_mode"] == "economic"
+        assert call["carbon_price_eur_per_t"] == 80.0
+        assert call["store_reward_eur_per_t"] == 0.0
+        assert call["vent_penalty_weight"] == 1.0
         assert call["operating_cost_weight"] == 1.0
         assert call["enforce_full_load_dispatch"] is False
         assert call["require_empty_terminal_departure"] is True
@@ -226,7 +234,13 @@ def test_metadata_is_derived_from_environment_helpers_without_schema_drift(tmp_p
     assert metadata["action_dimensions"] == [*env.vessel_action_dims, *env.well_rate_action_dims]
     assert metadata["weather_mode"] == "block"
     assert metadata["weather_observation_layout"] == "global"
-    assert metadata["reward"]["mode"] == "vent_first"
+    assert metadata["reward"] == {
+        "mode": "economic",
+        "carbon_price_eur_per_t": 80.0,
+        "store_reward_eur_per_t": 0.0,
+        "vent_penalty_weight": 1.0,
+        "operating_cost_weight": 1.0,
+    }
     assert metadata["partial_load_dispatch"] is True
     assert metadata["require_empty_terminal_departure"] is True
     assert metadata["vessel_destination_feature_names"] == list(
@@ -263,9 +277,45 @@ def test_policy_mapping_uses_custom_extractor_only_for_tcn():
     policy, kwargs = compare.model_policy_config("edge_gnn_mode_destination")
     assert policy == "MultiInputPolicy"
     assert kwargs["features_extractor_class"] is EdgeGNNForecastExtractor
-    policy, kwargs = compare.model_policy_config("future_mlp_mode_destination")
+    for variant in (
+        "future_mlp",
+        "future_mlp_mode",
+        "future_mlp_mode_destination",
+    ):
+        policy, kwargs = compare.model_policy_config(variant)
+        assert policy == "MultiInputPolicy"
+        assert kwargs["features_extractor_class"] is FutureMLPForecastExtractor
+    policy, kwargs = compare.model_policy_config(
+        "gated_past24_mlp_mode_destination"
+    )
     assert policy == "MultiInputPolicy"
-    assert kwargs["features_extractor_class"] is FutureMLPForecastExtractor
+    assert kwargs["features_extractor_class"] is GatedPastMLPForecastExtractor
+    assert kwargs["features_extractor_kwargs"] == {
+        "state_features": 64,
+        "past_features": 64,
+        "forecast_features": 64,
+    }
+    policy, kwargs = compare.model_policy_config("past24_mlp_mode_destination")
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is PastMLPForecastExtractor
+    assert kwargs["features_extractor_kwargs"] == {
+        "state_features": 64,
+        "past_features": 64,
+        "forecast_features": 64,
+    }
+    policy, kwargs = compare.model_policy_config(
+        "balanced_edge_gnn_mode_destination"
+    )
+    assert policy == "MultiInputPolicy"
+    assert kwargs["features_extractor_class"] is BalancedEdgeGNNForecastExtractor
+    policy, kwargs = compare.model_policy_config(
+        "balanced_edge_gnn_future_mlp_mode_destination"
+    )
+    assert policy == "MultiInputPolicy"
+    assert (
+        kwargs["features_extractor_class"]
+        is BalancedEdgeGNNFutureMLPForecastExtractor
+    )
     policy, kwargs = compare.model_policy_config(
         "fixed_scale_larger_mlp_mode_destination"
     )
@@ -293,6 +343,37 @@ def test_cli_accepts_tcn_mode_destination_variant(tmp_path):
     args = _train_args(tmp_path, "tcn_mode_destination")
 
     assert args.variant == "tcn_mode_destination"
+
+
+def test_cli_accepts_bc_label_smoothing(tmp_path):
+    args = _train_args(
+        tmp_path,
+        "entity_residual_edge_gnn_mode_destination",
+        "--bc-label-smoothing",
+        "0.05",
+    )
+
+    assert args.bc_label_smoothing == 0.05
+
+
+def test_future_mlp_decision_only_primary_run_emits_shared_baselines(tmp_path):
+    primary = _train_args(
+        tmp_path,
+        "future_mlp",
+        "--bc-objective",
+        "decision_only",
+        "--bc-only",
+    )
+    enriched = _train_args(
+        tmp_path,
+        "future_mlp_mode",
+        "--bc-objective",
+        "decision_only",
+        "--bc-only",
+    )
+
+    assert compare.should_emit_baselines(primary)
+    assert not compare.should_emit_baselines(enriched)
 
 
 def test_cli_accepts_replan_phase_variant_and_weight(tmp_path):
@@ -349,7 +430,23 @@ def test_cli_accepts_learned_plan_context_imitation_only_variant(tmp_path):
         ("gnn_mode_destination", "GNNForecastExtractor"),
         ("larger_mlp_mode_destination", "LargerMLPForecastExtractor"),
         ("edge_gnn_mode_destination", "EdgeGNNForecastExtractor"),
+        ("future_mlp", "FutureMLPForecastExtractor"),
+        ("future_mlp_mode", "FutureMLPForecastExtractor"),
         ("future_mlp_mode_destination", "FutureMLPForecastExtractor"),
+        (
+            "gated_past24_mlp_mode_destination",
+            "GatedPastMLPForecastExtractor",
+        ),
+        ("past24_mlp_mode_destination", "PastMLPForecastExtractor"),
+        ("past24_zero_mlp_mode_destination", "PastMLPForecastExtractor"),
+        (
+            "balanced_edge_gnn_mode_destination",
+            "BalancedEdgeGNNForecastExtractor",
+        ),
+        (
+            "balanced_edge_gnn_future_mlp_mode_destination",
+            "BalancedEdgeGNNFutureMLPForecastExtractor",
+        ),
         (
             "fixed_scale_larger_mlp_mode_destination",
             "FixedScaleLargerMLPForecastExtractor",
@@ -363,12 +460,18 @@ def test_cli_accepts_learned_plan_context_imitation_only_variant(tmp_path):
     ],
 )
 def test_policy_manifest_records_selected_encoder(variant, extractor_name):
-    assert compare.policy_manifest(variant) == {
+    expected = {
         "name": "MultiInputPolicy",
         "features_extractor": extractor_name,
         "state_features": 64,
         "forecast_features": 64,
     }
+    if extractor_name in {
+        "GatedPastMLPForecastExtractor",
+        "PastMLPForecastExtractor",
+    }:
+        expected["past_features"] = 64
+    assert compare.policy_manifest(variant) == expected
 
 
 def test_cli_accepts_gnn_mode_destination_variant(tmp_path):
@@ -382,7 +485,14 @@ def test_cli_accepts_gnn_mode_destination_variant(tmp_path):
     [
         "larger_mlp_mode_destination",
         "edge_gnn_mode_destination",
+        "future_mlp",
+        "future_mlp_mode",
         "future_mlp_mode_destination",
+        "gated_past24_mlp_mode_destination",
+        "past24_mlp_mode_destination",
+        "past24_zero_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
         "fixed_scale_larger_mlp_mode_destination",
         "fixed_scale_edge_gnn_mode_destination",
         "stable_tcn_mode_destination",
@@ -393,54 +503,6 @@ def test_cli_accepts_new_encoder_variants(tmp_path, variant):
     args = _train_args(tmp_path, variant)
 
     assert args.variant == variant
-
-
-def test_cli_accepts_heldout_demo_cache_and_uses_distinct_diagnostic_path(tmp_path):
-    heldout = tmp_path / "heldout.npz"
-    args = _train_args(
-        tmp_path,
-        "tcn_mode_destination",
-        "--heldout-demo-cache",
-        str(heldout),
-    )
-
-    assert args.heldout_demo_cache == str(heldout)
-    assert compare.heldout_demo_diagnostics_path(args).name == (
-        "heldout_demo_mode_diagnostics_tcn_mode_destination_seed0.csv"
-    )
-
-
-def test_heldout_diagnostics_add_stage_and_model_seed(monkeypatch):
-    expected_rows = [{"vessel": "all", "mode": "all"}]
-    monkeypatch.setattr(
-        compare,
-        "demonstration_mode_diagnostics",
-        lambda *args, **kwargs: expected_rows,
-    )
-    batch = SimpleNamespace(
-        observations=lambda variant: {"variant": variant},
-        actions=np.zeros((1, 4), dtype=np.int64),
-        masks=np.ones((1, 21), dtype=bool),
-        operation_modes=np.ones((1, 3, 5), dtype=np.float32),
-    )
-
-    rows = compare.heldout_demonstration_diagnostics(
-        object(),
-        batch,
-        variant="tcn_mode_destination",
-        vessel_count=3,
-        stage="bc",
-        model_seed=2,
-    )
-
-    assert rows == [
-        {
-            "stage": "bc",
-            "model_seed": 2,
-            "vessel": "all",
-            "mode": "all",
-        }
-    ]
 
 
 def test_train_variant_loads_and_passes_heldout_demonstrations(tmp_path):
@@ -569,115 +631,6 @@ def test_gnn_bc_hpc_script_locks_encoder_only_comparison():
     assert '--heldout-demo-cache "$HELDOUT_DEMO_CACHE"' in source
     assert "--bc-only" in source
     assert "--timesteps 0" in source
-
-
-def _bc_ablation_rows(offset):
-    rows = []
-    for variant in ("state_mode", "tcn_mode"):
-        for model_seed in range(5):
-            for eval_seed in (101, 102):
-                rows.append(
-                    {
-                        "variant": variant,
-                        "stage": "bc",
-                        "deterministic": "true",
-                        "model_seed": str(model_seed),
-                        "eval_seed": str(eval_seed),
-                        "vented_t": str(10.0 + model_seed + offset),
-                        "stored_t": str(100.0 - offset),
-                        "total_cost": str(1000.0 + offset),
-                    }
-                )
-    return rows
-
-
-def test_bc_ablation_report_computes_exact_paired_objective_deltas():
-    from experiments import report_bc_objective_ablation as report
-
-    rows_by_objective = {
-        "current": _bc_ablation_rows(0.0),
-        "decision_only": _bc_ablation_rows(-2.0),
-        "decision_balanced": _bc_ablation_rows(-3.0),
-    }
-
-    paired = report.paired_metric_rows(rows_by_objective, "vented_t")
-    lookup = {
-        (row["comparison"], row["variant"]): row
-        for row in paired
-        if row["deterministic"] is True
-    }
-    assert lookup[("decision_only-current", "state_mode")]["mean_delta"] == -2.0
-    assert lookup[("decision_balanced-current", "tcn_mode")]["mean_delta"] == -3.0
-    assert lookup[("decision_balanced-decision_only", "state_mode")]["mean_delta"] == -1.0
-    assert lookup[("decision_only-current", "state_mode")]["model_sd"] == 0.0
-    assert lookup[("decision_only-current", "state_mode")]["ci95_half_width"] == 0.0
-
-
-def test_bc_ablation_report_rejects_missing_pair_keys():
-    from experiments import report_bc_objective_ablation as report
-
-    rows_by_objective = {
-        "current": _bc_ablation_rows(0.0),
-        "decision_only": _bc_ablation_rows(-2.0)[:-1],
-        "decision_balanced": _bc_ablation_rows(-3.0),
-    }
-    with pytest.raises(ValueError, match="missing paired keys"):
-        report.paired_metric_rows(rows_by_objective, "vented_t")
-
-
-def test_bc_ablation_report_summarizes_decision_and_rollout_diagnostics():
-    from experiments import report_bc_objective_ablation as report
-
-    demo = {}
-    rollout = {}
-    for objective_index, objective in enumerate(report.OBJECTIVES):
-        demo[objective] = [
-            {
-                "variant": "state_mode",
-                "stage": "bc",
-                "model_seed": str(seed),
-                "vessel": "all",
-                "mode": "loading",
-                "dispatch_recall": str(0.4 + 0.1 * objective_index),
-                "conditional_destination_accuracy": "0.5",
-                "voluntary_wait_accuracy": "0.9",
-                "mean_wait_probability": "0.8",
-            }
-            for seed in range(5)
-        ]
-        rollout[objective] = [
-            {
-                "variant": "state_mode",
-                "stage": "bc",
-                "deterministic": "true",
-                "model_seed": str(seed),
-                "eval_seed": str(eval_seed),
-                "vessel": "all",
-                "mode": "all",
-                "dispatch_count": str(30 + objective_index),
-                "partial_load_departure_count": "20",
-                "milk_run_departure_count": "5",
-                "longest_berthed_no_dispatch_streak": "100",
-                "mean_wait_probability": "0.95",
-            }
-            for seed in range(5)
-            for eval_seed in (101, 102)
-        ]
-
-    demo_rows = report.demo_summary_rows(demo)
-    rollout_rows = report.rollout_summary_rows(rollout)
-
-    balanced_demo = next(
-        row for row in demo_rows
-        if row["objective"] == "decision_balanced" and row["variant"] == "state_mode"
-    )
-    assert balanced_demo["dispatch_recall_mean"] == pytest.approx(0.6)
-    balanced_rollout = next(
-        row for row in rollout_rows
-        if row["objective"] == "decision_balanced" and row["variant"] == "state_mode"
-    )
-    assert balanced_rollout["dispatch_count_mean"] == 32.0
-    assert balanced_rollout["episodes"] == 10
 
 
 def test_hpc_scripts_lock_formal_protocol_defaults():
@@ -889,7 +842,6 @@ def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, ob
         "total_targets": 8,
     }
     evaluated = []
-    heldout_rows = [{"stage": "bc", "model_seed": 0}]
     heldout_batch = object()
 
     def fake_evaluate(_args, _model, *, stage, **_kwargs):
@@ -917,12 +869,6 @@ def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, ob
         patch.object(compare, "evaluate_reference_rows", return_value=[]),
         patch.object(compare, "count_trainable_parameters", return_value=12),
         patch.object(compare, "write_results_csv"),
-        patch.object(
-            compare,
-            "heldout_demonstration_diagnostics",
-            return_value=heldout_rows,
-        ) as heldout_diagnostics,
-        patch.object(compare, "write_diagnostics_csv") as write_diagnostics,
         patch.object(compare, "write_json_immutable") as write_manifest,
         patch.object(compare, "git_commit", return_value="abc123"),
     ):
@@ -943,14 +889,6 @@ def test_bc_only_objectives_use_expected_training_path_and_skip_ppo(tmp_path, ob
     assert manifest["bc"]["objective"] == objective
     assert manifest["ppo"]["explicitly_skipped"] is True
     assert manifest["checkpoints"]["ppo"] is None
-    heldout_diagnostics.assert_called_once()
-    write_diagnostics.assert_called_once_with(
-        compare.heldout_demo_diagnostics_path(args),
-        heldout_rows,
-    )
-    assert manifest["diagnostics"]["heldout_demonstration_mode_csv"] == str(
-        compare.heldout_demo_diagnostics_path(args)
-    )
     if objective == "decision_only":
         decision_only.assert_called_once()
         standard_clone.assert_called_once()
@@ -1138,6 +1076,22 @@ def test_generate_demos_normalizes_npz_path_before_collision_check(tmp_path):
     collect.assert_not_called()
     save.assert_not_called()
     assert actual.read_bytes() == b"do-not-overwrite"
+
+
+def test_generate_demos_accepts_greedy_teacher(tmp_path):
+    args = compare.parse_args(
+        [
+            "generate-demos",
+            "--demo-cache",
+            str(tmp_path / "greedy.npz"),
+            "--demo-seeds",
+            "1",
+            "--teacher",
+            "greedy",
+        ]
+    )
+
+    assert args.teacher == "greedy"
 
 
 def _complete_run_manifest():
