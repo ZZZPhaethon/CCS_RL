@@ -1,2 +1,0 @@
-case,episodes,fixed_scenario,horizon_h,status,solve_time_s,is_valid,validation_error,max_binary_integrality_violation,stored_t,deliveries,vented_t,in_transit_t,in_transit_growth_t,shortfall_t,operating_cost,total_cost,cost_per_stored_t,time_limit_s,mip_gap_rel,mip_gap_abs
-static_milp_fixed_horizon_scenario_oracle,1,northern_lights_phase1,720,skipped,,False,static MILP solve skipped,,,,,,,,,,,,,
