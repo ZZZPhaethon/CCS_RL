@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from sim.control import cplex_milp, trip_milp
+from sim.control import cplex_milp
 from sim.control.replay import replay_native_actions
 from sim.environment import VESSEL_WAIT
 from tests.test_rolling_milp import _no_capture_env
@@ -70,14 +70,19 @@ def test_cplex_replay_adapter_separates_executable_from_exact():
     assert any("vented_t" in mismatch for mismatch in replay.mismatches)
 
 
-def test_trip_replay_uses_the_common_exactness_adapter():
+def test_cplex_replay_adapter_matches_the_one_kg_model_resolution():
     env = _no_capture_env(cap_hours=1)
     env.reset(seed=1)
     actions = [{"vessels": [VESSEL_WAIT], "wells": [0]}]
     result = _matching_result(env, actions)
+    result.overflow_risk_t += 1e-3
 
-    replay = trip_milp.replay_trip_milp_plan(env, result)
+    replay = cplex_milp.replay_full_scenario_cplex_plan(env, result)
 
-    assert replay.is_executable
     assert replay.is_exact
-    assert "injection_tph" in replay.compared_fields
+
+    result.overflow_risk_t += 1.5e-3
+    replay = cplex_milp.replay_full_scenario_cplex_plan(env, result)
+
+    assert not replay.is_exact
+    assert any("overflow_risk_t" in mismatch for mismatch in replay.mismatches)

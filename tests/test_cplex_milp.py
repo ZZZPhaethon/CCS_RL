@@ -1,17 +1,26 @@
+import copy
 import unittest
 import inspect
+from dataclasses import replace
 from unittest.mock import patch
 
 from sim.control import cplex_milp
-from sim.economics import EconomicParameters
+from sim.control import rolling_milp
+from sim.economics import CostModel, EconomicParameters
 from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, SubseaManifold, Terminal, Vessel
 from sim.environment import CCSEnv, CCSEnvConfig, WELL_RATE_LEVELS_MTPA
 from sim.environment.env import VESSEL_GO_TERMINAL, VESSEL_WAIT
 from sim.line_source import LineSourceParameters
 from sim.network import PhysicalNetwork
 from sim.operations.pressure_limits import projected_bottomhole_pressure_bar
+from sim.routes import sea_route
 from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
-from tests.test_rolling_milp import _no_capture_env, _two_berth_parallel_env, _two_source_one_ship_fast_env
+from tests.test_rolling_milp import (
+    _cold_env,
+    _no_capture_env,
+    _two_berth_parallel_env,
+    _two_source_one_ship_fast_env,
+)
 
 
 def _two_ship_high_rate_source_env() -> CCSEnv:
@@ -82,6 +91,34 @@ class CplexMilpInterfaceTests(unittest.TestCase):
     def test_module_exposes_full_scenario_solver(self):
         self.assertTrue(hasattr(cplex_milp, "solve_full_scenario_with_cplex"))
 
+    def test_cross_source_leg_distance_is_independent_of_vessel_home_route(self):
+        env = _cold_env(cap_hours=24)
+        env.reset(seed=1)
+        terminal_id = env.terminal_ids[0]
+        source_id = env.emitter_ids[0]
+        expected = sea_route(
+            env.locations[source_id], env.locations[terminal_id]
+        ).distance_km
+
+        for vessel_id in env.vessel_ids:
+            route = env._routes[vessel_id]
+            simulator_leg = env.simulator._dynamic_leg_route(
+                route, source_id, terminal_id
+            )
+            self.assertAlmostEqual(simulator_leg["distance_km"], expected)
+            self.assertAlmostEqual(
+                cplex_milp._dynamic_leg_distance_km(
+                    env, route, source_id, terminal_id
+                ),
+                expected,
+            )
+            self.assertAlmostEqual(
+                rolling_milp._dynamic_leg_distance_km(
+                    env, route, source_id, terminal_id
+                ),
+                expected,
+            )
+
     @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
     def test_solver_command_uses_external_cplex_executable(self):
         cmd = cplex_milp._make_cplex_cmd(
@@ -127,6 +164,422 @@ class CplexMilpInterfaceTests(unittest.TestCase):
         )
 
         self.assertEqual(label, "Integer Feasible")
+
+    def test_parse_cplex_log_extracts_time_limit_diagnostics(self):
+        parsed = cplex_milp._parse_cplex_log(
+            """
+Reduced MIP has 1,234 rows, 5,678 columns, and 90,123 nonzeros.
+MIP start 'm1' defined initial solution with objective 1000.0000.
+MIP - Time limit exceeded, integer feasible:  Objective =  3.9524708239e+02
+Current MIP best bound =  3.1000000000e+02 (gap = 27.5%)
+Solution time =  120.01 sec.  Iterations = 12,345  Nodes = 678
+""",
+            warm_start_requested=True,
+        )
+
+        self.assertEqual(parsed["termination_reason"], "Time limit exceeded, integer feasible")
+        self.assertEqual(parsed["best_bound"], 310.0)
+        self.assertAlmostEqual(parsed["relative_gap"], 0.275)
+        self.assertEqual(parsed["iterations"], 12345)
+        self.assertEqual(parsed["nodes"], 678)
+        self.assertEqual(parsed["reduced_rows"], 1234)
+        self.assertEqual(parsed["reduced_columns"], 5678)
+        self.assertEqual(parsed["reduced_nonzeros"], 90123)
+        self.assertTrue(parsed["warm_start_accepted"])
+        self.assertIn("defined initial solution", parsed["warm_start_message"])
+
+    def test_parse_cplex_log_extracts_time_limit_without_integer_solution(self):
+        parsed = cplex_milp._parse_cplex_log(
+            "MIP - Time limit exceeded, no integer solution.\n",
+            warm_start_requested=False,
+        )
+
+        self.assertEqual(
+            parsed["termination_reason"],
+            "Time limit exceeded, no integer solution.",
+        )
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_mip_start_audit_reports_violated_and_partial_constraints(self):
+        problem = cplex_milp.pulp.LpProblem("mip_start_audit")
+        x = cplex_milp.pulp.LpVariable("x", cat="Binary")
+        y = cplex_milp.pulp.LpVariable("y", lowBound=0.0)
+        problem += x <= 0.0
+        problem += x + y <= 2.0
+        x.setInitialValue(1.0)
+
+        audit = cplex_milp._audit_mip_start(problem)
+
+        self.assertEqual(audit.total_variables, 2)
+        self.assertEqual(audit.initialized_variables, 1)
+        self.assertEqual(audit.missing_variable_names, ("y",))
+        self.assertEqual(audit.evaluated_constraints, 1)
+        self.assertEqual(audit.partial_constraint_count, 1)
+        self.assertEqual(audit.violated_constraint_count, 1)
+        self.assertAlmostEqual(audit.max_constraint_violation, 1.0)
+
+    def test_initial_sailing_fuel_hours_include_only_in_horizon_sailing_steps(self):
+        starts = {
+            "arrives": cplex_milp._PathStart(start_h=4, node_id="terminal"),
+            "beyond_horizon": cplex_milp._PathStart(start_h=10, node_id=None),
+            "berthed": cplex_milp._PathStart(start_h=0, node_id="source"),
+        }
+
+        hours = cplex_milp._initial_sailing_fuel_hours(starts, horizon_h=10)
+
+        self.assertEqual(hours, 13)
+
+    def test_reachable_action_arc_pruning_follows_zero_hour_closure(self):
+        arcs = [
+            cplex_milp._ActionArc("ship", 0, 0, "a", "b", 1, True),
+            cplex_milp._ActionArc("ship", 0, 1, "b", "c", 2, True),
+            cplex_milp._ActionArc("ship", 0, 1, "x", "c", 2, True),
+            cplex_milp._ActionArc("ship", 1, 2, "c", "c", 0, False),
+        ]
+
+        reachable = cplex_milp._reachable_action_arcs(
+            arcs,
+            {"ship": cplex_milp._PathStart(0, "a")},
+        )
+
+        self.assertEqual(reachable, [arcs[0], arcs[1], arcs[3]])
+
+    def test_truncated_arc_carries_remaining_cleanup_fuel(self):
+        env = _no_capture_env(cap_hours=3)
+        env._routes["ship"]["distance_km"] = 10.0 * 1.852
+        env.reset(seed=1)
+        scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=3,
+            emitter_availability={"source": [1.0] * 3},
+            vessel_speed_factor={"ship": [1.0] * 3},
+            well_available={"well": [True] * 3},
+            injectivity_factor={"well": [1.0] * 3},
+        )
+
+        arcs, _starts = cplex_milp._build_action_arcs(
+            env, scenario, start_step=0, horizon_h=3
+        )
+        arc = next(
+            item
+            for item in arcs
+            if item.is_sailing
+            and item.origin_id == "source"
+            and item.destination_id == "terminal"
+            and item.start_h == 0
+        )
+
+        self.assertFalse(arc.arrives_within_horizon)
+        self.assertEqual(arc.remaining_cleanup_fuel_h, 7)
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_fixed_state_cleanup_prices_remaining_sailing_and_ready_return(self):
+        env = _no_capture_env(cap_hours=2)
+        env._routes["ship"]["distance_km"] = 10.0 * 1.852
+        env.reset(seed=1)
+        env.simulator.state.vessel_berths["ship"] = None
+        env.simulator.vessel_states["ship"].update(
+            {
+                "mode": "sailing",
+                "berth": None,
+                "origin": "source",
+                "destination": "terminal",
+                "progress": 0.4,
+                "distance_km": 10.0 * 1.852,
+            }
+        )
+        params = EconomicParameters()
+
+        cost = cplex_milp._terminal_cleanup_cost_for_state(env, params)
+
+        self.assertAlmostEqual(
+            cost,
+            (6.0 + 9.0) * params.vessel_fuel_eur_per_h_sailing,
+            places=6,
+        )
+
+    def test_fifo_diagnostic_mode_rejects_unknown_value(self):
+        env = _no_capture_env(cap_hours=1)
+        env.reset(seed=1)
+
+        with self.assertRaisesRegex(ValueError, "fifo_diagnostic_mode"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                fifo_diagnostic_mode="unknown",
+            )
+        with self.assertRaisesRegex(
+            ValueError, "Unknown integrality relaxation groups"
+        ):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                integrality_relax_groups=("unknown",),
+            )
+        with self.assertRaisesRegex(ValueError, "vessel_visit_load_cut_stride_h"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                vessel_visit_load_cuts=True,
+                vessel_visit_load_cut_stride_h=0,
+            )
+        with self.assertRaisesRegex(ValueError, "source_visit_vent_cut_stride_h"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                source_visit_vent_cuts=True,
+                source_visit_vent_cut_stride_h=0,
+            )
+        with self.assertRaisesRegex(ValueError, "terminal_visit_cut_stride_h"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                terminal_visit_cuts=True,
+                terminal_visit_cut_stride_h=0,
+            )
+        with self.assertRaisesRegex(
+            ValueError, "service_reachability_cut_stride_h"
+        ):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                service_reachability_cuts=True,
+                service_reachability_cut_stride_h=0,
+            )
+        with self.assertRaisesRegex(ValueError, "must be non-negative"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                fixed_terminal_departures_by_vessel={"ship": -1},
+            )
+        with self.assertRaisesRegex(ValueError, "Unknown vessel/source pairs"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                fixed_terminal_departures_by_vessel_source={
+                    ("ship", "unknown_source"): 0
+                },
+            )
+        with self.assertRaisesRegex(ValueError, "fixed source reposition"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                fixed_source_reposition_departures_by_vessel={"ship": -1},
+            )
+        with self.assertRaisesRegex(ValueError, "minimum total source"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                min_total_source_reposition_departures=-1,
+            )
+        with self.assertRaisesRegex(ValueError, "must be non-negative"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                fixed_terminal_departures_by_vessel_source={
+                    ("ship", "source"): -1
+                },
+            )
+        with self.assertRaisesRegex(ValueError, "Unknown vessel/source pairs"):
+            cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                fixed_terminal_to_source_departures_by_vessel_source={
+                    ("ship", "unknown_source"): 0
+                },
+            )
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_terminal_cleanup_value_reports_separate_future_cost(self):
+        env = _no_capture_env(cap_hours=2)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 500.0
+
+        result = cplex_milp.solve_full_scenario_with_cplex(
+            env,
+            horizon_h=1,
+            economics=EconomicParameters(),
+            economic_objective=True,
+            terminal_cleanup_value=True,
+            environment_aligned_service=True,
+            cleanup_unary_trip_slots=True,
+            time_limit_s=10.0,
+        )
+
+        self.assertTrue(result.is_valid, result.validation_error)
+        self.assertTrue(result.terminal_cleanup_value_enabled)
+        self.assertGreater(result.terminal_cleanup_cost, 0.0)
+        self.assertAlmostEqual(
+            result.terminal_cleanup_cost,
+            result.terminal_cleanup_vessel_fuel
+            + result.terminal_cleanup_conditioning
+            + result.terminal_cleanup_reconditioning
+            + result.terminal_cleanup_loading
+            + result.terminal_cleanup_unloading,
+            places=6,
+        )
+        self.assertAlmostEqual(
+            result.augmented_objective_value,
+            result.objective_value + result.terminal_cleanup_cost,
+            places=6,
+        )
+        terminal_env = copy.deepcopy(env)
+        replay = cplex_milp.replay_native_actions(
+            terminal_env,
+            result.native_actions_by_hour,
+            horizon_h=1,
+            copy_env=False,
+        )
+        self.assertTrue(replay.is_executable)
+        self.assertAlmostEqual(
+            cplex_milp._terminal_cleanup_cost_for_state(
+                terminal_env,
+                EconomicParameters(),
+            ),
+            result.terminal_cleanup_cost,
+            places=6,
+        )
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_action_warm_start_completes_terminal_cleanup_variables(self):
+        env = _no_capture_env(cap_hours=2)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 500.0
+        actions = [{"vessels": [VESSEL_WAIT], "wells": [0]}]
+        params = EconomicParameters()
+
+        result = cplex_milp.solve_full_scenario_with_cplex(
+            env,
+            horizon_h=1,
+            economics=params,
+            warm_start_native_actions_by_hour=actions,
+            economic_objective=True,
+            terminal_cleanup_value=True,
+            terminal_cleanup_mip_start_mode="complete",
+            environment_aligned_service=True,
+            cleanup_unary_trip_slots=True,
+            time_limit_s=10.0,
+        )
+
+        self.assertIsNotNone(result.mip_start_audit)
+        self.assertFalse(
+            any(
+                name.startswith("tail_")
+                for name in result.mip_start_audit.missing_variable_names
+            )
+        )
+        seeded_cleanup_cost = result.diagnostic_variable_values[
+            "mip_start_terminal_cleanup_cost"
+        ]
+        terminal_env = copy.deepcopy(env)
+        replay = cplex_milp.replay_native_actions(
+            terminal_env,
+            actions,
+            horizon_h=1,
+            copy_env=False,
+        )
+        self.assertTrue(replay.is_executable)
+        self.assertAlmostEqual(
+            seeded_cleanup_cost,
+            cplex_milp._terminal_cleanup_cost_for_state(terminal_env, params),
+            places=6,
+        )
+
+    def test_warm_start_unload_replay_preserves_terminal_fifo_head(self):
+        env = _two_berth_parallel_env()
+        env.reset(seed=1)
+        state = env.simulator.state
+        for vessel_id in env.vessel_ids:
+            state.entity_inventory_t[vessel_id] = 1_000.0
+            state.vessel_berths[vessel_id] = "terminal"
+            env.simulator.vessel_states[vessel_id].update(
+                {
+                    "mode": "berthed",
+                    "berth": "terminal",
+                    "origin": "terminal",
+                    "destination": "terminal",
+                    "progress": 0.0,
+                    "distance_km": 0.0,
+                }
+            )
+        state.terminal_unload_queues["terminal"] = ["ship_b", "ship_a"]
+        actions = [{"vessels": [VESSEL_WAIT, VESSEL_WAIT], "wells": [0]}]
+
+        unloads = cplex_milp._replay_native_action_unloads(env, actions, horizon_h=1)
+
+        self.assertEqual(unloads, {0: {"ship_b": 1_000.0}})
+
+    def test_warm_start_unload_replay_keeps_blocked_fifo_head_active(self):
+        env = _two_berth_parallel_env()
+        env.reset(seed=1)
+        state = env.simulator.state
+        terminal = env.network.entities["terminal"]
+        state.entity_inventory_t["terminal"] = terminal.storage_capacity_t
+        for vessel_id in env.vessel_ids:
+            state.entity_inventory_t[vessel_id] = 1_000.0
+            state.vessel_berths[vessel_id] = "terminal"
+            env.simulator.vessel_states[vessel_id].update(
+                {
+                    "mode": "berthed",
+                    "berth": "terminal",
+                    "origin": "terminal",
+                    "destination": "terminal",
+                    "progress": 0.0,
+                    "distance_km": 0.0,
+                }
+            )
+        state.terminal_unload_queues["terminal"] = ["ship_b", "ship_a"]
+        actions = [{"vessels": [VESSEL_WAIT, VESSEL_WAIT], "wells": [0]}]
+
+        unloads = cplex_milp._replay_native_action_unloads(
+            env, actions, horizon_h=1
+        )
+
+        self.assertEqual(unloads, {0: {"ship_b": 0.0}})
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_lexicographic_solver_keeps_last_feasible_stage_if_next_stage_fails(self):
+        env = _no_capture_env(cap_hours=1)
+        env.reset(seed=1)
+        original_solve = cplex_milp.pulp.LpProblem.solve
+        calls = 0
+
+        def fail_second_stage(problem, solver=None, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                for variable in problem.variables():
+                    variable.varValue = None
+                problem.status = cplex_milp.pulp.constants.LpStatusInfeasible
+                problem.sol_status = cplex_milp.pulp.constants.LpSolutionNoSolutionFound
+                return problem.status
+            return original_solve(problem, solver, **kwargs)
+
+        with patch.object(cplex_milp.pulp.LpProblem, "solve", new=fail_second_stage):
+            result = cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                economics=EconomicParameters(),
+                lexicographic_vent_first=True,
+                time_limit_s=10.0,
+            )
+
+        self.assertEqual(calls, 2)
+        self.assertTrue(result.is_valid, result.validation_error)
+        self.assertEqual(result.status, "Optimal")
+        self.assertEqual(
+            [diagnostic.stage for diagnostic in result.stage_diagnostics],
+            ["vent", "end_unstored"],
+        )
 
     @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
     def test_native_actions_seed_arc_and_well_mip_start_values(self):
@@ -344,6 +797,168 @@ class CplexMilpInterfaceTests(unittest.TestCase):
         )
 
         self.assertEqual(hours, 2)
+
+    def test_weather_cleanup_leg_bound_uses_best_full_forecast_departure(self):
+        env = _no_capture_env(cap_hours=4)
+        env.reset(seed=1)
+        route = env._routes["ship"]
+        scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=4,
+            emitter_availability={"source": [1.0] * 4},
+            vessel_speed_factor={"ship": [0.5, 1.0, 1.0, 1.0]},
+            well_available={"well": [True] * 4},
+            injectivity_factor={"well": [1.0] * 4},
+        )
+
+        fuel_h = cplex_milp._best_future_weather_leg_fuel_h(
+            env,
+            scenario,
+            "ship",
+            origin_id="source",
+            destination_id="terminal",
+            distance_km=float(route["distance_km"]),
+            earliest_start_step=0,
+        )
+
+        self.assertEqual(fuel_h, 0)
+
+        scenario.vessel_speed_factor["ship"] = [0.5] * 4
+        fuel_h = cplex_milp._best_future_weather_leg_fuel_h(
+            env,
+            scenario,
+            "ship",
+            origin_id="source",
+            destination_id="terminal",
+            distance_km=float(route["distance_km"]),
+            earliest_start_step=0,
+        )
+
+        self.assertEqual(fuel_h, 1)
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_cleanup_source_mode_partition_cut_preserves_integer_tail_cost(self):
+        env = _no_capture_env(cap_hours=4)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 500.0
+        params = EconomicParameters()
+
+        baseline = cplex_milp._terminal_cleanup_cost_for_state(env, params)
+        partitioned = cplex_milp._terminal_cleanup_cost_for_state(
+            env,
+            params,
+            source_mode_partition_cut=True,
+        )
+
+        self.assertAlmostEqual(partitioned, baseline, places=6)
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_cleanup_headroom_risk_prices_capture_before_first_response(self):
+        env = _no_capture_env(cap_hours=4)
+        env.reset(seed=1)
+        emitter = replace(
+            env.network.entities["source"], nominal_capture_tph=100.0
+        )
+        env.network.entities["source"] = emitter
+        env.simulator.state.entity_inventory_t["source"] = 950.0
+        env.simulator.state.entity_inventory_t["ship"] = 500.0
+        env.simulator.state.vessel_berths["ship"] = "terminal"
+        env.simulator.vessel_states["ship"].update(
+            {
+                "mode": "berthed",
+                "berth": "terminal",
+                "origin": "terminal",
+                "destination": "terminal",
+                "progress": 0.0,
+            }
+        )
+        params = EconomicParameters()
+
+        baseline = cplex_milp._terminal_cleanup_cost_for_state(env, params)
+        risk_cost, values = cplex_milp._terminal_cleanup_solution_for_state(
+            env,
+            params,
+            source_headroom_risk=True,
+        )
+        normal_capture_tph = (
+            emitter.nominal_capture_tph
+            * emitter.availability
+            * emitter.default_utilization
+        )
+        expected_vent_t = max(
+            0.0,
+            950.0 + 2.0 * normal_capture_tph - emitter.buffer_capacity_t,
+        )
+
+        self.assertAlmostEqual(
+            values["tail_headroom_vent_source"], expected_vent_t
+        )
+        self.assertAlmostEqual(
+            risk_cost - baseline,
+            expected_vent_t * params.carbon_price_eur_per_t,
+            places=6,
+        )
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_cleanup_response_time_includes_remaining_leg_and_actual_unload(self):
+        env = _no_capture_env(cap_hours=4)
+        env._routes["ship"]["distance_km"] = 10.0 * 1.852
+        env.reset(seed=1)
+        emitter = replace(
+            env.network.entities["source"], nominal_capture_tph=10.0
+        )
+        env.network.entities["source"] = emitter
+        env.simulator.state.entity_inventory_t["source"] = 900.0
+        env.simulator.state.entity_inventory_t["ship"] = 500.0
+        env.simulator.state.vessel_berths["ship"] = None
+        env.simulator.vessel_states["ship"].update(
+            {
+                "mode": "sailing",
+                "berth": None,
+                "origin": "source",
+                "destination": "terminal",
+                "progress": 0.4,
+                "distance_km": 10.0 * 1.852,
+            }
+        )
+        params = EconomicParameters()
+
+        baseline = cplex_milp._terminal_cleanup_cost_for_state(env, params)
+        timed = cplex_milp._terminal_cleanup_cost_for_state(
+            env,
+            params,
+            source_headroom_risk=True,
+        )
+        expected_response_h = 6.0 + 1.0 + 10.0
+        expected_vent_t = max(
+            0.0,
+            900.0
+            + emitter.nominal_capture_tph * expected_response_h
+            - emitter.buffer_capacity_t,
+        )
+
+        self.assertAlmostEqual(
+            timed - baseline,
+            expected_vent_t * params.carbon_price_eur_per_t,
+            places=6,
+        )
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_weather_cleanup_bound_raises_fixed_state_tail_under_slow_weather(self):
+        env = _no_capture_env(cap_hours=4)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 500.0
+        env.scenario.vessel_speed_factor["ship"] = [0.5] * 4
+        params = EconomicParameters()
+
+        nominal = cplex_milp._terminal_cleanup_cost_for_state(env, params)
+        weather = cplex_milp._terminal_cleanup_cost_for_state(
+            env,
+            params,
+            weather_aware_sailing_lower_bound=True,
+        )
+
+        self.assertGreater(weather, nominal)
 
     def test_well_rate_options_use_pressure_limited_rl_mask(self):
         env = _no_capture_env(cap_hours=2)
@@ -735,6 +1350,316 @@ class CplexMilpInterfaceTests(unittest.TestCase):
         self.assertTrue(result.is_valid, result.validation_error)
         self.assertGreater(result.stored_t, 500.0 - 1e-6)
         self.assertLessEqual(result.stored_t, 1_000.0 + 1e-6)
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_environment_aligned_service_allows_two_vessels_at_one_terminal(self):
+        env = _two_ship_priority_env()
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 0.0
+        env.simulator.state.entity_inventory_t["terminal"] = 0.0
+        for vessel_id in env.vessel_ids:
+            env.simulator.state.vessel_berths[vessel_id] = "terminal"
+            env.simulator.vessel_states[vessel_id] = {
+                "mode": "berthed",
+                "berth": "terminal",
+                "origin": "terminal",
+                "destination": "terminal",
+                "progress": 0.0,
+            }
+            env.simulator.state.entity_inventory_t[vessel_id] = env.network.entities[vessel_id].capacity_t
+        env.cumulative_captured_t = sum(
+            env.simulator.state.entity_inventory_t[vessel_id]
+            for vessel_id in env.vessel_ids
+        )
+
+        result = cplex_milp.solve_full_scenario_with_cplex(
+            env,
+            horizon_h=1,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=1_000.0),
+            storage_reward_eur_per_t=1_000.0,
+            time_limit_s=10.0,
+            environment_aligned_service=True,
+        )
+
+        self.assertTrue(result.is_valid, result.validation_error)
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_environment_aligned_service_unloads_terminal_fifo_head(self):
+        env = _two_ship_priority_env()
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 0.0
+        env.simulator.state.entity_inventory_t["terminal"] = 0.0
+        for vessel_id in env.vessel_ids:
+            env.simulator.state.vessel_berths[vessel_id] = "terminal"
+            env.simulator.vessel_states[vessel_id] = {
+                "mode": "berthed",
+                "berth": "terminal",
+                "origin": "terminal",
+                "destination": "terminal",
+                "progress": 0.0,
+                "distance_km": 0.0,
+            }
+            env.simulator.state.entity_inventory_t[vessel_id] = env.network.entities[vessel_id].capacity_t
+        env.simulator.state.terminal_unload_queues["terminal"] = ["ship_b", "ship_a"]
+
+        result = cplex_milp.solve_full_scenario_with_cplex(
+            env,
+            horizon_h=1,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=0.0),
+            storage_reward_eur_per_t=0.0,
+            time_limit_s=10.0,
+            environment_aligned_service=True,
+        )
+
+        self.assertTrue(result.is_valid, result.validation_error)
+        self.assertAlmostEqual(result.unload_t_by_hour["ship_b"][0], 1_000.0)
+        self.assertAlmostEqual(result.unload_t_by_hour["ship_a"][0], 0.0)
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_environment_aligned_service_uses_environment_loading_order(self):
+        env = _two_ship_high_rate_source_env()
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 1_500.0
+        env.simulator.state.entity_inventory_t["terminal"] = 0.0
+        for vessel_id in env.vessel_ids:
+            env.simulator.state.entity_inventory_t[vessel_id] = 0.0
+            env._routes[vessel_id]["distance_km"] = 1_000.0
+
+        result = cplex_milp.solve_full_scenario_with_cplex(
+            env,
+            horizon_h=1,
+            economics=EconomicParameters(
+                storage_shortfall_eur_per_t=0.0,
+                ship_fuel_cost_hfo_eur_per_t=1e9,
+            ),
+            storage_reward_eur_per_t=0.0,
+            time_limit_s=10.0,
+            environment_aligned_service=True,
+        )
+
+        self.assertTrue(result.is_valid, result.validation_error)
+        self.assertAlmostEqual(result.load_t_by_hour["ship_a"][0], 1_000.0)
+        self.assertAlmostEqual(result.load_t_by_hour["ship_b"][0], 0.0)
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_factored_load_min_matches_choice3_and_replay(self):
+        base_env = _no_capture_env(cap_hours=1)
+        base_env.reset(seed=1)
+        base_env.simulator.state.entity_inventory_t["source"] = 400.0
+        base_env.simulator.state.entity_inventory_t["ship"] = 200.0
+        base_env.simulator.state.entity_inventory_t["terminal"] = 0.0
+        base_env._routes["ship"]["distance_km"] = 1_000.0
+        economics = EconomicParameters(ship_fuel_cost_hfo_eur_per_t=1e9)
+        base_env.cost_model = CostModel(economics)
+
+        results = {}
+        replays = {}
+        for formulation in ("choice3", "factored"):
+            env = copy.deepcopy(base_env)
+            result = cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                economics=economics,
+                storage_reward_eur_per_t=0.0,
+                time_limit_s=10.0,
+                environment_aligned_service=True,
+                load_min_formulation=formulation,
+            )
+            results[formulation] = result
+            replays[formulation] = cplex_milp.replay_full_scenario_cplex_plan(
+                copy.deepcopy(base_env),
+                result,
+            )
+
+        for result in results.values():
+            self.assertTrue(result.is_valid, result.validation_error)
+        for replay in replays.values():
+            self.assertTrue(replay.is_exact, replay.mismatches)
+        for formulation in ("factored",):
+            for vessel_id in base_env.vessel_ids:
+                self.assertAlmostEqual(
+                    results[formulation].load_t_by_hour[vessel_id][0],
+                    results["choice3"].load_t_by_hour[vessel_id][0],
+                )
+            self.assertAlmostEqual(results[formulation].load_t_by_hour["ship"][0], 300.0)
+            self.assertAlmostEqual(
+                results[formulation].total_cost,
+                results["choice3"].total_cost,
+            )
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_valid_inequality_groups_preserve_optimal_solution_and_replay(self):
+        base_env = _no_capture_env(cap_hours=2)
+        base_env.reset(seed=1)
+        base_env.simulator.state.entity_inventory_t["source"] = 400.0
+        base_env.simulator.state.entity_inventory_t["ship"] = 200.0
+        economics = EconomicParameters(ship_fuel_cost_hfo_eur_per_t=1e9)
+        base_env.cost_model = CostModel(economics)
+
+        variants = {
+            "baseline": {},
+            "vessel_visit_load": {"vessel_visit_load_cuts": True},
+            "source_visit_vent": {"source_visit_vent_cuts": True},
+            "terminal_visit": {"terminal_visit_cuts": True},
+            "service_reachability": {"service_reachability_cuts": True},
+            "route_cargo_flow": {"route_cargo_flow_linking": True},
+            "prune_unreachable_route_arcs": {
+                "prune_unreachable_route_arcs": True
+            },
+        }
+        results = {}
+        for variant, cut_kwargs in variants.items():
+            env = copy.deepcopy(base_env)
+            result = cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=2,
+                economics=economics,
+                storage_reward_eur_per_t=0.0,
+                time_limit_s=10.0,
+                environment_aligned_service=True,
+                **cut_kwargs,
+            )
+            replay = cplex_milp.replay_full_scenario_cplex_plan(
+                copy.deepcopy(base_env),
+                result,
+            )
+            self.assertTrue(result.is_valid, result.validation_error)
+            self.assertTrue(replay.is_exact, replay.mismatches)
+            results[variant] = result
+
+        for variant in (
+            "vessel_visit_load",
+            "source_visit_vent",
+            "terminal_visit",
+            "service_reachability",
+            "route_cargo_flow",
+            "prune_unreachable_route_arcs",
+        ):
+            self.assertAlmostEqual(
+                results[variant].total_cost,
+                results["baseline"].total_cost,
+            )
+            self.assertEqual(
+                results[variant].native_actions_by_hour,
+                results["baseline"].native_actions_by_hour,
+            )
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_route_cargo_flow_cleanup_link_preserves_optimum_and_replay(self):
+        base_env = _no_capture_env(cap_hours=2)
+        base_env.reset(seed=1)
+        base_env.simulator.state.entity_inventory_t["source"] = 400.0
+        base_env.simulator.state.entity_inventory_t["ship"] = 200.0
+        economics = EconomicParameters(ship_fuel_cost_hfo_eur_per_t=1e9)
+        base_env.cost_model = CostModel(economics)
+
+        variants = {
+            "baseline": {},
+            "route_cargo_flow": {"route_cargo_flow_linking": True},
+            "cleanup_unary_trips": {
+                "route_cargo_flow_linking": True,
+                "cleanup_unary_trip_slots": True,
+            },
+            "cleanup_aggregate_full_trip_dominance": {
+                "route_cargo_flow_linking": True,
+                "cleanup_unary_trip_slots": True,
+                "cleanup_aggregate_full_trip_dominance": True,
+            },
+            "cleanup_return_partition": {
+                "route_cargo_flow_linking": True,
+                "cleanup_unary_trip_slots": True,
+                "cleanup_return_partition_cut": True,
+            },
+        }
+        results = {}
+        for variant, kwargs in variants.items():
+            result = cplex_milp.solve_full_scenario_with_cplex(
+                copy.deepcopy(base_env),
+                horizon_h=2,
+                economics=economics,
+                economic_objective=True,
+                terminal_cleanup_value=True,
+                environment_aligned_service=True,
+                time_limit_s=10.0,
+                **kwargs,
+            )
+            replay = cplex_milp.replay_full_scenario_cplex_plan(
+                copy.deepcopy(base_env), result
+            )
+            self.assertTrue(result.is_valid, result.validation_error)
+            self.assertTrue(replay.is_exact, replay.mismatches)
+            results[variant] = result
+
+        for variant in (
+            "route_cargo_flow",
+            "cleanup_unary_trips",
+            "cleanup_aggregate_full_trip_dominance",
+            "cleanup_return_partition",
+        ):
+            self.assertAlmostEqual(
+                results[variant].augmented_objective_value,
+                results["baseline"].augmented_objective_value,
+            )
+
+    @unittest.skipIf(
+        cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),
+        "external CPLEX executable not available",
+    )
+    def test_environment_aligned_service_forces_automatic_terminal_unloading(self):
+        env = _no_capture_env(cap_hours=1)
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["source"] = 0.0
+        env.simulator.state.entity_inventory_t["ship"] = 500.0
+        env.simulator.state.entity_inventory_t["terminal"] = 0.0
+        env.simulator.state.vessel_berths["ship"] = "terminal"
+        env.simulator.vessel_states["ship"] = {
+            "mode": "berthed",
+            "berth": "terminal",
+            "origin": "terminal",
+            "destination": "terminal",
+            "progress": 0.0,
+            "distance_km": 0.0,
+        }
+        env.cumulative_captured_t = 500.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=1,
+            emitter_availability={"source": [0.0]},
+            vessel_speed_factor={"ship": [1.0]},
+            well_available={"well": [True]},
+            injectivity_factor={"well": [1.0]},
+        )
+        env.scenario.apply_to_state(env.simulator.state, time_h=0.0)
+
+        result = cplex_milp.solve_full_scenario_with_cplex(
+            env,
+            horizon_h=1,
+            economics=EconomicParameters(storage_shortfall_eur_per_t=0.0),
+            storage_reward_eur_per_t=0.0,
+            time_limit_s=10.0,
+            environment_aligned_service=True,
+        )
+
+        self.assertTrue(result.is_valid, result.validation_error)
+        self.assertAlmostEqual(result.unload_t_by_hour["ship"][0], 500.0)
 
     @unittest.skipIf(
         cplex_milp.pulp is None or not cplex_milp.pulp.CPLEX_CMD(msg=0).available(),

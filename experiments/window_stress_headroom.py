@@ -9,17 +9,15 @@ import math
 import random
 import sys
 import time
-from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Iterator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 for path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from sim.control import cplex_milp, trip_milp
+from sim.control import cplex_milp
 from sim.control.baselines import greedy_shuttle_policy
 from sim.economics import CostModel, EconomicParameters
 from sim.environment import CCSEnv, CCSEnvConfig
@@ -28,26 +26,6 @@ from sim.network_scenarios import build_fixed_scenario_demo, fixed_scenario_loca
 from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
 
 SCENARIO_ID = "northern_lights_phase1_3vessels"
-
-
-@contextmanager
-def pruned_executable_options(load_hours: set[int], load_start_stride_h: int) -> Iterator[None]:
-    original = trip_milp._executable_trip_options
-
-    def filtered(env, scenario, start_step: int, horizon_h: int):
-        options = original(env, scenario, start_step, horizon_h)
-        return [
-            option
-            for option in options
-            if len(option.load_profile_t) in load_hours
-            and option.load_start_h % load_start_stride_h == 0
-        ]
-
-    trip_milp._executable_trip_options = filtered
-    try:
-        yield
-    finally:
-        trip_milp._executable_trip_options = original
 
 
 def parse_csv_floats(value: str) -> list[float]:
@@ -444,9 +422,7 @@ def solve_oracle(
         "threads": args.cplex_threads,
         "msg": args.cplex_msg,
     }
-    if args.oracle_model == "native_action":
-        return cplex_milp.solve_full_scenario_with_cplex(env, **kwargs)
-    return trip_milp.solve_executable_trip_milp_with_cplex(env, **kwargs)
+    return cplex_milp.solve_full_scenario_with_cplex(env, **kwargs)
 
 
 def run_case(
@@ -546,7 +522,7 @@ def run_case(
         else "",
         "seed": seed,
         "hours": args.hours,
-        "oracle_model": args.oracle_model,
+        "oracle_model": "native_action",
         "objective": args.reward_mode,
         "greedy_objective": greedy_objective,
         "optimized_objective": exact_value(optimized_objective),
@@ -644,11 +620,6 @@ def main() -> None:
     parser.add_argument("--overflow-risk-lookahead-h", type=float, default=24.0)
     parser.add_argument("--operating-cost-weight", type=float, default=1.0)
     parser.add_argument("--warm-start-policy", choices=("none", "greedy"), default="greedy")
-    parser.add_argument(
-        "--oracle-model",
-        choices=("executable_trip", "native_action"),
-        default="executable_trip",
-    )
     parser.add_argument("--scenario-config-defaults", action="store_true")
     parser.add_argument("--output-dir", default="output/window_stress_720h_total_cost_headroom")
     parser.add_argument("--cplex-time-limit-s", type=float, default=180.0)
@@ -656,8 +627,6 @@ def main() -> None:
     parser.add_argument("--cplex-mip-gap-rel", type=float, default=0.02)
     parser.add_argument("--cplex-threads", type=int, default=1)
     parser.add_argument("--cplex-msg", action="store_true")
-    parser.add_argument("--load-hours", default="4,6,8,10")
-    parser.add_argument("--load-start-stride-h", type=int, default=12)
     parser.add_argument("--window-mean-hours", type=float, default=48.0)
     parser.add_argument("--capture-high-output-mean-hours", type=float, default=None)
     parser.add_argument("--weather-window-mean-hours", type=float, default=None)
@@ -709,52 +678,49 @@ def main() -> None:
     capture_rates = parse_csv_floats(args.capture_high_output_rates or args.rates)
     weather_rates = parse_csv_floats(args.weather_rates or args.rates)
     seeds = parse_csv_ints(args.seeds)
-    load_hours = set(parse_csv_ints(args.load_hours))
-
-    with pruned_executable_options(load_hours, args.load_start_stride_h):
-        for vent_penalty in vent_penalties:
-            economics = EconomicParameters(carbon_price_eur_per_t=vent_penalty)
-            for capture_rate in capture_rates:
-                for weather_rate in weather_rates:
-                    for seed in seeds:
-                        key = (vent_penalty, args.weather_window_mode, capture_rate, weather_rate, seed)
-                        if key in done:
-                            print(
-                                f"skip Pvent={vent_penalty:g} capture_rate={capture_rate:g} "
-                                f"weather_rate={weather_rate:g} seed={seed}",
-                                flush=True,
-                            )
-                            continue
-                        row = run_case(args, economics, capture_rate, weather_rate, seed)
-                        rows.append(row)
-                        write_csv(by_seed_path, rows)
-                        write_csv(summary_path, summarize(rows))
-                        if row["replay_is_exact"]:
-                            message = (
-                                "done "
-                                f"Pvent={vent_penalty:g} "
-                                f"capture_rate={capture_rate:g} "
-                                f"weather_rate={weather_rate:g} "
-                                f"seed={seed} "
-                                f"greedy_vent={row['greedy_vented_t']:.1f} "
-                                f"opt_vent={row['optimized_vented_t']:.1f} "
-                                f"vent_red={row['vented_reduction_t']:.1f} "
-                                f"objective_save={row['total_cost_saving_eur']:.0f} "
-                                f"solve_s={row['executable_solve_time_s']:.1f} "
-                                f"status={row['executable_status']} replay_exact=True"
-                            )
-                        else:
-                            message = (
-                                "done "
-                                f"Pvent={vent_penalty:g} "
-                                f"capture_rate={capture_rate:g} "
-                                f"weather_rate={weather_rate:g} "
-                                f"seed={seed} "
-                                f"solve_s={row['executable_solve_time_s']:.1f} "
-                                f"status={row['executable_status']} replay_exact=False "
-                                f"mismatches={row['replay_mismatches_sample']}"
-                            )
-                        print(message, flush=True)
+    for vent_penalty in vent_penalties:
+        economics = EconomicParameters(carbon_price_eur_per_t=vent_penalty)
+        for capture_rate in capture_rates:
+            for weather_rate in weather_rates:
+                for seed in seeds:
+                    key = (vent_penalty, args.weather_window_mode, capture_rate, weather_rate, seed)
+                    if key in done:
+                        print(
+                            f"skip Pvent={vent_penalty:g} capture_rate={capture_rate:g} "
+                            f"weather_rate={weather_rate:g} seed={seed}",
+                            flush=True,
+                        )
+                        continue
+                    row = run_case(args, economics, capture_rate, weather_rate, seed)
+                    rows.append(row)
+                    write_csv(by_seed_path, rows)
+                    write_csv(summary_path, summarize(rows))
+                    if row["replay_is_exact"]:
+                        message = (
+                            "done "
+                            f"Pvent={vent_penalty:g} "
+                            f"capture_rate={capture_rate:g} "
+                            f"weather_rate={weather_rate:g} "
+                            f"seed={seed} "
+                            f"greedy_vent={row['greedy_vented_t']:.1f} "
+                            f"opt_vent={row['optimized_vented_t']:.1f} "
+                            f"vent_red={row['vented_reduction_t']:.1f} "
+                            f"objective_save={row['total_cost_saving_eur']:.0f} "
+                            f"solve_s={row['executable_solve_time_s']:.1f} "
+                            f"status={row['executable_status']} replay_exact=True"
+                        )
+                    else:
+                        message = (
+                            "done "
+                            f"Pvent={vent_penalty:g} "
+                            f"capture_rate={capture_rate:g} "
+                            f"weather_rate={weather_rate:g} "
+                            f"seed={seed} "
+                            f"solve_s={row['executable_solve_time_s']:.1f} "
+                            f"status={row['executable_status']} replay_exact=False "
+                            f"mismatches={row['replay_mismatches_sample']}"
+                        )
+                    print(message, flush=True)
 
 
 if __name__ == "__main__":

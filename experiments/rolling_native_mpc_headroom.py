@@ -242,7 +242,6 @@ def run_seed(args: argparse.Namespace, seed: int, economics: EconomicParameters)
             replan_every=args.replan_every,
             planning_horizon_h=args.planning_horizon_h,
             time_limit_s=args.rolling_milp_time_limit_s,
-            solver=getattr(args, "rolling_milp_solver", "cbc"),
             economics=economics,
         )
         milp_start = time.perf_counter()
@@ -277,7 +276,6 @@ def run_seed(args: argparse.Namespace, seed: int, economics: EconomicParameters)
                 "rolling_milp_replay_is_executable": milp_replay.is_executable,
                 "rolling_milp_replay_is_exact": milp_replay.is_exact,
                 "rolling_milp_replay_mismatches": ";".join(milp_replay.mismatches),
-                "rolling_milp_solver": rolling_milp.solver,
                 "rolling_milp_wall_s": milp_wall_s,
                 "rolling_milp_replans": rolling_milp.replan_count,
                 "rolling_milp_model_inexact_replans": rolling_milp.model_inexact_replan_count,
@@ -320,11 +318,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Also evaluate the replay-grounded rolling MILP on the same scenario.",
     )
     parser.add_argument("--rolling-milp-time-limit-s", type=float, default=30.0)
-    parser.add_argument(
-        "--rolling-milp-solver",
-        choices=("cbc", "cplex", "cplex_native"),
-        default="cbc",
-    )
     parser.add_argument("--output-dir", type=Path, default=Path("output/rolling_native_mpc_block_24h_720h"))
     return parser.parse_args(argv)
 

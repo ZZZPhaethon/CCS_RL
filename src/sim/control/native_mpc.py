@@ -14,6 +14,14 @@ from .replay import ReplayExpectation, replay_native_actions
 from .rolling_milp import _capture_tonnes, _sail_hours_between
 
 Policy = Callable[[CCSEnv], dict[str, list]]
+_OBJECTIVE_MODES = {
+    "lexicographic",
+    "economic",
+    "economic_safe",
+    "economic_safe_strict",
+    "economic_lex_guard",
+    "economic_execution_guard",
+}
 
 
 @dataclass(frozen=True)
@@ -27,6 +35,17 @@ class _NativeMpcCandidate:
     is_valid: bool
     is_exact: bool = False
     mismatches: tuple[str, ...] = ()
+    execution_vented_t: float = 0.0
+    execution_unstored_t: float = 0.0
+
+
+@dataclass(frozen=True)
+class _NativeMpcBoundaryLimits:
+    max_nonstored_t: float | None = None
+    max_vented_t: float | None = None
+    max_end_unstored_t: float | None = None
+    max_execution_vented_t: float | None = None
+    max_execution_unstored_t: float | None = None
 
 
 class RollingNativeMpcController:
@@ -43,10 +62,15 @@ class RollingNativeMpcController:
         replan_every: int = 24,
         planning_horizon_h: int = 168,
         progress: Callable[[str], None] | None = None,
+        objective_mode: str = "lexicographic",
     ) -> None:
         self.replan_every = max(1, int(replan_every))
         self.planning_horizon_h = max(1, int(planning_horizon_h))
         self.progress = progress
+        self.objective_mode = str(objective_mode).lower()
+        if self.objective_mode not in _OBJECTIVE_MODES:
+            raise ValueError(f"Unknown native MPC objective mode: {objective_mode}")
+        self.vent_eur_per_t = float(env.cost_model.parameters.carbon_price_eur_per_t)
         self._native_actions_by_hour: list[dict[str, list[int]]] = []
         self._plan_origin_h = -1e9
         self.last_candidate_name = ""
@@ -54,6 +78,11 @@ class RollingNativeMpcController:
         self.last_trace_replay_is_exact = False
         self.last_trace_replay_mismatches: tuple[str, ...] = ()
         self.candidate_evaluations = 0
+        self.last_safe_progress_limit_t: float | None = None
+        self.last_safe_vent_limit_t: float | None = None
+        self.last_safe_end_unstored_limit_t: float | None = None
+        self.last_safe_execution_vent_limit_t: float | None = None
+        self.last_safe_execution_unstored_limit_t: float | None = None
 
     def __call__(self, env: CCSEnv) -> dict[str, list]:
         return self.policy(env)
@@ -75,8 +104,12 @@ class RollingNativeMpcController:
     def _replan(self, env: CCSEnv, now: float) -> None:
         remaining_h = max(1, min(self.planning_horizon_h, env.n_steps - env.t))
         candidates = [
-            _rollout_native_candidate(env, greedy_shuttle_policy, remaining_h, "greedy"),
-            _rollout_native_candidate(env, _forecast_urgency_policy, remaining_h, "forecast_urgency"),
+            _rollout_native_candidate(
+                env, greedy_shuttle_policy, remaining_h, "greedy", self.replan_every
+            ),
+            _rollout_native_candidate(
+                env, _forecast_urgency_policy, remaining_h, "forecast_urgency", self.replan_every
+            ),
         ]
         for assignment in _dedicated_assignments(env):
             name = "dedicated:" + ",".join(assignment[vessel_id] for vessel_id in env.vessel_ids)
@@ -86,13 +119,23 @@ class RollingNativeMpcController:
                     _make_dedicated_policy(assignment),
                     remaining_h,
                     name,
+                    self.replan_every,
                 )
             )
         self.candidate_evaluations += len(candidates)
         valid = [candidate for candidate in candidates if candidate.is_valid]
         if not valid:
             raise RuntimeError("rolling_native_mpc produced no replay-valid native candidate")
-        best = min(valid, key=self._candidate_key)
+        best, boundary_limits = _select_native_mpc_candidate(
+            valid,
+            objective_mode=self.objective_mode,
+            vent_eur_per_t=self.vent_eur_per_t,
+        )
+        self.last_safe_progress_limit_t = boundary_limits.max_nonstored_t
+        self.last_safe_vent_limit_t = boundary_limits.max_vented_t
+        self.last_safe_end_unstored_limit_t = boundary_limits.max_end_unstored_t
+        self.last_safe_execution_vent_limit_t = boundary_limits.max_execution_vented_t
+        self.last_safe_execution_unstored_limit_t = boundary_limits.max_execution_unstored_t
         self._native_actions_by_hour = best.native_actions_by_hour
         self._plan_origin_h = now
         self.last_candidate_name = best.name
@@ -102,7 +145,8 @@ class RollingNativeMpcController:
         if self.progress is not None:
             self.progress(
                 f"  rolling_native_mpc replan at t={now:.0f} h; candidate={best.name}; "
-                f"forecast_vent={best.vented_t:,.1f} t; end_unstored={best.end_unstored_t:,.1f} t"
+                f"objective={self.objective_mode}; forecast_vent={best.vented_t:,.1f} t; "
+                f"end_unstored={best.end_unstored_t:,.1f} t"
             )
     @staticmethod
     def _candidate_key(candidate: _NativeMpcCandidate) -> tuple[float, float, float]:
@@ -126,6 +170,87 @@ class RollingNativeMpcController:
                 raise RuntimeError(f"rolling_native_mpc action is infeasible for {well_id}: {choice}")
 
 
+def _select_native_mpc_candidate(
+    candidates: list[_NativeMpcCandidate],
+    *,
+    objective_mode: str,
+    vent_eur_per_t: float,
+) -> tuple[_NativeMpcCandidate, _NativeMpcBoundaryLimits]:
+    if not candidates:
+        raise ValueError("At least one replay-valid MPC candidate is required")
+    if objective_mode == "lexicographic":
+        return (
+            min(candidates, key=RollingNativeMpcController._candidate_key),
+            _NativeMpcBoundaryLimits(),
+        )
+
+    boundary_limits = _NativeMpcBoundaryLimits()
+    eligible = candidates
+    if objective_mode in {
+        "economic_safe",
+        "economic_safe_strict",
+        "economic_lex_guard",
+        "economic_execution_guard",
+    }:
+        if objective_mode in {"economic_lex_guard", "economic_execution_guard"}:
+            reference = min(candidates, key=RollingNativeMpcController._candidate_key)
+        else:
+            reference = next(
+                (candidate for candidate in candidates if candidate.name == "forecast_urgency"),
+                min(candidates, key=lambda candidate: candidate.vented_t + candidate.end_unstored_t),
+            )
+        if objective_mode == "economic_safe_strict":
+            boundary_limits = _NativeMpcBoundaryLimits(
+                max_vented_t=reference.vented_t,
+                max_end_unstored_t=reference.end_unstored_t,
+            )
+            eligible = [
+                candidate
+                for candidate in candidates
+                if candidate.vented_t <= reference.vented_t + 1e-3
+                and candidate.end_unstored_t <= reference.end_unstored_t + 1e-3
+            ]
+        elif objective_mode == "economic_lex_guard":
+            boundary_limits = _NativeMpcBoundaryLimits(
+                max_vented_t=reference.vented_t,
+                max_end_unstored_t=reference.end_unstored_t,
+            )
+            eligible = [
+                candidate
+                for candidate in candidates
+                if candidate.vented_t <= reference.vented_t + 1e-3
+                and candidate.end_unstored_t <= reference.end_unstored_t + 1e-3
+            ]
+        elif objective_mode == "economic_execution_guard":
+            boundary_limits = _NativeMpcBoundaryLimits(
+                max_execution_vented_t=reference.execution_vented_t,
+                max_execution_unstored_t=reference.execution_unstored_t,
+            )
+            eligible = [
+                candidate
+                for candidate in candidates
+                if candidate.execution_vented_t <= reference.execution_vented_t + 1e-3
+                and candidate.execution_unstored_t <= reference.execution_unstored_t + 1e-3
+            ]
+        else:
+            safe_progress_limit_t = reference.vented_t + reference.end_unstored_t
+            boundary_limits = _NativeMpcBoundaryLimits(max_nonstored_t=safe_progress_limit_t)
+            eligible = [
+                candidate
+                for candidate in candidates
+                if candidate.vented_t + candidate.end_unstored_t <= safe_progress_limit_t + 1e-3
+            ]
+
+    def economic_key(candidate: _NativeMpcCandidate) -> tuple[float, float, float]:
+        return (
+            candidate.operating_cost + vent_eur_per_t * candidate.vented_t,
+            candidate.vented_t + candidate.end_unstored_t,
+            candidate.vented_t,
+        )
+
+    return min(eligible, key=economic_key), boundary_limits
+
+
 def native_mpc_candidate_names(env: CCSEnv) -> tuple[str, ...]:
     """Return candidate names in the stable order used by the native MPC."""
     names = ["greedy", "forecast_urgency"]
@@ -136,7 +261,13 @@ def native_mpc_candidate_names(env: CCSEnv) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _rollout_native_candidate(env: CCSEnv, policy: Policy, horizon_h: int, name: str) -> _NativeMpcCandidate:
+def _rollout_native_candidate(
+    env: CCSEnv,
+    policy: Policy,
+    horizon_h: int,
+    name: str,
+    execution_h: int | None = None,
+) -> _NativeMpcCandidate:
     replay_env = copy.deepcopy(env)
     start_stored_t = float(replay_env.cumulative_stored_t)
     start_vented_t = float(replay_env.ledger.vented_t)
@@ -149,6 +280,9 @@ def _rollout_native_candidate(env: CCSEnv, policy: Policy, horizon_h: int, name:
     injection_tph: list[float] = []
     total_reward = 0.0
     overflow_risk_t = 0.0
+    execution_vented_t = 0.0
+    execution_unstored_t = 0.0
+    execution_steps = min(horizon_h, execution_h if execution_h is not None else horizon_h)
     for _ in range(horizon_h):
         action = policy(replay_env)
         native_action = {
@@ -162,6 +296,9 @@ def _rollout_native_candidate(env: CCSEnv, policy: Policy, horizon_h: int, name:
         total_reward += float(reward)
         overflow_risk_t += float(info.get("overflow_risk_t", 0.0))
         violations.extend(str(value) for value in info.get("violations", []))
+        if len(actions) == execution_steps:
+            execution_vented_t = float(replay_env.ledger.vented_t) - start_vented_t
+            execution_unstored_t = replay_env._in_transit_inventory()
         if terminated or truncated:
             break
     invalid = {"berth_required", "bottomhole_pressure_clipped"}
@@ -232,6 +369,8 @@ def _rollout_native_candidate(env: CCSEnv, policy: Policy, horizon_h: int, name:
         is_valid=legacy_is_valid and replay.is_executable and replay.is_exact,
         is_exact=replay.is_exact,
         mismatches=replay.mismatches,
+        execution_vented_t=execution_vented_t,
+        execution_unstored_t=execution_unstored_t,
     )
 
 
