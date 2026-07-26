@@ -28,7 +28,9 @@ from sim.control.native_mpc import (
     RollingNativeMpcController,
     _NativeMpcCandidate,
     _select_native_mpc_candidate,
+    native_mpc_candidate_names,
 )
+from sim.control.baselines import greedy_shuttle_policy
 from sim.economics import EconomicParameters
 from sim.entities import Emitter, InjectionWell, Pipeline, Reservoir, SubseaManifold, Terminal, Vessel
 from sim.environment import (
@@ -546,6 +548,22 @@ class NativeMpcTests(unittest.TestCase):
         controller = RollingNativeMpcController(env, objective_mode="economic")
 
         self.assertEqual(controller.objective_mode, "economic")
+
+    def test_native_mpc_accepts_a_goal_preference_candidate(self):
+        env = _cold_env(cap_hours=24)
+        controller = RollingNativeMpcController(
+            env,
+            planning_horizon_h=24,
+            preferred_policies={"goal_preference": greedy_shuttle_policy},
+        )
+
+        run_episode(env, controller, seed=1)
+
+        self.assertIn("goal_preference", controller.preferred_policies)
+        self.assertGreater(
+            controller.candidate_evaluations,
+            len(native_mpc_candidate_names(env)),
+        )
 
     def test_native_mpc_economic_safe_rejects_boundary_exploiting_candidate(self):
         reference = _NativeMpcCandidate(

@@ -63,11 +63,13 @@ class RollingNativeMpcController:
         planning_horizon_h: int = 168,
         progress: Callable[[str], None] | None = None,
         objective_mode: str = "lexicographic",
+        preferred_policies: dict[str, Policy] | None = None,
     ) -> None:
         self.replan_every = max(1, int(replan_every))
         self.planning_horizon_h = max(1, int(planning_horizon_h))
         self.progress = progress
         self.objective_mode = str(objective_mode).lower()
+        self.preferred_policies = dict(preferred_policies or {})
         if self.objective_mode not in _OBJECTIVE_MODES:
             raise ValueError(f"Unknown native MPC objective mode: {objective_mode}")
         self.vent_eur_per_t = float(env.cost_model.parameters.carbon_price_eur_per_t)
@@ -117,6 +119,16 @@ class RollingNativeMpcController:
                 _rollout_native_candidate(
                     env,
                     _make_dedicated_policy(assignment),
+                    remaining_h,
+                    name,
+                    self.replan_every,
+                )
+            )
+        for name, policy in self.preferred_policies.items():
+            candidates.append(
+                _rollout_native_candidate(
+                    env,
+                    policy,
                     remaining_h,
                     name,
                     self.replan_every,
