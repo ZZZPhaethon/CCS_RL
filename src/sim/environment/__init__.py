@@ -24,6 +24,7 @@ from .forecast import (
     current_state_observation,
     forecast_channel_names,
     future_forecast_observation,
+    masked_future_forecast_observation,
 )
 
 _FORECAST_GYM_EXPORTS = frozenset(
@@ -65,5 +66,6 @@ __all__ = [
     "forecast_channel_names",
     "forecast_policy_observation",
     "future_forecast_observation",
+    "masked_future_forecast_observation",
     "make_forecast_ppo_policy",
 ]

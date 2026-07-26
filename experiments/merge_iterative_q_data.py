@@ -52,6 +52,10 @@ def merge_shards(args) -> dict[str, object]:
         ):
             if metadata[field] != reference[field]:
                 raise ValueError(f"shard metadata mismatch for {field}")
+        if metadata.get("future_feature_names") != reference.get(
+            "future_feature_names"
+        ):
+            raise ValueError("shard metadata mismatch for future_feature_names")
     if args.expected_split and reference["split"] != args.expected_split:
         raise ValueError(
             f"expected split {args.expected_split}, got {reference['split']}"

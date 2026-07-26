@@ -25,6 +25,9 @@ PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_greedy_dagger}"
 : "${CHUNK_SIZE:?CHUNK_SIZE must be set}"
 : "${DATASET_SEED:?DATASET_SEED must be set}"
 WORKERS=4
+SCENARIO_PROTOCOL="${SCENARIO_PROTOCOL:-q_original}"
+HARD_SCENARIO_PROBABILITY="${HARD_SCENARIO_PROBABILITY:-0.5}"
+FORECAST_CONTEXT_HOURS="${FORECAST_CONTEXT_HOURS:-168}"
 
 TRAIN_TASKS=$(((TRAIN_COUNT + CHUNK_SIZE - 1) / CHUNK_SIZE))
 if (( SLURM_ARRAY_TASK_ID < TRAIN_TASKS )); then
@@ -77,6 +80,9 @@ for ((worker = 0; worker < WORKERS; worker++)); do
     --reward-scale 0.00001 \
     --dataset-seed "$DATASET_SEED" \
     --variant future_mlp_mode_destination \
+    --scenario-protocol "$SCENARIO_PROTOCOL" \
+    --hard-scenario-probability "$HARD_SCENARIO_PROBABILITY" \
+    --forecast-context-hours "$FORECAST_CONTEXT_HOURS" \
     --device cpu &
   pids+=("$!")
   offset=$((offset + worker_count))

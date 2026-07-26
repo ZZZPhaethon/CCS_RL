@@ -1,4 +1,4 @@
-"""Evaluate an iterative state-only Q policy with ensemble safety gates."""
+"""Evaluate iterative Q policies with ensemble safety gates."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -16,8 +17,18 @@ else:  # pragma: no cover
     import compare_forecast_encoders_rl as compare
 
 from sim.control.baselines import greedy_shuttle_policy
-from sim.control.iterative_action_q import IterativeActionQuantileQ
+from sim.control.event_based.rl.observation_encoder import (
+    future_summary_observation,
+)
+from sim.control.iterative_action_q import (
+    IterativeActionQuantileQ,
+    IterativeForecastActionQuantileQ,
+    IterativeFutureActionQuantileQ,
+)
 from sim.environment.event_residual_gym import EventJointResidualGymEnv
+from sim.environment.forecast import masked_future_forecast_observation
+
+from experiments import iterative_q_data_common as common
 
 
 DEFAULT_GATES = (
@@ -37,6 +48,7 @@ def parse_args(argv=None):
     parser.add_argument("--reward-scale", type=float, default=1e-5)
     parser.add_argument("--gates", nargs="+", default=list(DEFAULT_GATES))
     parser.add_argument("--device", default="auto")
+    common.add_scenario_protocol_arguments(parser)
     args = parser.parse_args(argv)
     if args.episode_hours <= 0 or args.reward_scale <= 0.0:
         parser.error("episode hours and reward scale must be positive")
@@ -127,6 +139,10 @@ def _compare_args(args, variant: str):
 
 
 def _make_native(args, variant):
+    if str(getattr(args, "scenario_protocol", "q_original")) != "q_original":
+        return common.make_native_env(
+            SimpleNamespace(**vars(args), variant=variant)
+        )
     native = compare.make_experiment_env(
         _compare_args(args, variant), demonstration=False
     )
@@ -218,20 +234,45 @@ def _load_model(args, device):
     metadata = checkpoint["metadata"]
     configuration = checkpoint["configuration"]
     normalization = checkpoint["normalization"]
-    if configuration.get("q_head") != "iterative_action_q":
-        raise ValueError("checkpoint is not an iterative state-only Q model")
-    model = IterativeActionQuantileQ(
-        metadata["state_feature_names"],
-        metadata["joint_actions"],
-        state_mean=normalization["state_mean"],
-        state_std=normalization["state_std"],
-        return_scale=float(normalization["return_scale"]),
-        heads=int(configuration["heads"]),
-        quantiles=int(configuration["quantiles"]),
-        prior_scale=float(configuration["prior_scale"]),
-        action_embedding_size=int(configuration["action_embedding_size"]),
-        action_feature_size=int(configuration["action_feature_size"]),
-    ).to(device)
+    model_arguments = {
+        "state_mean": normalization["state_mean"],
+        "state_std": normalization["state_std"],
+        "return_scale": float(normalization["return_scale"]),
+        "heads": int(configuration["heads"]),
+        "quantiles": int(configuration["quantiles"]),
+        "prior_scale": float(configuration["prior_scale"]),
+        "action_embedding_size": int(configuration["action_embedding_size"]),
+        "action_feature_size": int(configuration["action_feature_size"]),
+    }
+    q_head = configuration.get("q_head")
+    if q_head == "iterative_action_q_future_v4_24_72":
+        model = IterativeFutureActionQuantileQ(
+            metadata["state_feature_names"],
+            metadata["future_feature_names"],
+            metadata["joint_actions"],
+            future_mean=normalization["future_mean"],
+            future_std=normalization["future_std"],
+            **model_arguments,
+        ).to(device)
+    elif q_head == "iterative_action_q_future_168":
+        model = IterativeForecastActionQuantileQ(
+            metadata["state_feature_names"],
+            metadata["forecast_feature_names"],
+            metadata["joint_actions"],
+            forecast_mean=normalization["forecast_mean"],
+            forecast_std=normalization["forecast_std"],
+            forecast_horizon_h=int(metadata["forecast_horizon_h"]),
+            forecast_encoder=str(configuration["forecast_encoder"]),
+            **model_arguments,
+        ).to(device)
+    elif q_head == "iterative_action_q":
+        model = IterativeActionQuantileQ(
+            metadata["state_feature_names"],
+            metadata["joint_actions"],
+            **model_arguments,
+        ).to(device)
+    else:
+        raise ValueError("checkpoint is not an iterative Q model")
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     return model, metadata
@@ -242,12 +283,48 @@ def _tensor_observation(observation, device):
     return state[None, None]
 
 
-def evaluate_gate(args, model, metadata, gate, baselines, device):
+def expected_q_for_observation(model, observation, env, device) -> np.ndarray:
+    states = _tensor_observation(observation, device)
+    with torch.no_grad():
+        if isinstance(model, IterativeFutureActionQuantileQ):
+            summary = torch.as_tensor(
+                future_summary_observation(env),
+                dtype=torch.float32,
+                device=device,
+            )[None, None]
+            q = model(states, summary)
+        elif isinstance(model, IterativeForecastActionQuantileQ):
+            forecast = torch.as_tensor(
+                masked_future_forecast_observation(
+                    env, horizon_h=model.forecast_horizon_h
+                ),
+                dtype=torch.float32,
+                device=device,
+            )[None, None]
+            q = model(states, forecast)
+        else:
+            q = model(states)
+    return q[0, 0].mean(dim=-1).cpu().numpy() * float(model.return_scale)
+
+
+def evaluate_gate(
+    args,
+    model,
+    metadata,
+    gate,
+    baselines,
+    device,
+    *,
+    event_env_factory=None,
+):
     rows = []
     variant = str(metadata["observation_variant"])
     follow_index = int(metadata["follow_action_index"])
+    event_env_factory = event_env_factory or (
+        lambda: make_event_env(args, variant)
+    )
     for seed in args.eval_seeds:
-        wrapper = make_event_env(args, variant)
+        wrapper = event_env_factory()
         observation, _info = wrapper.reset_native_seed(int(seed))
         done = False
         event_count = 0
@@ -258,11 +335,11 @@ def evaluate_gate(args, model, metadata, gate, baselines, device):
         agreement_sum = 0
         used_windows = set()
         while not done:
-            states = _tensor_observation(observation, device)
-            with torch.no_grad():
-                q = model(states)
-            expected_q = (
-                q[0, 0].mean(dim=-1).cpu().numpy() * float(model.return_scale)
+            expected_q = expected_q_for_observation(
+                model,
+                observation,
+                wrapper.env,
+                device,
             )
             action, decision = select_safe_action(
                 expected_q,

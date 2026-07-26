@@ -25,6 +25,11 @@ PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_greedy_dagger}"
 INITIAL_CHECKPOINT="${INITIAL_CHECKPOINT:-}"
 CREATE_LOCK="${CREATE_LOCK:-0}"
 PROTOCOL_PREFIX="${PROTOCOL_PREFIX:-iterative_q}"
+OBSERVATION_INPUT="${OBSERVATION_INPUT:-state_only}"
+FORECAST_ENCODER="${FORECAST_ENCODER:-small_mlp}"
+POLICY_WINDOWS_H="${POLICY_WINDOWS_H:-108-179:180-251:252-323:324-395:396-467:468-539:540-611:612-680}"
+MAX_OVERRIDES="${MAX_OVERRIDES:-8}"
+POLICY_WINDOWS_CSV="${POLICY_WINDOWS_H//:/,}"
 
 IFS=':' read -r -a STAGES <<< "$DATA_STAGES"
 TRAIN_DATA=()
@@ -51,6 +56,8 @@ python -u scripts/train_iterative_action_q.py \
   --validation-data "${VALIDATION_DATA[@]}" \
   "${INITIAL_ARGS[@]}" \
   --out-dir "$RUN_ROOT/$OUTPUT_STAGE" \
+  --observation-input "$OBSERVATION_INPUT" \
+  --forecast-encoder "$FORECAST_ENCODER" \
   --epochs 40 \
   --patience 8 \
   --batch-size 16 \
@@ -80,5 +87,7 @@ if [[ "$CREATE_LOCK" == "1" ]]; then
     --out-path "$RUN_ROOT/${OUTPUT_STAGE}_lock.json" \
     --protocol-id "${PROTOCOL_PREFIX}_${OUTPUT_STAGE}" \
     --residual-margin "$RESIDUAL_MARGIN" \
-    --economic-margin-eur "$ECONOMIC_MARGIN_EUR"
+    --economic-margin-eur "$ECONOMIC_MARGIN_EUR" \
+    --max-overrides "$MAX_OVERRIDES" \
+    --windows-h "$POLICY_WINDOWS_CSV"
 fi

@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 
 
-WINDOWS_H = [
+DEFAULT_WINDOWS_H = [
     [108, 179],
     [180, 251],
     [252, 323],
@@ -22,14 +22,52 @@ WINDOWS_H = [
 ]
 
 
-def parse_args() -> argparse.Namespace:
+def parse_windows_h(value: str) -> list[list[int]]:
+    windows = []
+    for item in value.split(","):
+        try:
+            start_text, end_text = item.split("-", 1)
+            start, end = int(start_text), int(end_text)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                "windows must be comma-separated START-END pairs"
+            ) from exc
+        if start < 0 or end < start:
+            raise argparse.ArgumentTypeError(
+                "window bounds must satisfy 0 <= START <= END"
+            )
+        windows.append([start, end])
+    if not windows:
+        raise argparse.ArgumentTypeError("at least one policy window is required")
+    if any(
+        current[0] <= previous[1]
+        for previous, current in zip(windows, windows[1:])
+    ):
+        raise argparse.ArgumentTypeError(
+            "policy windows must be ordered and non-overlapping"
+        )
+    return windows
+
+
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--out-path", required=True)
     parser.add_argument("--protocol-id", required=True)
     parser.add_argument("--residual-margin", type=float, required=True)
     parser.add_argument("--economic-margin-eur", type=float, required=True)
-    return parser.parse_args()
+    parser.add_argument("--max-overrides", type=int, default=8)
+    parser.add_argument(
+        "--windows-h",
+        type=parse_windows_h,
+        default=[list(window) for window in DEFAULT_WINDOWS_H],
+    )
+    args = parser.parse_args(argv)
+    if args.max_overrides <= 0:
+        parser.error("max overrides must be positive")
+    if args.max_overrides > len(args.windows_h):
+        parser.error("max overrides cannot exceed the policy window count")
+    return args
 
 
 def sha256(path: Path) -> str:
@@ -50,8 +88,11 @@ def main() -> None:
         raise FileExistsError(out_path)
     checkpoint_payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
     model_configuration = checkpoint_payload.get("configuration", {})
-    if model_configuration.get("q_head") != "iterative_action_q":
-        raise ValueError("checkpoint is not an iterative state-only Q model")
+    if model_configuration.get("q_head") not in {
+        "iterative_action_q",
+        "iterative_action_q_future_v4_24_72",
+    }:
+        raise ValueError("checkpoint is not an iterative Q model")
 
     payload = {
         "protocol_id": args.protocol_id,
@@ -64,9 +105,9 @@ def main() -> None:
             "required_heads": 4,
             "residual_margin": args.residual_margin,
             "economic_margin_eur": args.economic_margin_eur,
-            "max_overrides": 8,
+            "max_overrides": int(args.max_overrides),
             "one_override_per_window": True,
-            "windows_h": WINDOWS_H,
+            "windows_h": args.windows_h,
         },
         "uses_mpc_for_training_or_selection": False,
     }

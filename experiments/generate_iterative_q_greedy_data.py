@@ -28,6 +28,7 @@ def parse_args(argv=None):
     parser.add_argument("--variant", default=common.DEFAULT_VARIANT)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--overwrite", action="store_true")
+    common.add_scenario_protocol_arguments(parser)
     args = parser.parse_args(argv)
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("scenario seeds must be unique")
@@ -43,6 +44,10 @@ def parse_args(argv=None):
         parser.error("sample counts must be non-negative")
     if args.episode_hours <= 0 or args.reward_scale <= 0.0:
         parser.error("episode hours and reward scale must be positive")
+    if not 0.0 <= args.hard_scenario_probability <= 1.0:
+        parser.error("hard scenario probability must be inside [0, 1]")
+    if args.forecast_context_hours < 168:
+        parser.error("forecast context hours must be at least 168")
     return args
 
 
@@ -109,6 +114,7 @@ def generate_candidate(
         raise RuntimeError("dense action became illegal after copying the root")
     start_h = int(wrapper.env.t)
     arrays["states"][0] = observation["state"]
+    arrays["future_summaries"][0] = common.v4_future_summary(wrapper)
     arrays["action_masks"][0] = action_mask
     arrays["actions"][0] = int(action)
     arrays["physical_start_hours"][0] = start_h
@@ -205,6 +211,7 @@ def generate_dataset(args):
         "episode_hours": int(args.episode_hours),
         "observation_variant": str(args.variant),
         "state_feature_names": common.state_feature_names(schema_wrapper),
+        "future_feature_names": common.v4_future_feature_names(schema_wrapper),
         "joint_actions": schema_wrapper._joint_action_array.tolist(),
         "follow_indices": schema_wrapper.residual_env.follow_indices.tolist(),
         "follow_action_index": int(schema_wrapper.follow_action()),
@@ -212,6 +219,8 @@ def generate_dataset(args):
         "objective": "pure economic operating cost plus vent penalty",
         "residual_reward": "scaled Greedy cost minus candidate cost",
         "uses_mpc": False,
+        "scenario_protocol": str(args.scenario_protocol),
+        "scenario_difficulties": common.scenario_difficulties(args),
         "root_fractions": [float(value) for value in args.root_fractions],
         "roots_per_seed": int(
             len(args.root_fractions)

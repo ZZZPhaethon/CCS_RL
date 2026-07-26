@@ -83,3 +83,23 @@ def future_forecast_observation(
         weather = [float(env.scenario.vessel_speed_factor[vessel_id][index])]
         rows.append([*capture, *emitter_online, *well_available, *injectivity, *weather])
     return rows
+
+
+def masked_future_forecast_observation(
+    env: CCSEnv,
+    horizon_h: int = FORECAST_HORIZON_H,
+) -> list[list[float]]:
+    """Return finite-episode forecasts with a binary valid-horizon channel."""
+
+    if env.simulator is None or env.scenario is None:
+        raise RuntimeError("Call env.reset() before requesting forecast observations.")
+    horizon = int(horizon_h)
+    if horizon <= 0:
+        raise ValueError("horizon_h must be positive")
+    now_index = env.scenario.step_index(env.simulator.state.time_h)
+    valid_steps = min(horizon, max(0, int(env.n_steps) - now_index))
+    values = future_forecast_observation(env, valid_steps) if valid_steps else []
+    channel_count = len(forecast_channel_names(env))
+    rows = [[*row, 1.0] for row in values]
+    rows.extend([[0.0] * (channel_count + 1) for _ in range(horizon - valid_steps)])
+    return rows

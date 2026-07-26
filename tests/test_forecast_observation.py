@@ -7,6 +7,7 @@ from sim.environment.forecast import (
     current_state_observation,
     forecast_channel_names,
     future_forecast_observation,
+    masked_future_forecast_observation,
 )
 from sim.train import make_native_env
 
@@ -106,3 +107,14 @@ def test_last_rl_step_still_has_full_forecast_context():
     assert forecast.shape == (168, 9)
     assert forecast[0, 8] == env.scenario.vessel_speed_factor[vessel_id][719]
     assert forecast[-1, 8] == env.scenario.vessel_speed_factor[vessel_id][886]
+
+
+def test_masked_forecast_hides_post_episode_context():
+    env = _env(hours=720)
+    env.reset(seed=7)
+    env.simulator.state.time_h = 700.0
+    forecast = np.asarray(masked_future_forecast_observation(env))
+    assert forecast.shape == (168, 10)
+    assert np.all(forecast[:20, -1] == 1.0)
+    assert np.all(forecast[20:, -1] == 0.0)
+    assert np.all(forecast[20:, :-1] == 0.0)

@@ -3,6 +3,8 @@ import torch
 
 from sim.control.iterative_action_q import (
     IterativeActionQuantileQ,
+    IterativeForecastActionQuantileQ,
+    IterativeFutureActionQuantileQ,
     quantile_huber_loss,
 )
 
@@ -59,6 +61,54 @@ def test_iterative_action_q_backpropagates_into_state_encoder():
     loss = model(torch.randn(2, 1, len(_features()))).mean()
     loss.backward()
     assert model.state_encoder.vessel_encoder[0].weight.grad is not None
+
+
+def test_iterative_future_q_uses_v4_summary_shape():
+    names = _features()
+    joint_actions = np.asarray([[0, 0, 0], [1, 0, 0]])
+    model = IterativeFutureActionQuantileQ(
+        names,
+        [f"future_{index}" for index in range(14)],
+        joint_actions,
+        state_mean=np.zeros(len(names)),
+        state_std=np.ones(len(names)),
+        future_mean=np.zeros(14),
+        future_std=np.ones(14),
+        return_scale=1.0,
+        heads=2,
+        quantiles=3,
+    )
+    q = model(
+        torch.randn(2, 1, len(names)),
+        torch.randn(2, 1, 14),
+    )
+    assert q.shape == (2, 1, 2, 2, 3)
+
+
+def test_iterative_forecast_q_encoders_use_masked_168h_shape():
+    names = _features()
+    joint_actions = np.asarray([[0, 0, 0], [1, 0, 0]])
+    forecast_names = [*[f"forecast_{index}" for index in range(9)], "valid_horizon"]
+    for encoder in ("small_mlp", "tcn", "gru"):
+        model = IterativeForecastActionQuantileQ(
+            names,
+            forecast_names,
+            joint_actions,
+            state_mean=np.zeros(len(names)),
+            state_std=np.ones(len(names)),
+            forecast_mean=np.zeros(9),
+            forecast_std=np.ones(9),
+            return_scale=1.0,
+            forecast_encoder=encoder,
+            heads=2,
+            quantiles=3,
+        )
+        forecast = torch.randn(2, 1, 168, 10)
+        forecast[..., -1] = 1.0
+        forecast[1, :, 80:, :-1] = 0.0
+        forecast[1, :, 80:, -1] = 0.0
+        q = model(torch.randn(2, 1, len(names)), forecast)
+        assert q.shape == (2, 1, 2, 2, 3)
 
 
 def test_quantile_huber_loss_is_zero_for_identical_point_targets():

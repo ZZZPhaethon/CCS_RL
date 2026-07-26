@@ -1,4 +1,4 @@
-"""Train the state-only action-value model on paired same-state outcomes."""
+"""Train iterative action-value models on paired same-state outcomes."""
 
 from __future__ import annotations
 
@@ -14,7 +14,12 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
-from sim.control.iterative_action_q import IterativeActionQuantileQ, quantile_huber_loss
+from sim.control.iterative_action_q import (
+    IterativeActionQuantileQ,
+    IterativeForecastActionQuantileQ,
+    IterativeFutureActionQuantileQ,
+    quantile_huber_loss,
+)
 
 
 def parse_args(argv=None):
@@ -23,6 +28,16 @@ def parse_args(argv=None):
     parser.add_argument("--validation-data", nargs="+", required=True)
     parser.add_argument("--initial-checkpoint")
     parser.add_argument("--out-dir", required=True)
+    parser.add_argument(
+        "--observation-input",
+        choices=("state_only", "v4_future_24_72", "forecast_168"),
+        default="state_only",
+    )
+    parser.add_argument(
+        "--forecast-encoder",
+        choices=("small_mlp", "tcn", "gru"),
+        default="small_mlp",
+    )
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--patience", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -80,7 +95,7 @@ def parse_args(argv=None):
 
 
 def _load(path: str):
-    fields = (
+    required_fields = (
         "states",
         "actions",
         "return_to_go",
@@ -88,7 +103,11 @@ def _load(path: str):
         "root_time_h",
     )
     with np.load(path, allow_pickle=False) as loaded:
-        data = {field: loaded[field].copy() for field in fields}
+        data = {field: loaded[field].copy() for field in required_fields}
+        if "future_summaries" in loaded:
+            data["future_summaries"] = loaded["future_summaries"].copy()
+        if "future_forecasts" in loaded:
+            data["future_forecasts"] = loaded["future_forecasts"].copy()
         metadata = json.loads(str(loaded["metadata_json"]))
     return data, metadata
 
@@ -137,7 +156,9 @@ def regression_metrics(
     }
 
 
-def dataset_normalization(rows) -> dict[str, np.ndarray | float]:
+def dataset_normalization(
+    rows, observation_input: str = "state_only"
+) -> dict[str, np.ndarray | float]:
     """Compute P1 normalization directly from its Greedy training data."""
 
     unique_root_states = []
@@ -151,15 +172,61 @@ def dataset_normalization(rows) -> dict[str, np.ndarray | float]:
     returns = np.concatenate(
         [data["return_to_go"][:, 0].astype(np.float32) for data, _metadata in rows]
     )
-    return {
+    normalization = {
         "state_mean": states.mean(axis=0),
         "state_std": np.maximum(states.std(axis=0), 1e-5),
         "return_scale": max(float(returns.std()), 1.0),
     }
+    if observation_input == "v4_future_24_72":
+        unique_root_futures = []
+        for data, _metadata in rows:
+            if "future_summaries" not in data:
+                raise ValueError("future-aware training requires future_summaries")
+            keys = np.stack((data["scenario_seed"], data["root_time_h"]), axis=1)
+            _unique, first_indices = np.unique(keys, axis=0, return_index=True)
+            unique_root_futures.append(
+                data["future_summaries"][
+                    np.sort(first_indices), 0
+                ].astype(np.float32)
+            )
+        futures = np.concatenate(unique_root_futures)
+        normalization.update(
+            {
+                "future_mean": futures.mean(axis=0),
+                "future_std": np.maximum(futures.std(axis=0), 1e-5),
+            }
+        )
+    elif observation_input == "forecast_168":
+        unique_root_forecasts = []
+        for data, _metadata in rows:
+            if "future_forecasts" not in data:
+                raise ValueError("forecast-aware training requires future_forecasts")
+            keys = np.stack((data["scenario_seed"], data["root_time_h"]), axis=1)
+            _unique, first_indices = np.unique(keys, axis=0, return_index=True)
+            unique_root_forecasts.append(
+                data["future_forecasts"][
+                    np.sort(first_indices), 0
+                ].astype(np.float32)
+            )
+        forecasts = np.concatenate(unique_root_forecasts)
+        valid = forecasts[..., -1] > 0.5
+        values = forecasts[..., :-1][valid]
+        normalization.update(
+            {
+                "forecast_mean": values.mean(axis=0),
+                "forecast_std": np.maximum(values.std(axis=0), 1e-5),
+            }
+        )
+    return normalization
 
 
 class GroupedDenseActionDataset(Dataset):
-    def __init__(self, data, follow_action_index: int | None = None):
+    def __init__(
+        self,
+        data,
+        follow_action_index: int | None = None,
+        observation_input: str = "state_only",
+    ):
         keys = np.stack((data["scenario_seed"], data["root_time_h"]), axis=1)
         self.groups = []
         self.root_hours = []
@@ -168,6 +235,32 @@ class GroupedDenseActionDataset(Dataset):
             reference_state = data["states"][indices[0], 0]
             if not np.allclose(data["states"][indices, 0], reference_state):
                 raise ValueError("same-root state observations are not identical")
+            if observation_input == "v4_future_24_72":
+                if "future_summaries" not in data:
+                    raise ValueError(
+                        "future-aware training requires future_summaries"
+                    )
+                reference_future = data["future_summaries"][indices[0], 0]
+                if not np.allclose(
+                    data["future_summaries"][indices, 0], reference_future
+                ):
+                    raise ValueError(
+                        "same-root future summaries are not identical"
+                    )
+            elif observation_input == "forecast_168":
+                if "future_forecasts" not in data:
+                    raise ValueError(
+                        "forecast-aware training requires future_forecasts"
+                    )
+                reference_future = data["future_forecasts"][indices[0], 0]
+                if not np.allclose(
+                    data["future_forecasts"][indices, 0], reference_future
+                ):
+                    raise ValueError(
+                        "same-root future forecasts are not identical"
+                    )
+            else:
+                reference_future = np.empty(0, dtype=np.float32)
             actions = data["actions"][indices, 0].astype(np.int64)
             targets = data["return_to_go"][indices, 0].astype(np.float32)
             if len(actions) != len(np.unique(actions)):
@@ -190,18 +283,19 @@ class GroupedDenseActionDataset(Dataset):
             self.groups.append(
                 (
                     reference_state.astype(np.float32),
+                    reference_future.astype(np.float32),
                     actions,
                     targets,
                 )
             )
             self.root_hours.append(int(key[1]))
-        self.max_actions = max(len(group[1]) for group in self.groups)
+        self.max_actions = max(len(group[2]) for group in self.groups)
 
     def __len__(self):
         return len(self.groups)
 
     def __getitem__(self, index):
-        state, actions, targets = self.groups[index]
+        state, future, actions, targets = self.groups[index]
         padded_actions = np.full(self.max_actions, -1, dtype=np.int64)
         padded_targets = np.zeros(self.max_actions, dtype=np.float32)
         valid = np.zeros(self.max_actions, dtype=bool)
@@ -210,6 +304,7 @@ class GroupedDenseActionDataset(Dataset):
         valid[: len(actions)] = True
         return (
             state,
+            future,
             padded_actions,
             padded_targets,
             valid,
@@ -217,11 +312,12 @@ class GroupedDenseActionDataset(Dataset):
         )
 
 
-def _combined_dataset(rows, follow_action_index):
+def _combined_dataset(rows, follow_action_index, observation_input):
     datasets = [
         GroupedDenseActionDataset(
             data,
             None if metadata.get("anchors_in_data", False) else follow_action_index,
+            observation_input,
         )
         for data, metadata in rows
     ]
@@ -239,8 +335,13 @@ def selected_action_quantiles(q: torch.Tensor, actions: torch.Tensor) -> torch.T
     return q.gather(2, index).permute(0, 2, 1, 3)
 
 
-def model_quantiles(model, state, device):
+def model_quantiles(model, state, future, device):
     states = state[:, None].to(device)
+    if isinstance(
+        model, (IterativeFutureActionQuantileQ, IterativeForecastActionQuantileQ)
+    ):
+        futures = future[:, None].to(device)
+        return model(states, futures)
     return model(states)
 
 
@@ -260,9 +361,9 @@ def evaluate(
     model.eval()
     minimum_return = float(pairwise_min_cost_eur) * float(reward_scale)
     with torch.no_grad():
-        for state, actions, targets, valid, root_hours in loader:
+        for state, future, actions, targets, valid, root_hours in loader:
             batch = len(state)
-            q = model_quantiles(model, state, device)
+            q = model_quantiles(model, state, future, device)
             chosen = selected_action_quantiles(q[:, 0], actions.to(device))
             predicted = (
                 chosen.mean(dim=(-1, -2)).cpu().numpy() * float(model.return_scale)
@@ -366,6 +467,24 @@ def run(args):
     for key in ("state_feature_names", "joint_actions"):
         if any(metadata[key] != train_metadata[key] for _data, metadata in all_rows):
             raise ValueError(f"dataset schema mismatch for {key}")
+    if args.observation_input == "v4_future_24_72":
+        if "future_feature_names" not in train_metadata:
+            raise ValueError("future-aware training requires future feature names")
+        if any(
+            metadata.get("future_feature_names")
+            != train_metadata["future_feature_names"]
+            for _data, metadata in all_rows
+        ):
+            raise ValueError("dataset schema mismatch for future_feature_names")
+    elif args.observation_input == "forecast_168":
+        if "forecast_feature_names" not in train_metadata:
+            raise ValueError("forecast-aware training requires forecast feature names")
+        if any(
+            metadata.get("forecast_feature_names")
+            != train_metadata["forecast_feature_names"]
+            for _data, metadata in all_rows
+        ):
+            raise ValueError("dataset schema mismatch for forecast_feature_names")
     for _data, metadata in all_rows:
         if float(metadata["reward_scale"]) != float(train_metadata["reward_scale"]):
             raise ValueError("dataset reward scales do not match")
@@ -380,7 +499,7 @@ def run(args):
     if train_seeds & validation_seeds:
         raise ValueError("train and validation scenario seeds overlap")
     source = None
-    normalization = dataset_normalization(train_rows)
+    normalization = dataset_normalization(train_rows, args.observation_input)
     if args.initial_checkpoint:
         source = torch.load(
             args.initial_checkpoint, map_location="cpu", weights_only=False
@@ -388,13 +507,31 @@ def run(args):
         for key in ("state_feature_names", "joint_actions"):
             if source["metadata"][key] != train_metadata[key]:
                 raise ValueError(f"initial checkpoint schema mismatch for {key}")
+        if source["configuration"].get(
+            "observation_input", "state_only"
+        ) != args.observation_input:
+            raise ValueError("initial checkpoint observation input mismatch")
+        if (
+            args.observation_input == "forecast_168"
+            and source["configuration"].get("forecast_encoder")
+            != args.forecast_encoder
+        ):
+            raise ValueError("initial checkpoint forecast encoder mismatch")
+        normalization_keys = ["state_mean", "state_std", "return_scale"]
+        if args.observation_input == "v4_future_24_72":
+            normalization_keys.extend(("future_mean", "future_std"))
+        elif args.observation_input == "forecast_168":
+            normalization_keys.extend(("forecast_mean", "forecast_std"))
         normalization = {
-            key: source["normalization"][key]
-            for key in ("state_mean", "state_std", "return_scale")
+            key: source["normalization"][key] for key in normalization_keys
         }
     follow_index = int(train_metadata["follow_action_index"])
-    train_dataset = _combined_dataset(train_rows, follow_index)
-    validation_dataset = _combined_dataset(validation_rows, follow_index)
+    train_dataset = _combined_dataset(
+        train_rows, follow_index, args.observation_input
+    )
+    validation_dataset = _combined_dataset(
+        validation_rows, follow_index, args.observation_input
+    )
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -408,16 +545,38 @@ def run(args):
     if device_name == "auto":
         device_name = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_name)
-    model = IterativeActionQuantileQ(
-        train_metadata["state_feature_names"],
-        train_metadata["joint_actions"],
+    model_arguments = {
         **normalization,
-        heads=args.heads,
-        quantiles=args.quantiles,
-        prior_scale=args.prior_scale,
-        action_embedding_size=args.action_embedding_size,
-        action_feature_size=args.action_feature_size,
-    ).to(device)
+        "heads": args.heads,
+        "quantiles": args.quantiles,
+        "prior_scale": args.prior_scale,
+        "action_embedding_size": args.action_embedding_size,
+        "action_feature_size": args.action_feature_size,
+    }
+    if args.observation_input == "v4_future_24_72":
+        if "future_feature_names" not in train_metadata:
+            raise ValueError("future-aware training requires future feature names")
+        model = IterativeFutureActionQuantileQ(
+            train_metadata["state_feature_names"],
+            train_metadata["future_feature_names"],
+            train_metadata["joint_actions"],
+            **model_arguments,
+        ).to(device)
+    elif args.observation_input == "forecast_168":
+        model = IterativeForecastActionQuantileQ(
+            train_metadata["state_feature_names"],
+            train_metadata["forecast_feature_names"],
+            train_metadata["joint_actions"],
+            forecast_horizon_h=int(train_metadata["forecast_horizon_h"]),
+            forecast_encoder=args.forecast_encoder,
+            **model_arguments,
+        ).to(device)
+    else:
+        model = IterativeActionQuantileQ(
+            train_metadata["state_feature_names"],
+            train_metadata["joint_actions"],
+            **model_arguments,
+        ).to(device)
     compatible = {}
     if source is not None:
         target_state = model.state_dict()
@@ -456,9 +615,9 @@ def run(args):
     for epoch in range(1, args.epochs + 1):
         model.train()
         losses = []
-        for state, actions, targets, valid, _root_hours in train_loader:
+        for state, future, actions, targets, valid, _root_hours in train_loader:
             batch = len(state)
-            q = model_quantiles(model, state, device)
+            q = model_quantiles(model, state, future, device)
             root_q = q[:, 0]
             actions_device = actions.to(device)
             targets_device = targets.to(device)
@@ -579,8 +738,11 @@ def run(args):
         args.pairwise_min_cost_eur,
     )
     configuration = vars(args).copy()
-    configuration["q_head"] = "iterative_action_q"
-    configuration["observation_input"] = "state_only"
+    configuration["q_head"] = {
+        "state_only": "iterative_action_q",
+        "v4_future_24_72": "iterative_action_q_future_v4_24_72",
+        "forecast_168": "iterative_action_q_future_168",
+    }[args.observation_input]
     checkpoint_metadata = dict(train_metadata)
     checkpoint_metadata["training_data_sources"] = list(args.train_data)
     checkpoint_metadata["validation_data_sources"] = list(args.validation_data)

@@ -24,6 +24,9 @@ PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_greedy_dagger}"
 G0_ROOT_FRACTIONS="${G0_ROOT_FRACTIONS:-0.15:0.25:0.35:0.45:0.55:0.65:0.75:0.85}"
 IFS=':' read -r -a ROOT_FRACTIONS <<< "$G0_ROOT_FRACTIONS"
 G0_ROOTS_PER_SEED="${G0_ROOTS_PER_SEED:-${#ROOT_FRACTIONS[@]}}"
+SCENARIO_PROTOCOL="${SCENARIO_PROTOCOL:-q_original}"
+HARD_SCENARIO_PROBABILITY="${HARD_SCENARIO_PROBABILITY:-0.5}"
+FORECAST_CONTEXT_HOURS="${FORECAST_CONTEXT_HOURS:-168}"
 
 TRAIN_TASKS=$(((TRAIN_COUNT + CHUNK_SIZE - 1) / CHUNK_SIZE))
 if (( SLURM_ARRAY_TASK_ID < TRAIN_TASKS )); then
@@ -61,4 +64,7 @@ python -u experiments/generate_iterative_q_greedy_data.py \
   --reward-scale 0.00001 \
   --dataset-seed 20260723 \
   --variant future_mlp_mode_destination \
+  --scenario-protocol "$SCENARIO_PROTOCOL" \
+  --hard-scenario-probability "$HARD_SCENARIO_PROBABILITY" \
+  --forecast-context-hours "$FORECAST_CONTEXT_HOURS" \
   --device cpu

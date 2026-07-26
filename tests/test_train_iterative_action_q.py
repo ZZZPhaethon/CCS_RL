@@ -24,7 +24,7 @@ def _feature_names():
     return names
 
 
-def _dataset(path, split, seeds):
+def _dataset(path, split, seeds, *, include_future=False, include_forecast=False):
     rows = []
     for seed in seeds:
         for root_index, hour in enumerate((120, 360)):
@@ -46,13 +46,41 @@ def _dataset(path, split, seeds):
         "reward_scale": 1e-5,
         "uses_mpc": False,
     }
+    arrays = {
+        "states": np.asarray([[row[2]] for row in rows], dtype=np.float32),
+        "actions": np.asarray([[row[3]] for row in rows], dtype=np.int16),
+        "return_to_go": np.asarray(
+            [[row[4]] for row in rows], dtype=np.float32
+        ),
+        "scenario_seed": np.asarray([row[0] for row in rows]),
+        "root_time_h": np.asarray([row[1] for row in rows]),
+    }
+    if include_future:
+        metadata["future_feature_names"] = [
+            f"future_{index}" for index in range(14)
+        ]
+        arrays["future_summaries"] = np.asarray(
+            [
+                [[row[0] / 100.0, row[1] / 720.0, *([0.5] * 12)]]
+                for row in rows
+            ],
+            dtype=np.float32,
+        )
+    if include_forecast:
+        metadata["forecast_feature_names"] = [
+            *[f"forecast_{index}" for index in range(9)],
+            "valid_horizon",
+        ]
+        metadata["forecast_horizon_h"] = 168
+        forecasts = np.zeros((len(rows), 1, 168, 10), dtype=np.float32)
+        for index, row in enumerate(rows):
+            valid_horizon = min(168, 720 - row[1])
+            forecasts[index, 0, :valid_horizon, :9] = row[0] / 100.0
+            forecasts[index, 0, :valid_horizon, 9] = 1.0
+        arrays["future_forecasts"] = forecasts
     np.savez_compressed(
         path,
-        states=np.asarray([[row[2]] for row in rows], dtype=np.float32),
-        actions=np.asarray([[row[3]] for row in rows], dtype=np.int16),
-        return_to_go=np.asarray([[row[4]] for row in rows], dtype=np.float32),
-        scenario_seed=np.asarray([row[0] for row in rows]),
-        root_time_h=np.asarray([row[1] for row in rows]),
+        **arrays,
         metadata_json=np.asarray(json.dumps(metadata)),
     )
 
@@ -67,7 +95,8 @@ def test_grouped_dense_dataset_appends_follow_and_deduplicates():
         "return_to_go": np.asarray([[-1.0], [2.0], [-1.0]]),
     }
     dataset = GroupedDenseActionDataset(data, follow_action_index=7)
-    _state, actions, targets, valid, root_hour = dataset[0]
+    _state, future, actions, targets, valid, root_hour = dataset[0]
+    assert future.shape == (0,)
     assert list(actions[valid]) == [3, 4, 7]
     assert list(targets[valid]) == [-1.0, 2.0, 0.0]
     assert root_hour == 10
@@ -130,3 +159,97 @@ def test_training_from_greedy_data_requires_no_legacy_checkpoint(tmp_path):
     assert summary["loaded_pretrained_tensors"] == 0
     assert checkpoint["configuration"]["q_head"] == "iterative_action_q"
     assert checkpoint["configuration"]["observation_input"] == "state_only"
+
+
+def test_future_training_uses_v4_summary_input(tmp_path):
+    train_path = tmp_path / "train_future.npz"
+    validation_path = tmp_path / "validation_future.npz"
+    out_dir = tmp_path / "out_future"
+    _dataset(train_path, "train", [10, 11], include_future=True)
+    _dataset(validation_path, "validation", [20, 21], include_future=True)
+    args = parse_args(
+        [
+            "--train-data",
+            str(train_path),
+            "--validation-data",
+            str(validation_path),
+            "--out-dir",
+            str(out_dir),
+            "--observation-input",
+            "v4_future_24_72",
+            "--epochs",
+            "1",
+            "--patience",
+            "1",
+            "--batch-size",
+            "2",
+            "--heads",
+            "2",
+            "--quantiles",
+            "3",
+            "--action-embedding-size",
+            "4",
+            "--action-feature-size",
+            "8",
+            "--device",
+            "cpu",
+        ]
+    )
+    run(args)
+    checkpoint = torch.load(
+        out_dir / "iterative_action_q.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert (
+        checkpoint["configuration"]["q_head"]
+        == "iterative_action_q_future_v4_24_72"
+    )
+    assert checkpoint["normalization"]["future_mean"].shape == (14,)
+
+
+def test_full_forecast_training_uses_selected_encoder(tmp_path):
+    train_path = tmp_path / "train_forecast.npz"
+    validation_path = tmp_path / "validation_forecast.npz"
+    out_dir = tmp_path / "out_forecast"
+    _dataset(train_path, "train", [10, 11], include_forecast=True)
+    _dataset(validation_path, "validation", [20, 21], include_forecast=True)
+    args = parse_args(
+        [
+            "--train-data",
+            str(train_path),
+            "--validation-data",
+            str(validation_path),
+            "--out-dir",
+            str(out_dir),
+            "--observation-input",
+            "forecast_168",
+            "--forecast-encoder",
+            "gru",
+            "--epochs",
+            "1",
+            "--patience",
+            "1",
+            "--batch-size",
+            "2",
+            "--heads",
+            "2",
+            "--quantiles",
+            "3",
+            "--action-embedding-size",
+            "4",
+            "--action-feature-size",
+            "8",
+            "--device",
+            "cpu",
+        ]
+    )
+    run(args)
+    checkpoint = torch.load(
+        out_dir / "iterative_action_q.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert checkpoint["configuration"]["q_head"] == "iterative_action_q_future_168"
+    assert checkpoint["configuration"]["forecast_encoder"] == "gru"
+    assert checkpoint["normalization"]["forecast_mean"].shape == (9,)

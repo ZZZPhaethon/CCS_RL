@@ -21,7 +21,7 @@ import torch
 from experiments import iterative_q_data_common as common
 from experiments.evaluate_iterative_action_q import (
     _load_model,
-    _tensor_observation,
+    expected_q_for_observation,
     select_safe_action,
 )
 from experiments.generate_iterative_q_greedy_data import select_dense_actions
@@ -41,6 +41,7 @@ def parse_args(argv=None):
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--window-indices", type=int, nargs="+")
     parser.add_argument("--overwrite", action="store_true")
+    common.add_scenario_protocol_arguments(parser)
     args = parser.parse_args(argv)
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("scenario seeds must be unique")
@@ -48,6 +49,10 @@ def parse_args(argv=None):
         parser.error("sample counts must be non-negative")
     if args.episode_hours <= 0 or args.reward_scale <= 0.0:
         parser.error("episode hours and reward scale must be positive")
+    if not 0.0 <= args.hard_scenario_probability <= 1.0:
+        parser.error("hard scenario probability must be inside [0, 1]")
+    if args.forecast_context_hours < 168:
+        parser.error("forecast context hours must be at least 168")
     if args.window_indices is not None and (
         len(set(args.window_indices)) != len(args.window_indices)
         or min(args.window_indices) < 0
@@ -85,11 +90,8 @@ def load_locked_policy(args):
     return model, metadata, configuration, device, checkpoint_path
 
 
-def _policy_q(model, observation, device) -> np.ndarray:
-    states = _tensor_observation(observation, device)
-    with torch.no_grad():
-        q = model(states)
-    return q[0, 0].mean(dim=-1).cpu().numpy() * float(model.return_scale)
+def _policy_q(model, observation, env, device) -> np.ndarray:
+    return expected_q_for_observation(model, observation, env, device)
 
 
 def locked_action(
@@ -97,7 +99,7 @@ def locked_action(
 ):
     follow = int(metadata["follow_action_index"])
     action, decision = select_safe_action(
-        _policy_q(model, observation, device),
+        _policy_q(model, observation, wrapper.env, device),
         wrapper.action_masks(),
         follow,
         required_heads=int(policy_config["required_heads"]),
@@ -195,6 +197,8 @@ def _candidate_record(
 ):
     arrays = common.empty_candidate_arrays(wrapper, 1)
     arrays["states"][0] = observation["state"]
+    if arrays["future_summaries"].shape[-1] > 0:
+        arrays["future_summaries"][0] = common.v4_future_summary(wrapper)
     arrays["action_masks"][0] = wrapper.action_masks()
     arrays["actions"][0] = int(action)
     arrays["physical_start_hours"][0] = int(wrapper.env.t)
@@ -318,6 +322,7 @@ def generate_dataset(args):
         "episode_hours": int(args.episode_hours),
         "observation_variant": str(args.variant),
         "state_feature_names": common.state_feature_names(schema_wrapper),
+        "future_feature_names": common.v4_future_feature_names(schema_wrapper),
         "joint_actions": schema_wrapper._joint_action_array.tolist(),
         "follow_indices": schema_wrapper.residual_env.follow_indices.tolist(),
         "follow_action_index": int(schema_wrapper.follow_action()),
@@ -325,6 +330,8 @@ def generate_dataset(args):
         "objective": "pure economic operating cost plus vent penalty",
         "residual_reward": "scaled locked-policy anchor cost minus candidate cost",
         "uses_mpc": False,
+        "scenario_protocol": str(args.scenario_protocol),
+        "scenario_difficulties": common.scenario_difficulties(args),
         "anchors_in_data": True,
         "rollin_policy": str(args.lock_config),
         "rollin_checkpoint": str(checkpoint_path),

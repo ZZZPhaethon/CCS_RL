@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import random
+
 import numpy as np
 
 from scripts import compare_forecast_encoders_rl as compare
 
 from sim.control.baselines import greedy_shuttle_policy
+from sim.control.event_based.rl.observation_encoder import (
+    future_summary_feature_names,
+    future_summary_observation,
+)
+from sim.control.event_based.residual_rl_v4.scenario import (
+    ReplayableDifficultyScenarioGenerator,
+)
+from sim.environment import CCSEnvConfig, build_phase1_env
 from sim.environment.event_residual_gym import EventJointResidualGymEnv
 from sim.environment.forecast import current_state_feature_names
 from sim.environment.forecast_gym import (
@@ -20,6 +30,29 @@ from sim.environment.vessel_mode import (
 
 
 DEFAULT_VARIANT = "future_mlp_mode_destination"
+SCENARIO_PROTOCOLS = (
+    "q_original",
+    "v4_mixed_window",
+    "unified_window_v1",
+)
+
+
+def add_scenario_protocol_arguments(parser) -> None:
+    parser.add_argument(
+        "--scenario-protocol",
+        choices=SCENARIO_PROTOCOLS,
+        default="q_original",
+    )
+    parser.add_argument(
+        "--hard-scenario-probability",
+        type=float,
+        default=0.5,
+    )
+    parser.add_argument(
+        "--forecast-context-hours",
+        type=int,
+        default=168,
+    )
 
 
 def _compare_args(args):
@@ -42,9 +75,64 @@ def _compare_args(args):
 
 
 def make_native_env(args):
-    env = compare.make_experiment_env(_compare_args(args), demonstration=False)
+    protocol = str(getattr(args, "scenario_protocol", "q_original"))
+    if protocol == "q_original":
+        env = compare.make_experiment_env(
+            _compare_args(args), demonstration=False
+        )
+    elif protocol in {"v4_mixed_window", "unified_window_v1"}:
+        probability = float(args.hard_scenario_probability)
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError(
+                "hard_scenario_probability must be inside [0, 1]"
+            )
+        context_hours = int(args.forecast_context_hours)
+        if context_hours < 168:
+            raise ValueError(
+                "forecast_context_hours must be at least 168"
+            )
+        generator = ReplayableDifficultyScenarioGenerator(
+            episode_hours=int(args.episode_hours) + context_hours,
+            weather_process="window",
+            hard_probability=probability,
+            scenario_protocol=protocol,
+        )
+        env = build_phase1_env(
+            scenario="northern_lights_phase1_3vessels",
+            scenario_generator=generator,
+            weather_mode="window",
+            config=CCSEnvConfig(
+                episode_hours=int(args.episode_hours),
+                include_goal_obs=False,
+                reward_mode="economic",
+                store_reward_eur_per_t=0.0,
+                vent_penalty_weight=1.0,
+                operating_cost_weight=1.0,
+                enforce_full_load_dispatch=False,
+                require_empty_terminal_departure=True,
+            ),
+        )
+    else:  # pragma: no cover - guarded by CLI choices
+        raise ValueError(f"unknown scenario protocol: {protocol}")
     env.config.reward_scale = float(args.reward_scale)
     return env
+
+
+def scenario_difficulties(args) -> dict[str, str]:
+    protocol = str(getattr(args, "scenario_protocol", "q_original"))
+    if protocol == "q_original":
+        return {str(int(seed)): "q_original" for seed in args.seeds}
+    if protocol == "unified_window_v1":
+        return {str(int(seed)): "unified" for seed in args.seeds}
+    probability = float(args.hard_scenario_probability)
+    return {
+        str(int(seed)): (
+            "hard"
+            if random.Random(int(seed)).random() < probability
+            else "normal"
+        )
+        for seed in args.seeds
+    }
 
 
 def make_event_env(args) -> EventJointResidualGymEnv:
@@ -96,9 +184,16 @@ def event_residual_reward(
 
 def empty_candidate_arrays(wrapper, max_events: int) -> dict[str, np.ndarray]:
     state_shape = wrapper.observation_space["state"].shape
+    try:
+        future_shape = future_summary_observation(wrapper.env).shape
+    except AttributeError:
+        future_shape = (0,)
     action_count = int(wrapper.action_space.n)
     return {
         "states": np.zeros((max_events, *state_shape), dtype=np.float32),
+        "future_summaries": np.zeros(
+            (max_events, *future_shape), dtype=np.float32
+        ),
         "action_masks": np.zeros((max_events, action_count), dtype=bool),
         "actions": np.full(max_events, -1, dtype=np.int16),
         "physical_start_hours": np.full(max_events, -1, dtype=np.int16),
@@ -140,9 +235,20 @@ def state_feature_names(wrapper) -> list[str]:
     return names
 
 
+def v4_future_summary(wrapper) -> np.ndarray:
+    """Return the exact future-summary vector exposed to residual PPO v4."""
+
+    return future_summary_observation(wrapper.env)
+
+
+def v4_future_feature_names(wrapper) -> list[str]:
+    return list(future_summary_feature_names(wrapper.env))
+
+
 def stack_records(records: list[dict[str, object]]) -> dict[str, np.ndarray]:
     array_fields = (
         "states",
+        "future_summaries",
         "action_masks",
         "actions",
         "physical_start_hours",
