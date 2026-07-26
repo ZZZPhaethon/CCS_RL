@@ -87,7 +87,8 @@ class ProjectStructureTests(unittest.TestCase):
 
         self.assertTrue(
             all(
-                name.startswith("train_") or name == "compare_forecast_encoders_rl.py"
+                name.startswith(("build_", "train_"))
+                or name == "compare_forecast_encoders_rl.py"
                 for name in script_names
             )
         )

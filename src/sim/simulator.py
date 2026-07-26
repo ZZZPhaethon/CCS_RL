@@ -220,16 +220,35 @@ class PhysicalSimulator:
             origin_coordinate = self._location_tuple(origin, route)
             destination_coordinate = self._location_tuple(destination, route)
             maritime_route = sea_route(origin_coordinate, destination_coordinate)
-            coordinates = list(maritime_route.coordinates)
+            coordinates = self._connect_route_to_endpoints(
+                maritime_route.coordinates,
+                origin_coordinate,
+                destination_coordinate,
+            )
             leg_routes[leg_id] = {
                 "id": leg_id,
                 "origin": origin,
                 "destination": destination,
                 "provider": maritime_route.provider,
-                "distance_km": float(maritime_route.distance_km),
+                "distance_km": round(route_distance_km(coordinates), 2),
                 "coordinates": coordinates,
             }
         return leg_routes[leg_id]
+
+    @staticmethod
+    def _connect_route_to_endpoints(
+        coordinates: list[Coordinate],
+        origin: Coordinate,
+        destination: Coordinate,
+    ) -> list[Coordinate]:
+        connected = list(coordinates)
+        if not connected:
+            return [origin, destination]
+        if connected[0] != origin:
+            connected.insert(0, origin)
+        if connected[-1] != destination:
+            connected.append(destination)
+        return connected
 
     def _location_tuple(self, location_id: str, route: dict[str, Any]) -> Coordinate:
         if location_id in self.locations:

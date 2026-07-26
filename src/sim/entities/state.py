@@ -13,6 +13,7 @@ class PhysicalState:
     last_vent_tph: dict[str, float] = field(default_factory=dict)
     cumulative_vent_t: dict[str, float] = field(default_factory=dict)
     last_pipeline_flow_tph: dict[str, float] = field(default_factory=dict)
+    pipeline_flow_history_t: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     last_injection_flow_tph: dict[str, float] = field(default_factory=dict)
     injection_rate_history_tph: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     vessel_berths: dict[str, str] = field(default_factory=dict)
@@ -39,6 +40,10 @@ class PhysicalState:
             last_vent_tph=dict(self.last_vent_tph),
             cumulative_vent_t=dict(self.cumulative_vent_t),
             last_pipeline_flow_tph=dict(self.last_pipeline_flow_tph),
+            pipeline_flow_history_t={
+                pipeline_id: list(history)
+                for pipeline_id, history in self.pipeline_flow_history_t.items()
+            },
             last_injection_flow_tph=dict(self.last_injection_flow_tph),
             injection_rate_history_tph={
                 well_id: list(history)
@@ -65,6 +70,10 @@ class PhysicalState:
             "last_vent_tph": dict(self.last_vent_tph),
             "cumulative_vent_t": dict(self.cumulative_vent_t),
             "last_pipeline_flow_tph": dict(self.last_pipeline_flow_tph),
+            "pipeline_flow_history_t": {
+                pipeline_id: list(history)
+                for pipeline_id, history in self.pipeline_flow_history_t.items()
+            },
             "last_injection_flow_tph": dict(self.last_injection_flow_tph),
             "injection_rate_history_tph": {
                 well_id: list(history)

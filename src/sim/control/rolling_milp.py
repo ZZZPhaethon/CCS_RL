@@ -29,7 +29,7 @@ from ..environment import (
     VESSEL_WAIT,
     CCSEnv,
 )
-from ..routes import sea_route
+from ..routes import route_distance_km, sea_route
 from .milp import KNOTS_TO_KMH
 from .replay import replay_native_actions
 
@@ -987,14 +987,24 @@ def _dynamic_leg_distance_km(env: CCSEnv, route: dict, origin_id: str, destinati
     leg_routes = route.setdefault("dynamic_leg_routes", {})
     leg_id = f"{origin_id}->{destination_id}"
     if leg_id not in leg_routes:
-        maritime_route = sea_route(env.locations[origin_id], env.locations[destination_id])
+        origin = env.locations[origin_id]
+        destination = env.locations[destination_id]
+        maritime_route = sea_route(origin, destination)
+        coordinates = list(maritime_route.coordinates)
+        if not coordinates:
+            coordinates = [origin, destination]
+        else:
+            if coordinates[0] != origin:
+                coordinates.insert(0, origin)
+            if coordinates[-1] != destination:
+                coordinates.append(destination)
         leg_routes[leg_id] = {
             "id": leg_id,
             "origin": origin_id,
             "destination": destination_id,
             "provider": maritime_route.provider,
-            "distance_km": float(maritime_route.distance_km),
-            "coordinates": list(maritime_route.coordinates),
+            "distance_km": round(route_distance_km(coordinates), 2),
+            "coordinates": coordinates,
         }
     return float(leg_routes[leg_id]["distance_km"])
 

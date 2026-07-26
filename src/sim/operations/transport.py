@@ -6,6 +6,8 @@ from ..entities.state import PhysicalState, Violation
 from ..entities.storage import InjectionWell
 from .injection import inject_to_well, well_capacity_breakdown, well_remaining_capacity
 
+HOURS_PER_YEAR = 365.25 * 24.0
+
 
 def project_pipeline_outflow(
     network,
@@ -22,7 +24,31 @@ def project_pipeline_outflow(
     ) * network.time_step_hours
     pipeline_capacity_t = pipeline.max_flow_tph * network.time_step_hours
     well_capacity_t = pipeline_injection_capacity(network, pipeline.entity_id, state)
-    actual_t = min(requested_t, pipeline_capacity_t, well_capacity_t, max(0.0, supply_limit_t))
+    annual_capacity_t = pipeline_annual_remaining_capacity_t(network, pipeline, state)
+    minimum_stable_t = pipeline_minimum_stable_injection_t(
+        network,
+        pipeline.entity_id,
+        state,
+    )
+    actual_t = min(
+        requested_t,
+        pipeline_capacity_t,
+        well_capacity_t,
+        annual_capacity_t,
+        max(0.0, supply_limit_t),
+    )
+    if 0.0 < actual_t < minimum_stable_t - 1e-9:
+        actual_t = 0.0
+        violations.append(
+            Violation(
+                "minimum_stable_injection_not_met",
+                pipeline.entity_id,
+                requested_t,
+                0.0,
+                requested_t,
+                "Pipeline flow is below the minimum stable injection quantity.",
+            )
+        )
     state.last_pipeline_flow_tph[pipeline.entity_id] = actual_t / network.time_step_hours
     if actual_t < requested_t:
         violations.append(
@@ -57,6 +83,45 @@ def project_pipeline_outflow(
                     )
                 )
     return actual_t
+
+
+def pipeline_annual_remaining_capacity_t(
+    network,
+    pipeline: Pipeline,
+    state: PhysicalState,
+) -> float:
+    if pipeline.annual_capacity_tpy is None:
+        return float("inf")
+    interval_start_h = state.time_h - network.time_step_hours
+    window_start_h = interval_start_h - HOURS_PER_YEAR
+    used_t = sum(
+        amount_t
+        for start_h, amount_t in state.pipeline_flow_history_t.get(
+            pipeline.entity_id,
+            [],
+        )
+        if start_h > window_start_h
+    )
+    return max(0.0, pipeline.annual_capacity_tpy - used_t)
+
+
+def pipeline_minimum_stable_injection_t(
+    network,
+    pipeline_id: str,
+    state: PhysicalState,
+) -> float:
+    well_ids = list(network._downstream_of_type(pipeline_id, InjectionWell))
+    for manifold_id in network._downstream_of_type(pipeline_id, SubseaManifold):
+        well_ids.extend(network._downstream_of_type(manifold_id, InjectionWell))
+    minimums_t = [
+        well.min_stable_injection_tph * network.time_step_hours
+        for well_id in well_ids
+        for well in [network.entities[well_id]]
+        if isinstance(well, InjectionWell)
+        and well_remaining_capacity(network, well_id, state)
+        >= well.min_stable_injection_tph * network.time_step_hours - 1e-9
+    ]
+    return min(minimums_t, default=0.0)
 
 
 def distribute_pipeline_outflow(

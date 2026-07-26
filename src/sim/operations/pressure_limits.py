@@ -169,6 +169,8 @@ def pressure_limited_rate_level_mask(
         well = network.entities[well_id]
         assert isinstance(well, InjectionWell)
         physical_max_rate_tph = well.max_injection_tph
+    well = network.entities[well_id]
+    assert isinstance(well, InjectionWell)
     pressure_max_rate_tph = bottomhole_pressure_limited_rate_tph(
         network,
         state,
@@ -180,6 +182,11 @@ def pressure_limited_rate_level_mask(
     feasible_rate_tph = min(max(0.0, physical_max_rate_tph), pressure_max_rate_tph)
     return tuple(
         mtpa_to_tph(rate_mtpa) <= feasible_rate_tph + 1e-9
+        and (
+            rate_mtpa <= 1e-12
+            or mtpa_to_tph(rate_mtpa)
+            >= well.min_stable_injection_tph - 1e-9
+        )
         for rate_mtpa in rate_levels_mtpa
     )
 

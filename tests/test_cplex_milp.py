@@ -13,7 +13,7 @@ from sim.environment.env import VESSEL_GO_TERMINAL, VESSEL_WAIT
 from sim.line_source import LineSourceParameters
 from sim.network import PhysicalNetwork
 from sim.operations.pressure_limits import projected_bottomhole_pressure_bar
-from sim.routes import sea_route
+from sim.routes import route_distance_km, sea_route
 from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
 from tests.test_rolling_milp import (
     _cold_env,
@@ -96,9 +96,18 @@ class CplexMilpInterfaceTests(unittest.TestCase):
         env.reset(seed=1)
         terminal_id = env.terminal_ids[0]
         source_id = env.emitter_ids[0]
-        expected = sea_route(
-            env.locations[source_id], env.locations[terminal_id]
-        ).distance_km
+        origin = env.locations[source_id]
+        destination = env.locations[terminal_id]
+        maritime_route = sea_route(origin, destination)
+        coordinates = list(maritime_route.coordinates)
+        if not coordinates:
+            coordinates = [origin, destination]
+        else:
+            if coordinates[0] != origin:
+                coordinates.insert(0, origin)
+            if coordinates[-1] != destination:
+                coordinates.append(destination)
+        expected = round(route_distance_km(coordinates), 2)
 
         for vessel_id in env.vessel_ids:
             route = env._routes[vessel_id]
