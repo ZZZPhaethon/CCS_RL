@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from sim.control.event_based.rl.observation_encoder import FORECAST_WINDOWS_H
 from sim.control.event_based.rl.reward import HighLevelRewardConfig
 from sim.simulator import SimulatorStepCounter
 
@@ -24,6 +25,7 @@ def make_tail_robust_native_env(
     scenario: str = "northern_lights_phase1_3vessels",
     episode_hours: int = 720,
     forecast_context_hours: int = 168,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
     decision_interval_h: float = 24.0,
     event_triggered: bool = True,
     weather_mode: str = "window",
@@ -35,6 +37,7 @@ def make_tail_robust_native_env(
     outside_risk_intervention_penalty: float = 0.02,
     override_windows_h: tuple[tuple[float, float], ...] = (),
     simulator_step_counter: SimulatorStepCounter | None = None,
+    max_simulator_hour_steps: int | None = None,
 ):
     """Build a native v4 environment without a replay wrapper.
 
@@ -50,6 +53,7 @@ def make_tail_robust_native_env(
         scenario=scenario,
         episode_hours=episode_hours,
         forecast_context_hours=forecast_context_hours,
+        future_summary_windows_h=future_summary_windows_h,
         decision_interval_h=decision_interval_h,
         event_triggered=event_triggered,
         weather_mode=weather_mode,
@@ -68,6 +72,7 @@ def make_tail_robust_native_env(
             else "agent_selected"
         ),
         simulator_step_counter=simulator_step_counter,
+        max_simulator_hour_steps=max_simulator_hour_steps,
     )
 
 
@@ -76,6 +81,7 @@ def make_tail_replay_gym_env(
     scenario: str = "northern_lights_phase1_3vessels",
     episode_hours: int = 720,
     forecast_context_hours: int = 168,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
     decision_interval_h: float = 24.0,
     event_triggered: bool = True,
     weather_mode: str = "window",
@@ -92,6 +98,7 @@ def make_tail_replay_gym_env(
     minimum_replay_pool: int = 4,
     override_windows_h: tuple[tuple[float, float], ...] = (),
     simulator_step_counter: SimulatorStepCounter | None = None,
+    max_simulator_hour_steps: int | None = None,
 ) -> TailFailureReplayGymEnv:
     """Build one curriculum and failure-replay training environment.
 
@@ -101,6 +108,7 @@ def make_tail_replay_gym_env(
         scenario=scenario,
         episode_hours=episode_hours,
         forecast_context_hours=forecast_context_hours,
+        future_summary_windows_h=future_summary_windows_h,
         decision_interval_h=decision_interval_h,
         event_triggered=event_triggered,
         weather_mode=weather_mode,
@@ -114,6 +122,7 @@ def make_tail_replay_gym_env(
         ),
         override_windows_h=override_windows_h,
         simulator_step_counter=simulator_step_counter,
+        max_simulator_hour_steps=max_simulator_hour_steps,
     )
     return TailFailureReplayGymEnv(
         native,

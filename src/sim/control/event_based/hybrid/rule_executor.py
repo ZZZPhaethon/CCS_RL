@@ -81,7 +81,10 @@ class GoalAwareRuleExecutor:
                 well_position
             ][target_index]:
                 action["wells"][well_position] = target_index
-        return {"vessels": list(action["vessels"]), "wells": list(action["wells"])}
+        result = {"vessels": list(action["vessels"])}
+        if "wells" in action:
+            result["wells"] = list(action["wells"])
+        return result
 
 
 def _environment_from_context(context: Mapping[str, Any]) -> CCSEnv:
@@ -160,7 +163,7 @@ def _preference_shuttle_action(
         preferred_action = env.vessel_go_emitter_action(emitter_id)
         if masks[position][preferred_action]:
             action["vessels"][position] = preferred_action
-    return {
-        "vessels": list(action["vessels"]),
-        "wells": list(action["wells"]),
-    }
+    result = {"vessels": list(action["vessels"])}
+    if "wells" in action:
+        result["wells"] = list(action["wells"])
+    return result

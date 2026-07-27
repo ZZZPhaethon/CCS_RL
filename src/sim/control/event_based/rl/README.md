@@ -7,24 +7,24 @@ policy to control every vessel and injection detail at every simulation hour.
 
 ```text
 Operational event or maximum 24 h
-    ↓ 192 actions: per-vessel service preferences × 3 injection modes
+    ↓ 64 actions: per-vessel service preferences only
 DispatchGoal
     ↓ masked GoalAwareRuleExecutor, every physical hour
 CCSEnv / physical simulator
-    ↓ realised storage, venting, operating cost, and risk exposure
-aggregated PPO reward
+    ↓ realised operating cost + vent cost
+objective-aligned MaskablePPO reward
 ```
 
 ## Files / 文件
 
 | File | Role / 作用 |
 | --- | --- |
-| `action_codec.py` | Maps one `Discrete(192)` action to independent vessel-service preferences and an injection mode. / 将一个 `Discrete(192)` 动作映射为各船独立服务偏好与注入模式。 |
+| `action_codec.py` | Maps one `Discrete(64)` action to independent vessel-service preferences; wells use automatic-max control. / 将一个 `Discrete(64)` 动作映射为各船独立服务偏好；井使用自动最大可行注入。 |
 | `observation_encoder.py` | State, vessel mode/destination, and 24 h/72 h forecast summaries. / 状态、船舶模式/目的地与 24/72 小时预测摘要。 |
 | `reward.py` | Stable realised reward; unit cost stays an evaluation KPI. / 稳定的实际结果奖励；单位成本保留为评估 KPI。 |
 | `high_level_env.py` | Advances to an operational event or the maximum 24 h interval. / 推进到运行事件或最长 24 小时间隔。 |
-| `gym_env.py` | Gymnasium `Discrete` adapter. / Gymnasium `Discrete` 适配器。 |
-| `train_high_level_ppo.py` | PPO training entry point. / PPO 训练入口。 |
+| `gym_env.py` | Gymnasium `Discrete` adapter with the MaskablePPO action-mask interface. / 带 MaskablePPO 动作掩码接口的 Gymnasium `Discrete` 适配器。 |
+| `train_high_level_ppo.py` | Objective-aligned MaskablePPO training entry point. / 目标对齐的 MaskablePPO 训练入口。 |
 | `evaluate_high_level_ppo.py` | Held-out physical evaluation with total-cost metrics. / 使用总成本指标进行留出种子物理评估。 |
 
 ## Train / 训练
@@ -79,33 +79,30 @@ dynamic `tqdm` bars correctly. `--status-every-steps` still controls how often
 进度条时，才使用 `--progress-mode bar`。`--status-every-steps` 仍控制
 `status.json` 与 `training_metrics.csv` 的写入频率。
 
-Event-triggered training uses `gamma=1.0` by default because transition duration
-varies; each transition already aggregates its realised physical-hour reward.
-Use `--no-event-triggered` to recover fixed 24 h decisions and the previous
-`0.999 ** 24 ≈ 0.9763` discount. The maximum interval remains 24 h in both modes.
+Formal training fixes `gamma=1.0`. The default high-level reward is exactly
+`-1e-6 × realised total cost`; it contains no stored-CO2 credit, excess-vent
+shaping, or overflow-risk shaping.
 
-The default high-level reward scale is `1e-6`. Venting is priced at the scenario
-carbon-price level, with an additional penalty only above a 0.5% captured-mass
-tolerance. Overflow exposure is measured in tonne-hours. This keeps safety and
-venting important without rewarding a large loss of storage merely to eliminate
-the final small amount of venting.
+`--max-simulator-hour-steps` is a hard limit on bottom-level physical advances,
+not PPO decision steps. The environment checks it before every 1 h simulator
+advance, so a sparse high-level transition cannot overshoot `B_4800`. Omit the
+option for smoke tests until the 4,800-root budget has been measured.
 
 PPO uses `ent_coef=0.01` by default to slow premature collapse to one static
 action. Train with the fast rule executor. Use native MPC later for evaluation,
 demonstrations, or teacher data—not inside the PPO training loop.
 
-Models trained with the previous 18-action/52-feature interface are retained as
-historical results but are not shape-compatible with this 192-action/79-feature
-environment. Start a new run after this interface change.
+Models trained with the previous 18-action or 192-action interfaces are
+historical only and are not shape-compatible with this 64-action environment.
+Start a new run after this interface change.
 MLP PPO defaults to `cpu`; using CUDA for this small policy usually adds
 overhead without useful GPU utilisation.
 
-事件触发训练默认使用 `gamma=1.0`，因为每次转移持续时间不同，且奖励已经聚合实际经过的物理小时。
-使用 `--no-event-triggered` 可恢复固定 24 小时决策和 `0.999 ** 24 ≈ 0.9763` 折扣；两种模式的最长间隔均为 24 小时。
-
-高层奖励默认缩放为 `1e-6`。放空首先按场景碳价计价，仅对超过捕集量 0.5% 容许比例的部分附加惩罚；
-溢出风险按吨小时计算。PPO 默认 `ent_coef=0.01`，用于减缓策略过早收敛到单一静态动作。
+正式训练固定 `gamma=1.0`。高层奖励严格等于 `-1e-6 × 实际总成本`，不包含封存量奖励、
+额外放空塑形或溢出风险塑形。PPO 默认 `ent_coef=0.01`，用于减缓策略过早收敛到单一静态动作。
+`--max-simulator-hour-steps` 限制的是底层 1 h 物理仿真推进次数；环境在每次推进前检查，
+因此高层稀疏决策不会越过 \(B_{4800}\)。
 MLP PPO 默认使用 `cpu`；原生 MPC 仅用于评估、示范或教师数据，不放入 PPO 训练内环。
 
-旧版 18 动作/52 特征模型作为历史结果保留，但与新版 192 动作/79 特征环境形状不兼容；
+旧版 18 动作和 192 动作模型仅作为历史结果保留，与新版 64 动作环境不兼容；
 本次接口升级后需要启动新的训练。

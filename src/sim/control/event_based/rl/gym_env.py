@@ -41,6 +41,11 @@ class HighLevelDispatchGymEnv(gym.Env):
             dtype=np.float32,
         )
 
+    def action_masks(self) -> np.ndarray:
+        """Return the legal-action mask consumed by MaskablePPO."""
+
+        return self.env.action_masks()
+
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         """Sample a reproducible per-episode scenario seed and reset.
 
@@ -58,4 +63,3 @@ class HighLevelDispatchGymEnv(gym.Env):
         """
         observation, reward, terminated, truncated, info = self.env.step(int(action))
         return observation.astype(np.float32, copy=False), reward, terminated, truncated, info
-

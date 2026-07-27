@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from sim.control.event_based.rl.observation_encoder import FORECAST_WINDOWS_H
 from sim.control.event_based.rl.reward import HighLevelRewardConfig
 from sim.environment import CCSEnvConfig, build_phase1_env
 from sim.simulator import SimulatorStepCounter
@@ -28,6 +29,7 @@ def make_risk_gated_native_env(
     scenario: str = "northern_lights_phase1_3vessels",
     episode_hours: int = 720,
     forecast_context_hours: int = 168,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
     decision_interval_h: float = 24.0,
     event_triggered: bool = True,
     weather_mode: str = "window",
@@ -40,6 +42,7 @@ def make_risk_gated_native_env(
     scenario_generator=None,
     well_control_mode: str = "agent_selected",
     simulator_step_counter: SimulatorStepCounter | None = None,
+    max_simulator_hour_steps: int | None = None,
 ) -> RiskGatedResidualDispatchEnv:
     """Build one native v3 environment.
 
@@ -69,6 +72,8 @@ def make_risk_gated_native_env(
                 decision_interval_h=decision_interval_h,
                 event_triggered=event_triggered,
                 reward=reward or HighLevelRewardConfig(),
+                future_summary_windows_h=future_summary_windows_h,
+                max_simulator_hour_steps=max_simulator_hour_steps,
             ),
             adaptive_gate=gate or AdaptiveRiskGateConfig(),
             gate_mode=gate_mode,
@@ -97,6 +102,7 @@ def make_risk_gated_gym_env(
     episode_seed_max: int = 999_999,
     well_control_mode: str = "agent_selected",
     simulator_step_counter: SimulatorStepCounter | None = None,
+    max_simulator_hour_steps: int | None = None,
 ) -> MaskedResidualGymEnv:
     """Build one Gym-compatible v3 environment.
 
@@ -118,6 +124,7 @@ def make_risk_gated_gym_env(
         ),
         well_control_mode=well_control_mode,
         simulator_step_counter=simulator_step_counter,
+        max_simulator_hour_steps=max_simulator_hour_steps,
     )
     return MaskedResidualGymEnv(
         native,
@@ -143,6 +150,7 @@ def make_curriculum_risk_gated_gym_env(
     episode_seed_max: int = 999_999,
     well_control_mode: str = "agent_selected",
     simulator_step_counter: SimulatorStepCounter | None = None,
+    max_simulator_hour_steps: int | None = None,
 ) -> CurriculumMaskedResidualGymEnv:
     """Build one curriculum-aware v3 Gym environment.
 
@@ -164,6 +172,7 @@ def make_curriculum_risk_gated_gym_env(
         ),
         well_control_mode=well_control_mode,
         simulator_step_counter=simulator_step_counter,
+        max_simulator_hour_steps=max_simulator_hour_steps,
     )
     return CurriculumMaskedResidualGymEnv(
         native,

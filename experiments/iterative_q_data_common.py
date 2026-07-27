@@ -10,8 +10,11 @@ from scripts import compare_forecast_encoders_rl as compare
 
 from sim.control.baselines import greedy_shuttle_policy
 from sim.control.event_based.rl.observation_encoder import (
+    FORECAST_WINDOWS_H,
+    FUTURE_SUMMARY_REPRESENTATION_ID,
     future_summary_feature_names,
     future_summary_observation,
+    validated_future_summary_windows,
 )
 from sim.control.event_based.residual_rl_v4.scenario import (
     ReplayableDifficultyScenarioGenerator,
@@ -53,6 +56,12 @@ def add_scenario_protocol_arguments(parser) -> None:
         "--forecast-context-hours",
         type=int,
         default=168,
+    )
+    parser.add_argument(
+        "--future-summary-windows-h",
+        type=int,
+        nargs="*",
+        default=list(FORECAST_WINDOWS_H),
     )
 
 
@@ -147,13 +156,21 @@ def make_event_env(
     args,
     simulator_step_counter: SimulatorStepCounter | None = None,
 ) -> EventJointResidualGymEnv:
-    return EventJointResidualGymEnv(
+    wrapper = EventJointResidualGymEnv(
         make_native_env(args, simulator_step_counter),
         str(args.variant),
         include_episode_progress=True,
         greedy_control_variate=False,
         hourly_gamma=1.0,
     )
+    wrapper.future_summary_windows_h = validated_future_summary_windows(
+        getattr(
+            args,
+            "future_summary_windows_h",
+            FORECAST_WINDOWS_H,
+        )
+    )
+    return wrapper
 
 
 def metrics(env) -> dict[str, float]:
@@ -200,7 +217,7 @@ def event_residual_reward(
 def empty_candidate_arrays(wrapper, max_events: int) -> dict[str, np.ndarray]:
     state_shape = wrapper.observation_space["state"].shape
     try:
-        future_shape = future_summary_observation(wrapper.env).shape
+        future_shape = v4_future_summary(wrapper).shape
     except AttributeError:
         future_shape = (0,)
     action_count = int(wrapper.action_space.n)
@@ -253,11 +270,27 @@ def state_feature_names(wrapper) -> list[str]:
 def v4_future_summary(wrapper) -> np.ndarray:
     """Return the exact future-summary vector exposed to residual PPO v4."""
 
-    return future_summary_observation(wrapper.env)
+    return future_summary_observation(
+        wrapper.env,
+        getattr(
+            wrapper,
+            "future_summary_windows_h",
+            FORECAST_WINDOWS_H,
+        ),
+    )
 
 
 def v4_future_feature_names(wrapper) -> list[str]:
-    return list(future_summary_feature_names(wrapper.env))
+    return list(
+        future_summary_feature_names(
+            wrapper.env,
+            getattr(
+                wrapper,
+                "future_summary_windows_h",
+                FORECAST_WINDOWS_H,
+            ),
+        )
+    )
 
 
 def stack_records(records: list[dict[str, object]]) -> dict[str, np.ndarray]:

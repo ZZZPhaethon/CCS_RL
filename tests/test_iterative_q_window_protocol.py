@@ -4,6 +4,7 @@ import pytest
 
 from experiments import iterative_q_data_common as common
 from sim.control.event_based.rl.observation_encoder import (
+    future_summary_observation,
     high_level_observation,
 )
 
@@ -62,6 +63,22 @@ def test_iterative_q_future_summary_exactly_matches_v4():
     assert summary.shape == (14,)
     assert len(names) == 14
     assert summary == pytest.approx(high_level_observation(wrapper.env)[-14:])
+
+
+def test_iterative_q_uses_shared_configurable_future_summary():
+    args = _args(0.5)
+    args.future_summary_windows_h = (168,)
+    wrapper = common.make_event_env(args)
+    wrapper.reset_native_seed(123)
+
+    summary = common.v4_future_summary(wrapper)
+    names = common.v4_future_feature_names(wrapper)
+
+    assert summary.shape == (7,)
+    assert len(names) == 7
+    assert summary == pytest.approx(
+        future_summary_observation(wrapper.env, (168,))
+    )
 
 
 def test_unified_window_protocol_uses_one_fixed_configuration():

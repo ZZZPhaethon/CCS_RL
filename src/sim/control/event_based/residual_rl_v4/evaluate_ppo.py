@@ -58,6 +58,13 @@ def evaluate_run(
         forecast_context_hours=int(
             config["forecast_context_hours"]
         ),
+        future_summary_windows_h=tuple(
+            int(value)
+            for value in config.get(
+                "future_summary_windows_h",
+                (24, 72),
+            )
+        ),
         decision_interval_h=float(config["decision_interval_h"]),
         event_triggered=bool(config["event_triggered"]),
         weather_mode=str(config["weather_mode"]),

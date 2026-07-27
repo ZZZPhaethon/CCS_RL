@@ -14,6 +14,7 @@ from sim.environment import CCSEnv
 from sim.operations.unloading import terminal_unload_queue_snapshot
 
 from sim.control.event_based.rl.observation_encoder import (
+    FORECAST_WINDOWS_H,
     future_summary_feature_names,
     high_level_observation,
     high_level_observation_size,
@@ -43,6 +44,7 @@ def residual_observation(
     decision_trigger: str,
     hours_since_decision: float,
     maximum_interval_h: float,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
 ) -> np.ndarray:
     """Return base state, forecasts, event context, and risk features.
 
@@ -51,7 +53,7 @@ def residual_observation(
     if env.simulator is None:
         raise RuntimeError("Call env.reset() before requesting an observation.")
     values = [
-        *high_level_observation(env),
+        *high_level_observation(env, future_summary_windows_h),
         *_event_one_hot(decision_trigger),
         *_hours_to_overflow(env),
         *_travel_hours_matrix(env),
@@ -62,13 +64,16 @@ def residual_observation(
     return np.asarray(values, dtype=np.float32)
 
 
-def residual_observation_size(env: CCSEnv) -> int:
+def residual_observation_size(
+    env: CCSEnv,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
+) -> int:
     """Return the fixed residual-observation length.
 
     返回固定的残差观测长度。
     """
     return (
-        high_level_observation_size(env)
+        high_level_observation_size(env, future_summary_windows_h)
         + len(EVENT_TYPES)
         + len(env.emitter_ids)
         + len(env.vessel_ids) * len(env.emitter_ids)
@@ -76,7 +81,10 @@ def residual_observation_size(env: CCSEnv) -> int:
     )
 
 
-def residual_feature_names(env: CCSEnv) -> tuple[str, ...]:
+def residual_feature_names(
+    env: CCSEnv,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
+) -> tuple[str, ...]:
     """Return feature names in encoder order for experiment metadata.
 
     按编码顺序返回特征名称，用于实验元数据。
@@ -89,7 +97,9 @@ def residual_feature_names(env: CCSEnv) -> tuple[str, ...]:
 
     names.extend(vessel_operation_mode_feature_names(env))
     names.extend(vessel_sailing_destination_feature_names(env))
-    names.extend(future_summary_feature_names(env))
+    names.extend(
+        future_summary_feature_names(env, future_summary_windows_h)
+    )
     names.extend(f"event.{event}" for event in EVENT_TYPES)
     names.extend(f"{emitter}.hours_to_overflow_norm" for emitter in env.emitter_ids)
     for vessel_id in env.vessel_ids:

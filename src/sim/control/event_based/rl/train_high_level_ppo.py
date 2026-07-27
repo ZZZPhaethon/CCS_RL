@@ -24,6 +24,7 @@ from typing import Any
 
 from sim.environment import CCSEnvConfig, build_phase1_env
 from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
+from sim.simulator import SimulatorStepCounter
 
 from sim.control.event_based.residual_rl_v4.scenario import (
     ReplayableDifficultyScenarioGenerator,
@@ -35,10 +36,12 @@ from sim.control.event_based.hybrid import (
 
 from .gym_env import HighLevelDispatchGymEnv
 from .high_level_env import HighLevelDispatchEnv, HighLevelEnvConfig
+from .observation_encoder import (
+    FORECAST_WINDOWS_H,
+    FUTURE_SUMMARY_REPRESENTATION_ID,
+    future_summary_feature_names,
+)
 from .reward import HighLevelRewardConfig
-
-
-HOURLY_DISCOUNT = 0.999
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -71,6 +74,8 @@ def _make_status_callback(
     total_timesteps: int,
     run_dir: Path,
     report_every_steps: int,
+    simulator_step_counter: SimulatorStepCounter,
+    max_simulator_hour_steps: int | None,
     progress_mode: str = "lines",
 ):
     """Create a PPO callback that persists readable live training status.
@@ -147,6 +152,10 @@ def _make_status_callback(
                 fieldnames=(
                     "timesteps",
                     "target_timesteps",
+                    "simulator_step_calls",
+                    "simulator_hour_steps",
+                    "max_simulator_hour_steps",
+                    "simulator_budget_fraction",
                     "elapsed_seconds",
                     "decisions_per_second",
                     "episode_reward_mean",
@@ -168,10 +177,18 @@ def _make_status_callback(
                     self.last_progress_step = self.num_timesteps
             if self.num_timesteps - self.last_report_step >= self.report_every:
                 self._record("running")
-            return True
+            exhausted = self._budget_exhausted()
+            if exhausted:
+                self._record("simulator_budget_exhausted")
+            return not exhausted
 
         def _on_training_end(self) -> None:
-            self._record("completed")
+            state = (
+                "simulator_budget_exhausted"
+                if self._budget_exhausted()
+                else "completed"
+            )
+            self._record(state)
             if self.progress_bar is not None:
                 self.progress_bar.close()
             if self.metrics_file is not None:
@@ -180,9 +197,19 @@ def _make_status_callback(
         def _record(self, state: str) -> None:
             elapsed_seconds = max(1e-9, perf_counter() - self.started_at)
             metrics = self.logger.name_to_value
+            simulator_usage = simulator_step_counter.snapshot()
+            budget_fraction = (
+                simulator_usage.hour_steps / max_simulator_hour_steps
+                if max_simulator_hour_steps is not None
+                else None
+            )
             row = {
                 "timesteps": self.num_timesteps,
                 "target_timesteps": total_timesteps,
+                "simulator_step_calls": simulator_usage.calls,
+                "simulator_hour_steps": simulator_usage.hour_steps,
+                "max_simulator_hour_steps": max_simulator_hour_steps,
+                "simulator_budget_fraction": budget_fraction,
                 "elapsed_seconds": elapsed_seconds,
                 "decisions_per_second": self.num_timesteps / elapsed_seconds,
                 "episode_reward_mean": _logger_scalar(
@@ -210,6 +237,10 @@ def _make_status_callback(
                     "timesteps": self.num_timesteps,
                     "target_timesteps": total_timesteps,
                     "progress_fraction": min(1.0, self.num_timesteps / total_timesteps),
+                    **simulator_usage.as_dict(),
+                    "max_simulator_hour_steps": max_simulator_hour_steps,
+                    "simulator_budget_fraction": budget_fraction,
+                    "simulator_budget_exhausted": self._budget_exhausted(),
                     "elapsed_seconds": elapsed_seconds,
                     "decisions_per_second": row["decisions_per_second"],
                     "latest_metrics": row,
@@ -241,10 +272,20 @@ def _make_status_callback(
                 "High-level PPO | "
                 f"{100.0 * self.num_timesteps / total_timesteps:5.1f}% | "
                 f"{self.num_timesteps}/{total_timesteps} decisions | "
+                f"{row['simulator_hour_steps']:.0f} simulator h | "
                 f"{row['decisions_per_second']:.1f} decision/s | "
                 f"mean_reward={_format_optional(row['episode_reward_mean'])} | "
                 f"value_loss={_format_optional(row['value_loss'])} | "
                 f"kl={_format_optional(row['approx_kl'])}"
+            )
+
+        @staticmethod
+        def _budget_exhausted() -> bool:
+            usage = simulator_step_counter.snapshot()
+            return (
+                max_simulator_hour_steps is not None
+                and usage.hour_steps
+                >= float(max_simulator_hour_steps) - 1e-9
             )
 
     return TqdmStatusCallback()
@@ -317,6 +358,7 @@ def make_high_level_native_env(
     scenario: str = "northern_lights_phase1_3vessels",
     episode_hours: int = 720,
     forecast_context_hours: int = 169,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
     decision_interval_h: float = 24.0,
     event_triggered: bool = True,
     weather_mode: str = "block",
@@ -324,6 +366,8 @@ def make_high_level_native_env(
     scenario_protocol: str = "local_formal",
     executor: str = "rule",
     reward: HighLevelRewardConfig | None = None,
+    simulator_step_counter: SimulatorStepCounter | None = None,
+    max_simulator_hour_steps: int | None = None,
 ) -> HighLevelDispatchEnv:
     """Build the sparse RL environment with forecast context beyond episode end.
 
@@ -349,6 +393,7 @@ def make_high_level_native_env(
         )
     else:
         raise ValueError(f"unknown scenario protocol: {scenario_protocol}")
+    reward_config = reward or HighLevelRewardConfig.objective_aligned()
     physical_env = build_phase1_env(
         scenario=scenario,
         scenario_generator=scenario_generator,
@@ -356,8 +401,15 @@ def make_high_level_native_env(
         config=CCSEnvConfig(
             episode_hours=episode_hours,
             include_goal_obs=False,
-            reward_mode="vent_first",
+            reward_scale=reward_config.reward_scale,
+            injection_reward_eur_per_t=0.0,
+            store_reward_eur_per_t=0.0,
+            vent_penalty_weight=1.0,
+            operating_cost_weight=1.0,
+            reward_mode="economic",
+            well_control_mode="automatic_max",
         ),
+        simulator_step_counter=simulator_step_counter,
     )
     if executor == "rule":
         executor_factory = GoalAwareRuleExecutor
@@ -370,7 +422,9 @@ def make_high_level_native_env(
         config=HighLevelEnvConfig(
             decision_interval_h=decision_interval_h,
             event_triggered=event_triggered,
-            reward=reward or HighLevelRewardConfig(),
+            reward=reward_config,
+            future_summary_windows_h=future_summary_windows_h,
+            max_simulator_hour_steps=max_simulator_hour_steps,
         ),
         executor_factory=executor_factory,
     )
@@ -382,13 +436,14 @@ def train_high_level_ppo(
     seed: int = 0,
     scenario: str = "northern_lights_phase1_3vessels",
     episode_hours: int = 720,
-    forecast_context_hours: int = 169,
+    forecast_context_hours: int = 168,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
     decision_interval_h: float = 24.0,
     event_triggered: bool = True,
-    weather_mode: str = "block",
+    weather_mode: str = "window",
     warm_start: bool = True,
-    scenario_protocol: str = "local_formal",
-    gamma: float | None = None,
+    scenario_protocol: str = "unified_window_v1",
+    gamma: float = 1.0,
     n_steps: int = 256,
     batch_size: int = 64,
     learning_rate: float = 3e-4,
@@ -399,19 +454,28 @@ def train_high_level_ppo(
     status_every_steps: int = 10,
     progress_mode: str = "lines",
     reward: HighLevelRewardConfig | None = None,
+    max_simulator_hour_steps: int | None = None,
 ):
-    """Train PPO over sparse dispatch goals and return the trained model.
+    """Train MaskablePPO over sparse dispatch goals and return the model.
 
     在稀疏调度目标上训练 PPO，并返回训练后的模型。
     """
+    if abs(float(gamma) - 1.0) > 1e-12:
+        raise ValueError("Formal Centralized PPO uses gamma=1.0.")
+    if max_simulator_hour_steps is not None and (
+        int(max_simulator_hour_steps) != max_simulator_hour_steps
+        or max_simulator_hour_steps <= 0
+    ):
+        raise ValueError(
+            "max_simulator_hour_steps must be a positive integer."
+        )
     try:
-        from stable_baselines3 import PPO
+        from sb3_contrib import MaskablePPO
         from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
         from stable_baselines3.common.monitor import Monitor
     except ImportError as exc:  # pragma: no cover - dependency guard.
         raise ImportError(
-            "train_high_level_ppo requires stable-baselines3. "
-            "Install with `pip install stable-baselines3`."
+            "train_high_level_ppo requires stable-baselines3 and sb3-contrib."
         ) from exc
 
     run_dir = log_dir or default_run_dir(
@@ -421,32 +485,51 @@ def train_high_level_ppo(
         seed=seed,
     )
     run_dir.mkdir(parents=True, exist_ok=False)
+    simulator_step_counter = SimulatorStepCounter()
     native_env = make_high_level_native_env(
         scenario=scenario,
         episode_hours=episode_hours,
         forecast_context_hours=forecast_context_hours,
+        future_summary_windows_h=future_summary_windows_h,
         decision_interval_h=decision_interval_h,
         event_triggered=event_triggered,
         weather_mode=weather_mode,
         warm_start=warm_start,
         scenario_protocol=scenario_protocol,
         reward=reward,
+        simulator_step_counter=simulator_step_counter,
+        max_simulator_hour_steps=max_simulator_hour_steps,
     )
     gym_env = Monitor(
         HighLevelDispatchGymEnv(native_env),
         filename=str(run_dir / "monitor"),
     )
-    effective_gamma = float(gamma) if gamma is not None else (
-        1.0 if event_triggered else HOURLY_DISCOUNT ** decision_interval_h
-    )
+    effective_gamma = 1.0
     planned_timesteps = _planned_total_timesteps(total_timesteps, n_steps)
     _write_json(
         run_dir / "config.json",
         {
-            "interface_version": 2,
+            "interface_version": 3,
+            "algorithm": "MaskablePPO",
+            "dynamic_action_masks": True,
+            "action_mask_semantics": (
+                "all_vessel_preferences_are_safe_intentions"
+            ),
             "scenario": scenario,
             "episode_hours": episode_hours,
             "forecast_context_hours": forecast_context_hours,
+            "future_summary_representation_id": (
+                FUTURE_SUMMARY_REPRESENTATION_ID
+            ),
+            "future_summary_windows_h": list(
+                future_summary_windows_h
+            ),
+            "future_summary_feature_names": list(
+                future_summary_feature_names(
+                    native_env.env,
+                    future_summary_windows_h,
+                )
+            ),
             "decision_interval_h": decision_interval_h,
             "event_triggered": event_triggered,
             "weather_mode": weather_mode,
@@ -454,9 +537,9 @@ def train_high_level_ppo(
             "scenario_protocol": scenario_protocol,
             "requested_timesteps": total_timesteps,
             "planned_timesteps": planned_timesteps,
+            "max_simulator_hour_steps": max_simulator_hour_steps,
             "seed": seed,
             "gamma": effective_gamma,
-            "hourly_discount": HOURLY_DISCOUNT,
             "n_steps": n_steps,
             "batch_size": batch_size,
             "learning_rate": learning_rate,
@@ -472,6 +555,8 @@ def train_high_level_ppo(
         total_timesteps=planned_timesteps,
         run_dir=run_dir,
         report_every_steps=status_every_steps,
+        simulator_step_counter=simulator_step_counter,
+        max_simulator_hour_steps=max_simulator_hour_steps,
         progress_mode=progress_mode,
     )
     checkpoint_callback = CheckpointCallback(
@@ -479,7 +564,7 @@ def train_high_level_ppo(
         save_path=str(run_dir / "checkpoints"),
         name_prefix="ppo_high_level",
     )
-    model = PPO(
+    model = MaskablePPO(
         "MlpPolicy",
         gym_env,
         seed=seed,
@@ -492,21 +577,45 @@ def train_high_level_ppo(
         verbose=verbose,
         tensorboard_log=_tensorboard_log_dir(run_dir),
     )
-    model.learn(
-        total_timesteps=total_timesteps,
-        callback=CallbackList([status_callback, checkpoint_callback]),
-        progress_bar=False,
-    )
-    model.save(run_dir / "ppo_high_level_final")
-    _write_json(
-        run_dir / "training_complete.json",
-        {
-            "state": "completed",
-            "requested_timesteps": total_timesteps,
-            "planned_timesteps": planned_timesteps,
-            "model_path": str(run_dir / "ppo_high_level_final"),
-        },
-    )
+    try:
+        model.learn(
+            total_timesteps=total_timesteps,
+            callback=CallbackList([status_callback, checkpoint_callback]),
+            progress_bar=False,
+        )
+        model.save(run_dir / "ppo_high_level_final")
+        simulator_usage = simulator_step_counter.snapshot()
+        simulator_budget_exhausted = (
+            max_simulator_hour_steps is not None
+            and simulator_usage.hour_steps
+            >= float(max_simulator_hour_steps) - 1e-9
+        )
+        _write_json(
+            run_dir / "training_complete.json",
+            {
+                "state": (
+                    "simulator_budget_exhausted"
+                    if simulator_budget_exhausted
+                    else "completed"
+                ),
+                "requested_timesteps": total_timesteps,
+                "planned_timesteps": planned_timesteps,
+                **simulator_usage.as_dict(),
+                "max_simulator_hour_steps": max_simulator_hour_steps,
+                "simulator_budget_fraction": (
+                    simulator_usage.hour_steps
+                    / max_simulator_hour_steps
+                    if max_simulator_hour_steps is not None
+                    else None
+                ),
+                "simulator_budget_exhausted": (
+                    simulator_budget_exhausted
+                ),
+                "model_path": str(run_dir / "ppo_high_level_final"),
+            },
+        )
+    finally:
+        gym_env.close()
     return model
 
 
@@ -520,13 +629,23 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--scenario", default="northern_lights_phase1_3vessels")
     parser.add_argument("--episode-hours", type=int, default=720)
-    parser.add_argument("--forecast-context-hours", type=int, default=169)
+    parser.add_argument("--forecast-context-hours", type=int, default=168)
+    parser.add_argument(
+        "--future-summary-windows-h",
+        type=int,
+        nargs="*",
+        default=list(FORECAST_WINDOWS_H),
+        help=(
+            "Increasing shared future-summary horizons; pass no values "
+            "for a state-only ablation."
+        ),
+    )
     parser.add_argument("--decision-interval-h", type=float, default=24.0)
-    parser.add_argument("--weather-mode", choices=("window", "block"), default="block")
+    parser.add_argument("--weather-mode", choices=("window", "block"), default="window")
     parser.add_argument(
         "--scenario-protocol",
         choices=("local_formal", "unified_window_v1"),
-        default="local_formal",
+        default="unified_window_v1",
     )
     parser.add_argument(
         "--warm-start",
@@ -542,7 +661,16 @@ def main() -> None:
             "/ 在最大间隔前遇到运行事件时重规划。"
         ),
     )
-    parser.add_argument("--gamma", type=float, default=None)
+    parser.add_argument("--gamma", type=float, default=1.0)
+    parser.add_argument(
+        "--max-simulator-hour-steps",
+        type=int,
+        default=None,
+        help=(
+            "Hard cap on bottom-level one-hour simulator advances. "
+            "Set this to B_4800 for formal training."
+        ),
+    )
     parser.add_argument(
         "--reward-scale",
         type=float,
@@ -594,6 +722,9 @@ def main() -> None:
         scenario=args.scenario,
         episode_hours=args.episode_hours,
         forecast_context_hours=args.forecast_context_hours,
+        future_summary_windows_h=tuple(
+            args.future_summary_windows_h
+        ),
         decision_interval_h=args.decision_interval_h,
         event_triggered=args.event_triggered,
         weather_mode=args.weather_mode,
@@ -605,15 +736,13 @@ def main() -> None:
         log_dir=run_dir,
         status_every_steps=args.status_every_steps,
         progress_mode=args.progress_mode,
-        reward=HighLevelRewardConfig(reward_scale=args.reward_scale),
-    )
-    effective_gamma = args.gamma if args.gamma is not None else (
-        1.0
-        if args.event_triggered
-        else HOURLY_DISCOUNT ** args.decision_interval_h
+        reward=HighLevelRewardConfig.objective_aligned(
+            reward_scale=args.reward_scale
+        ),
+        max_simulator_hour_steps=args.max_simulator_hour_steps,
     )
     print(f"Saved PPO model and metrics under: {run_dir}")
-    print(f"High-level gamma: {effective_gamma:.8f}")
+    print("High-level gamma: 1.00000000")
 
 
 if __name__ == "__main__":

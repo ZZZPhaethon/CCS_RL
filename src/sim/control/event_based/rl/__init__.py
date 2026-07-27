@@ -3,7 +3,7 @@
 面向 CCS 调度的稀疏目标层强化学习。
 """
 
-from .action_codec import HighLevelActionCodec, InjectionMode
+from .action_codec import HighLevelActionCodec
 from .gym_env import HighLevelDispatchGymEnv
 from .high_level_env import HighLevelDispatchEnv, HighLevelEnvConfig
 from .reward import HighLevelRewardConfig
@@ -14,6 +14,4 @@ __all__ = [
     "HighLevelDispatchGymEnv",
     "HighLevelEnvConfig",
     "HighLevelRewardConfig",
-    "InjectionMode",
 ]
-

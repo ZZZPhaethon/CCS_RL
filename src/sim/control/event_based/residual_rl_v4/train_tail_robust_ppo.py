@@ -37,6 +37,10 @@ from sim.control.event_based.residual_rl_v3.risk_gate import (
     AdaptiveRiskGateConfig,
 )
 from sim.control.event_based.rl.reward import HighLevelRewardConfig
+from sim.control.event_based.rl.observation_encoder import (
+    FORECAST_WINDOWS_H,
+    FUTURE_SUMMARY_REPRESENTATION_ID,
+)
 
 from .factory import (
     make_tail_replay_gym_env,
@@ -91,6 +95,7 @@ def _make_tail_validation_callback(
     scenario: str,
     episode_hours: int,
     forecast_context_hours: int,
+    future_summary_windows_h: tuple[int, ...],
     decision_interval_h: float,
     event_triggered: bool,
     weather_mode: str,
@@ -139,6 +144,7 @@ def _make_tail_validation_callback(
                 "scenario": scenario,
                 "episode_hours": episode_hours,
                 "forecast_context_hours": forecast_context_hours,
+                "future_summary_windows_h": future_summary_windows_h,
                 "decision_interval_h": decision_interval_h,
                 "event_triggered": event_triggered,
                 "weather_mode": weather_mode,
@@ -371,6 +377,7 @@ def train_residual_v4(
     scenario: str = "northern_lights_phase1_3vessels",
     episode_hours: int = 720,
     forecast_context_hours: int = 168,
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
     decision_interval_h: float = 24.0,
     event_triggered: bool = True,
     weather_mode: str = "window",
@@ -473,6 +480,7 @@ def train_residual_v4(
         "scenario": scenario,
         "episode_hours": episode_hours,
         "forecast_context_hours": forecast_context_hours,
+        "future_summary_windows_h": future_summary_windows_h,
         "decision_interval_h": decision_interval_h,
         "event_triggered": event_triggered,
         "weather_mode": weather_mode,
@@ -509,6 +517,7 @@ def train_residual_v4(
         scenario=scenario,
         episode_hours=episode_hours,
         forecast_context_hours=forecast_context_hours,
+        future_summary_windows_h=future_summary_windows_h,
         decision_interval_h=decision_interval_h,
         event_triggered=event_triggered,
         weather_mode=weather_mode,
@@ -532,6 +541,7 @@ def train_residual_v4(
         scenario=scenario,
         episode_hours=episode_hours,
         forecast_context_hours=forecast_context_hours,
+        future_summary_windows_h=future_summary_windows_h,
         decision_interval_h=decision_interval_h,
         event_triggered=event_triggered,
         weather_mode=weather_mode,
@@ -586,6 +596,7 @@ def train_residual_v4(
                 scenario=scenario,
                 episode_hours=episode_hours,
                 forecast_context_hours=forecast_context_hours,
+                future_summary_windows_h=future_summary_windows_h,
                 decision_interval_h=decision_interval_h,
                 event_triggered=event_triggered,
                 weather_mode=weather_mode,
@@ -729,6 +740,7 @@ def _write_training_config(
     scenario: str,
     episode_hours: int,
     forecast_context_hours: int,
+    future_summary_windows_h: tuple[int, ...],
     decision_interval_h: float,
     event_triggered: bool,
     weather_mode: str,
@@ -776,6 +788,12 @@ def _write_training_config(
             "scenario": scenario,
             "episode_hours": episode_hours,
             "forecast_context_hours": forecast_context_hours,
+            "future_summary_representation_id": (
+                FUTURE_SUMMARY_REPRESENTATION_ID
+            ),
+            "future_summary_windows_h": list(
+                future_summary_windows_h
+            ),
             "decision_interval_h": decision_interval_h,
             "event_triggered": event_triggered,
             "weather_mode": weather_mode,
@@ -830,7 +848,10 @@ def _write_training_config(
             ),
             "observation_size": probe.observation_size,
             "observation_features": list(
-                residual_feature_names(probe.env)
+                residual_feature_names(
+                    probe.env,
+                    future_summary_windows_h,
+                )
             ),
             "high_level_reward": asdict(reward),
         },
@@ -866,6 +887,16 @@ def main() -> None:
     )
     parser.add_argument("--episode-hours", type=int, default=720)
     parser.add_argument("--forecast-context-hours", type=int, default=168)
+    parser.add_argument(
+        "--future-summary-windows-h",
+        type=int,
+        nargs="*",
+        default=list(FORECAST_WINDOWS_H),
+        help=(
+            "Increasing future-summary horizons in hours; pass the "
+            "option with no values for a state-only ablation."
+        ),
+    )
     parser.add_argument("--decision-interval-h", type=float, default=24.0)
     parser.add_argument(
         "--event-triggered",
@@ -1005,6 +1036,9 @@ def main() -> None:
         scenario=args.scenario,
         episode_hours=args.episode_hours,
         forecast_context_hours=args.forecast_context_hours,
+        future_summary_windows_h=tuple(
+            args.future_summary_windows_h
+        ),
         decision_interval_h=args.decision_interval_h,
         event_triggered=args.event_triggered,
         weather_mode=args.weather_mode,

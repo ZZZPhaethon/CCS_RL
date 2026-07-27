@@ -24,7 +24,12 @@ from sim.environment.vessel_mode import vessel_operation_modes
 from ..contracts import ActionExecutor
 from ..hybrid import GoalAwareRuleExecutor
 from .action_codec import HighLevelActionCodec
-from .observation_encoder import high_level_observation, high_level_observation_size
+from .observation_encoder import (
+    FORECAST_WINDOWS_H,
+    high_level_observation,
+    high_level_observation_size,
+    validated_future_summary_windows,
+)
 from .reward import HighLevelRewardConfig, high_level_reward
 
 
@@ -40,6 +45,8 @@ class HighLevelEnvConfig:
     emitter_fill_event_thresholds: tuple[float, ...] = (0.8, 0.95)
     minimum_operable_speed_factor: float = 0.75
     reward: HighLevelRewardConfig = HighLevelRewardConfig()
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H
+    max_simulator_hour_steps: int | None = None
 
     def __post_init__(self) -> None:
         """Validate time and event thresholds before an episode starts.
@@ -57,6 +64,16 @@ class HighLevelEnvConfig:
             raise ValueError("Emitter fill thresholds must be inside (0, 1).")
         if self.minimum_operable_speed_factor < 0.0:
             raise ValueError("minimum_operable_speed_factor must be non-negative.")
+        validated_future_summary_windows(
+            self.future_summary_windows_h
+        )
+        budget = self.max_simulator_hour_steps
+        if budget is not None and (
+            int(budget) != budget or budget <= 0
+        ):
+            raise ValueError(
+                "max_simulator_hour_steps must be a positive integer."
+            )
 
 
 @dataclass(frozen=True)
@@ -102,7 +119,9 @@ class HighLevelDispatchEnv:
         self.codec = HighLevelActionCodec(
             self.env.emitter_ids,
             self.env.vessel_ids,
-            self.env.well_ids,
+        )
+        self._simulator_usage_at_start = (
+            self.env.simulator_step_usage()
         )
         self.executor: ActionExecutor | None = None
 
@@ -114,13 +133,43 @@ class HighLevelDispatchEnv:
         """
         return self.codec.action_count
 
+    def action_masks(self) -> np.ndarray:
+        """Return admissible high-level vessel intentions.
+
+        Every encoded preference is legal because the low-level executor keeps
+        the Greedy action whenever a preference is temporarily infeasible.
+        """
+
+        return np.ones(self.action_count, dtype=bool)
+
+    def training_simulator_usage(self):
+        """Return physical-simulator use since this wrapper was created."""
+
+        return (
+            self.env.simulator_step_usage()
+            - self._simulator_usage_at_start
+        )
+
+    def simulator_budget_exhausted(self) -> bool:
+        """Return whether the configured training budget has been consumed."""
+
+        budget = self.config.max_simulator_hour_steps
+        return (
+            budget is not None
+            and self.training_simulator_usage().hour_steps
+            >= float(budget) - 1e-9
+        )
+
     @property
     def observation_size(self) -> int:
         """Return the fixed encoded observation size.
 
         返回固定的编码观测维度。
         """
-        return high_level_observation_size(self.env)
+        return high_level_observation_size(
+            self.env,
+            self.config.future_summary_windows_h,
+        )
 
     def reset(self, seed: int | None = None) -> np.ndarray:
         """Reset the physical episode and return the first sparse observation.
@@ -129,7 +178,10 @@ class HighLevelDispatchEnv:
         """
         self.env.reset(seed=seed)
         self.executor = self.executor_factory()
-        return high_level_observation(self.env)
+        return high_level_observation(
+            self.env,
+            self.config.future_summary_windows_h,
+        )
 
     def step(
         self,
@@ -157,10 +209,16 @@ class HighLevelDispatchEnv:
         terminated = False
         truncated = False
         native_steps = 0
+        budget_exhausted = False
         event_snapshot = _decision_event_snapshot(self.env, self.config)
         decision_trigger = "maximum_interval"
 
         for _ in range(self._decision_steps):
+            if self.simulator_budget_exhausted():
+                budget_exhausted = True
+                truncated = True
+                decision_trigger = "simulator_budget_exhausted"
+                break
             action = self.executor.propose_action(goal, {"env": self.env})
             _obs, reward, terminated, truncated, info = self.env.step(action)
             native_steps += 1
@@ -170,6 +228,11 @@ class HighLevelDispatchEnv:
                 * self.env.network.time_step_hours
             )
             violations.update(str(code) for code in info.get("violations", []))
+            if self.simulator_budget_exhausted():
+                budget_exhausted = True
+                truncated = True
+                decision_trigger = "simulator_budget_exhausted"
+                break
             if terminated or truncated:
                 decision_trigger = "episode_end"
                 break
@@ -199,8 +262,11 @@ class HighLevelDispatchEnv:
             overflow_risk_t_hours=overflow_risk_t_hours,
             violation_counts=violations,
             config=self.config.reward,
+            total_cost_eur=total_cost,
         )
         elapsed_hours = self.env.simulator.state.time_h - started_at_h
+        simulator_usage = self.training_simulator_usage()
+        simulator_budget = self.config.max_simulator_hour_steps
         info = {
             "action_label": self.codec.label(int(action_index)),
             "dispatch_goal": {
@@ -220,11 +286,28 @@ class HighLevelDispatchEnv:
             "violation_counts": dict(sorted(violations.items())),
             "high_level_reward": reward_breakdown,
             "native_hourly_reward": native_reward,
+            **simulator_usage.as_dict(),
+            "max_simulator_hour_steps": simulator_budget,
+            "simulator_budget_exhausted": budget_exhausted,
+            "simulator_budget_fraction": (
+                simulator_usage.hour_steps / simulator_budget
+                if simulator_budget is not None
+                else None
+            ),
             "cumulative_stored_t": self.env.cumulative_stored_t,
             "cumulative_vented_t": self.env.ledger.vented_t,
             "cumulative_total_cost": self.env.ledger.total_cost,
         }
-        return high_level_observation(self.env), reward, terminated, truncated, info
+        return (
+            high_level_observation(
+                self.env,
+                self.config.future_summary_windows_h,
+            ),
+            reward,
+            terminated,
+            truncated,
+            info,
+        )
 
 
 def _decision_event_snapshot(
@@ -295,4 +378,3 @@ def _replan_event_reason(
     if current.overflow_active and not previous.overflow_active:
         return "overflow_risk_started"
     return None
-

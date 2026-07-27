@@ -42,6 +42,27 @@ class HighLevelRewardConfig:
     overflow_risk_eur_per_t_hour: float = 10.0
     hard_violation_penalty_eur: float = 1_000_000.0
     reward_scale: float = 1e-6
+    objective: str = "shaped_economic"
+
+    @classmethod
+    def objective_aligned(
+        cls,
+        *,
+        reward_scale: float = 1e-6,
+    ) -> "HighLevelRewardConfig":
+        """Return a reward equal to scaled negative realised total cost."""
+
+        return cls(
+            stored_credit_eur_per_t=0.0,
+            vent_penalty_eur_per_t=80.0,
+            excess_vent_penalty_eur_per_t=0.0,
+            vent_tolerance_fraction=0.0,
+            operating_cost_weight=1.0,
+            overflow_risk_eur_per_t_hour=0.0,
+            hard_violation_penalty_eur=0.0,
+            reward_scale=reward_scale,
+            objective="realised_total_cost",
+        )
 
     def __post_init__(self) -> None:
         """Reject negative weights and invalid vent-tolerance fractions.
@@ -64,6 +85,14 @@ class HighLevelRewardConfig:
             raise ValueError("reward_scale must be positive.")
         if not 0.0 <= self.vent_tolerance_fraction <= 1.0:
             raise ValueError("vent_tolerance_fraction must be inside [0, 1].")
+        if self.objective not in {
+            "shaped_economic",
+            "realised_total_cost",
+        }:
+            raise ValueError(
+                "objective must be 'shaped_economic' or "
+                "'realised_total_cost'."
+            )
 
 
 def high_level_reward(
@@ -75,7 +104,8 @@ def high_level_reward(
     overflow_risk_t_hours: float,
     violation_counts: Mapping[str, int],
     config: HighLevelRewardConfig,
-) -> tuple[float, dict[str, float]]:
+    total_cost_eur: float | None = None,
+) -> tuple[float, dict[str, float | str]]:
     """Return a scaled reward and its unscaled component breakdown.
 
     返回缩放后奖励及其未缩放分解。
@@ -87,6 +117,18 @@ def high_level_reward(
     单位封存成本比值被有意排除在训练奖励之外，因为回合初期分母不稳定。它只作为评估
     指标使用。
     """
+    if config.objective == "realised_total_cost":
+        if total_cost_eur is None:
+            raise ValueError(
+                "realised_total_cost requires total_cost_eur."
+            )
+        realised_total_cost = max(0.0, float(total_cost_eur))
+        return -config.reward_scale * realised_total_cost, {
+            "objective": config.objective,
+            "realised_total_cost_eur": realised_total_cost,
+            "unscaled_reward_eur": -realised_total_cost,
+        }
+
     hard_violations = sum(
         int(count)
         for code, count in violation_counts.items()
@@ -113,6 +155,7 @@ def high_level_reward(
         - violation_penalty
     )
     return config.reward_scale * unscaled, {
+        "objective": config.objective,
         "stored_credit_eur": stored_credit,
         "vent_allowance_t": vent_allowance_t,
         "excess_vent_t": excess_vent_t,
@@ -125,4 +168,3 @@ def high_level_reward(
         "hard_violation_penalty_eur": violation_penalty,
         "unscaled_reward_eur": unscaled,
     }
-

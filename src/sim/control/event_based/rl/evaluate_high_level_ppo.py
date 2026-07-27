@@ -28,10 +28,10 @@ def evaluate_run(
     对一个已保存 PPO 进行确定性评估，并保存各随机种子的指标。
     """
     try:
-        from stable_baselines3 import PPO
+        from sb3_contrib import MaskablePPO
     except ImportError as exc:  # pragma: no cover - dependency guard.
         raise ImportError(
-            "PPO evaluation requires stable-baselines3."
+            "PPO evaluation requires stable-baselines3 and sb3-contrib."
         ) from exc
     try:
         from tqdm.auto import tqdm
@@ -45,6 +45,13 @@ def evaluate_run(
         scenario=str(config["scenario"]),
         episode_hours=int(config["episode_hours"]),
         forecast_context_hours=int(config.get("forecast_context_hours", 72)),
+        future_summary_windows_h=tuple(
+            int(value)
+            for value in config.get(
+                "future_summary_windows_h",
+                (24, 72),
+            )
+        ),
         decision_interval_h=float(config["decision_interval_h"]),
         event_triggered=bool(config.get("event_triggered", False)),
         weather_mode=str(config.get("weather_mode", "window")),
@@ -53,7 +60,10 @@ def evaluate_run(
         executor=executor,
         reward=reward_config,
     )
-    model = PPO.load(run_dir / "ppo_high_level_final", device="cpu")
+    model = MaskablePPO.load(
+        run_dir / "ppo_high_level_final",
+        device="cpu",
+    )
     seed_values = tuple(int(seed) for seed in seeds)
     if not seed_values:
         raise ValueError("At least one evaluation seed is required.")
@@ -144,7 +154,11 @@ def _evaluate_seed(model, env, seed: int) -> dict[str, Any]:
     violations: Counter[str] = Counter()
     done = False
     while not done:
-        action, _state = model.predict(observation, deterministic=True)
+        action, _state = model.predict(
+            observation,
+            deterministic=True,
+            action_masks=env.action_masks(),
+        )
         observation, reward, terminated, truncated, info = env.step(int(action))
         total_reward += float(reward)
         decisions += 1

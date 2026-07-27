@@ -111,6 +111,12 @@ Full-horizon MILP 作为 **time-limited perfect-foresight MILP reference** 运�
 
 由于 reward 已改变，正式 Event-Residual PPO 必须从头训练。原 tail-robust v4 checkpoint 可作为 E4 或 Supplementary 的附加鲁棒版本，但不能替代 E1 的 objective-aligned baseline。
 
+实现上保留原 `train_tail_robust_ppo.py`、默认配置和已有 checkpoint，另设
+`train_objective_aligned_ppo.py` 作为 E1 入口。后者仍使用 v4 的控制结构，但关闭
+tail curriculum、failure replay 和正常轨迹 shaping；其 residual reward 为
+`scale × (Greedy counterfactual total cost − actual total cost)`。由于 Greedy
+反事实轨迹独立于当前策略动作，该控制变量不改变最小化实际总成本的目标。
+
 #### Rolling MILP
 
 正式 Rolling MILP 锁定为：
@@ -297,7 +303,7 @@ E1 的三种学习方法使用同一最大训练预算：
 具体计数规则：
 
 - Centralized PPO 的每个环境 step 推进 1 h；vectorized training 时所有 workers 的 steps 求和；
-- Event-Residual PPO 的一个高层 transition 可能跨越多个小时，因此按每个 transition 内部实际执行的 physical hours 求和，不能直接使用 SB3 high-level timesteps；
+- Event-Residual PPO 的一个高层 transition 可能跨越多个小时；训练预算同时累计实际轨迹和 Greedy 反事实轨迹内部执行的全部 physical hours，不能直接使用 SB3 high-level timesteps。执行前必须为实际/反事实成对推进预留预算，剩余不足一对时提前截断而不得超支；
 - Iterative Q 按所有真实执行的 roll-in 和 counterfactual rollout 小时求和；
 - 每个独立训练 run 均使用相同的 \(B_{4800}\) 上限。
 
@@ -835,12 +841,15 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 - [x] 共享的最大可行井注入函数已实现，正式协议下所有控制器的上层动作空间均已移除井注入率；
 - [x] Rolling MILP 和 Full-horizon MILP 已使用相同自动注入规则，不包含额外井控制自由度；
 - [ ] Forecast 来源、误差和可见范围已固定；
+- [x] Centralized PPO、Event-Residual PPO 与 Iterative Q 已接入同一个 future-summary encoder；窗口可由统一参数切换，算法各自的动作和控制结构不变；
 - [ ] 三种学习方法的 24/72 h summary 字段、horizon 和归一化已统一锁定；
 - [ ] Rolling MILP 的经济目标、horizon、replan interval、time limit、Greedy-only warm start 和无 fallback 失败规则已固定；
 - [ ] Full-horizon MILP time limit、测试 seed 集和 replay 验证规则已固定；
 - [ ] Low/Medium/High stress 参数已在验证集检查并锁定；
 - [ ] Q 门控、window 和最大 intervention 数已固定；
-- [ ] Centralized PPO 已移除 stored-credit/额外塑形项，保留共同经济成本，并固定 action mask、\(\gamma=1\) 和 deterministic evaluation；
+- [x] Centralized PPO 已移除 stored-credit/额外塑形项，动作空间缩减为 64 个纯船舶调度意图，保留共同经济成本，并固定 action mask、\(\gamma=1\) 和 deterministic evaluation；
+- [x] Centralized PPO 已接入底层 simulator-hour hard cap：每次 1 h 推进前检查预算，训练产物记录实际 calls、simulated hours、预算使用率及耗尽状态；
+- [x] Event-Residual PPO 的独立 E1 训练入口已实现：保留原 v4 入口和 checkpoint，使用 objective-aligned residual reward、\(\gamma=1\)、自动最大井注入和 24/72 h summary，并对实际/Greedy 反事实 simulator calls 实施成对 hard cap；真实 MaskablePPO smoke test 已验证预算停止和 validation-best 输出；
 - [ ] Event-Residual PPO 已采用同一经济目标从头训练；原 tail-robust v4 仅作为可选补充结果；
 - [ ] 4,800-root Iterative Q 的 \(B_{4800}\) 已由统一计数器测得，PPO 和 Event-Residual PPO 的每个训练 run 均设置相同上限；
 - [x] 训练、验证、legacy-development 和正式测试 seed 范围已写入 manifest；

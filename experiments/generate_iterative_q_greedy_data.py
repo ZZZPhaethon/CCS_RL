@@ -230,6 +230,12 @@ def generate_dataset(args):
         "observation_variant": str(args.variant),
         "state_feature_names": common.state_feature_names(schema_wrapper),
         "future_feature_names": common.v4_future_feature_names(schema_wrapper),
+        "future_summary_representation_id": (
+            common.FUTURE_SUMMARY_REPRESENTATION_ID
+        ),
+        "future_summary_windows_h": list(
+            schema_wrapper.future_summary_windows_h
+        ),
         "joint_actions": schema_wrapper._joint_action_array.tolist(),
         "follow_indices": schema_wrapper.residual_env.follow_indices.tolist(),
         "follow_action_index": int(schema_wrapper.follow_action()),
