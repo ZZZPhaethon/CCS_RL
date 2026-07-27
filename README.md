@@ -37,7 +37,7 @@ High-level controllers, MILP solvers, RL policies, or experiment scripts submit 
 - **Decoupled action protocol and physics layer:** `sim.actions` defines action representation and resolution, while `sim.control` focuses on control decisions.
 - **Multiple controller families:** Includes idle/greedy baselines, rule-based controllers, static MILP benchmarks, rolling MILP/MPC, and RL policies.
 - **Reproducible scenarios:** `scenarios/` stores Northern Lights Phase 1/Phase 2 JSON scenarios, and `data/capture_rates/` stores capture-rate profiles.
-- **Disturbance and weather modeling:** Includes capture outages, injectivity decline, maintenance, wave-height scenarios, and vessel-speed effects.
+- **Disturbance and weather modeling:** Includes capture outages, maintenance, wave-height scenarios, and vessel-speed effects.
 - **Training and evaluation loop:** Provides a Gymnasium/SB3 adapter, PPO/BC training scripts, controller comparison experiments, and HTML dashboard outputs.
 
 ## Roadmap
@@ -146,9 +146,11 @@ See `src/sim/scenario_generation/wave_height/prediction/README.md` for details.
 
 ## Reinforcement Learning & LLM Experiments
 
-The `scripts/` directory holds the RL + LLM research stack. A full write-up of the
-findings (RL matching greedy, milk-run headroom, LLM planning, goal-conditioned
-generalization) is in [`docs/experiments_summary.md`](docs/experiments_summary.md).
+Training and training-data workflows live in `scripts/`. Comparisons, evaluations,
+ablations, and LLM proof-of-concept experiments live in `experiments/`. A full
+write-up of the findings (RL matching greedy, milk-run headroom, LLM planning,
+goal-conditioned generalization) is in
+[`docs/experiments_summary.md`](docs/experiments_summary.md).
 
 ### Behaviour cloning + PPO (kickstarting)
 
@@ -183,22 +185,22 @@ ollama pull qwen2.5:7b-instruct
 ollama pull llama3.1:8b
 ```
 
-- `scripts\llm_planner.py` — the LLM produces a high-level vessel→emitter
+- `experiments\llm_planner.py` — the LLM produces a high-level vessel→emitter
   assignment executed by a deterministic cluster policy (hierarchical planning).
-- `scripts\llm_router.py` — the LLM picks the destination at each dispatch step.
-- `scripts\eval_llm_goal.py` — LLM vs heuristic as the goal source for the
+- `experiments\llm_router.py` — the LLM picks the destination at each dispatch step.
+- `experiments\eval_llm_goal.py` — LLM vs heuristic as the goal source for the
   goal-conditioned policy.
 
 ```powershell
-uv run python scripts\llm_planner.py --model qwen2.5:7b-instruct `
+uv run python experiments\llm_planner.py --model qwen2.5:7b-instruct `
   --scenario northern_lights_phase1_milkrun_imbalanced
 ```
 
 ### Evaluation and ceiling
 
 ```powershell
-uv run python scripts\eval_ppo_model.py output\rl_ppo\<model>.zip
-uv run python scripts\eval_milp_ceiling.py --seeds 101 102   # rolling-MILP reference
+uv run python experiments\eval_ppo_model.py output\rl_ppo\<model>.zip
+uv run python experiments\eval_milp_ceiling.py --seeds 101 102   # rolling-MILP reference
 ```
 
 ### Milk-run scenarios
@@ -228,10 +230,10 @@ CCS_RLLLM/
 |-- data/                 # Capture-rate profiles, external references, experiment data
 |-- docs/                 # Research notes, design docs, and historical ideas
 |-- examples/             # Small demos and dashboard builders
-|-- experiments/          # Research experiment entry points
+|-- experiments/          # Comparisons, evaluations, ablations, and research experiments
 |-- hpc/                  # Cluster submission scripts and smoke tests
 |-- scenarios/            # Reproducible scenario JSON files
-|-- scripts/              # PPO/BC training and model evaluation scripts
+|-- scripts/              # Training and training-data workflow scripts
 |-- src/sim/              # Main Python package
 |-- tests/                # Unit, structure, and experiment smoke tests
 |-- visualisation html/   # Legacy visualization artifact directory

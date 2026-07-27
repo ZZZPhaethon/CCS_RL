@@ -18,6 +18,7 @@ from sim.line_source import (
     variable_rate_pressure_at_radius_bar,
 )
 from sim.network import PhysicalNetwork
+from sim.operations.pressure_limits import pressure_limited_rate_level_mask
 
 
 class PhysicalLayerTests(unittest.TestCase):
@@ -261,6 +262,61 @@ class PhysicalLayerTests(unittest.TestCase):
         self.assertLessEqual(
             snapshot["entities"]["well_1"]["bottomhole_pressure_bar"],
             pressure_limit_bar + 1e-9,
+        )
+
+    def test_supply_clip_is_not_attributed_to_bottomhole_pressure(self):
+        parameters = LineSourceParameters(
+            initial_pressure_bar=300.0,
+            permeability_md=10.0,
+            thickness_m=100.0,
+            porosity_fraction=0.22,
+            total_compressibility_1_pa=7e-10,
+            viscosity_pa_s=6e-5,
+            co2_density_kg_m3=630.0,
+            well_radius_m=0.10795,
+            skin=0.0,
+        )
+        pressure_capacity_mtpa = 1.0
+        hours_per_year = 365.25 * 24.0
+        pressure_capacity_tph = pressure_capacity_mtpa * 1_000_000.0 / hours_per_year
+        pressure_limit_bar = bottomhole_pressure_bar(
+            parameters,
+            pressure_capacity_mtpa,
+            elapsed_days=1.0 / 24.0,
+        ) + pressure_capacity_tph / 1_000_000.0 * 50.0
+
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=600.0))
+        network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
+        network.add_entity(
+            Reservoir(
+                "reservoir_1",
+                storage_capacity_t=1_000_000.0,
+                initial_pressure_bar=300.0,
+                pressure_at_capacity_bar=350.0,
+                max_pressure_bar=350.0,
+                well_bottomhole_pressure_limit_bar=pressure_limit_bar,
+                line_source_parameters=parameters,
+            )
+        )
+        network.connect("oygarden", "pipeline")
+        network.connect("pipeline", "well_1")
+        network.connect("well_1", "reservoir_1")
+        supply_t = 75.0
+        requested_tph = 100.0
+        state = PhysicalState(entity_inventory_t={"oygarden": supply_t})
+
+        result = network.step(state, actions={"pipeline": {"flow_tph": requested_tph}})
+
+        self.assertLess(supply_t, requested_tph)
+        self.assertLess(requested_tph, pressure_capacity_tph)
+        self.assertLess(pressure_capacity_tph, 500.0)
+        self.assertLess(500.0, 600.0)
+        self.assertAlmostEqual(result.flows_t[("oygarden", "pipeline")], supply_t)
+        self.assertTrue(any(v.violation_type == "flow_clipped" for v in result.violations))
+        self.assertFalse(
+            any(v.violation_type == "bottomhole_pressure_clipped" for v in result.violations)
         )
 
     def test_snapshot_reports_next_step_pressure_feasible_rate_levels(self):
@@ -651,6 +707,83 @@ class PhysicalLayerTests(unittest.TestCase):
         self.assertAlmostEqual(result.state.entity_inventory_t["ship_2"], 100.0)
         self.assertAlmostEqual(result.flows_t[("ship_2", "oygarden")], 200.0)
 
+    def test_terminal_fifo_queue_survives_state_copy_and_serialization(self):
+        state = PhysicalState(terminal_unload_queues={"oygarden": ["ship_b", "ship_a"]})
+
+        copied = state.copy()
+
+        self.assertEqual(copied.terminal_unload_queues, {"oygarden": ["ship_b", "ship_a"]})
+        self.assertIsNot(copied.terminal_unload_queues["oygarden"], state.terminal_unload_queues["oygarden"])
+        self.assertEqual(
+            state.as_dict()["terminal_unload_queues"],
+            {"oygarden": ["ship_b", "ship_a"]},
+        )
+
+    def test_terminal_fifo_uses_arrival_order_and_requeues_returning_vessel(self):
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(Vessel("ship_a", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=200.0))
+        network.add_entity(Vessel("ship_b", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=200.0))
+        network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
+        network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
+        network.connect("ship_a", "oygarden")
+        network.connect("ship_b", "oygarden")
+        network.connect("oygarden", "pipeline")
+        network.connect("pipeline", "well_1")
+        state = PhysicalState(
+            entity_inventory_t={"ship_a": 300.0, "ship_b": 300.0},
+            vessel_berths={"ship_b": "oygarden"},
+        )
+
+        first_arrival = network.step(state)
+        first_arrival.state.vessel_berths["ship_a"] = "oygarden"
+        rejected = network.step(
+            first_arrival.state,
+            actions={
+                "oygarden": {"unload_vessel": "ship_a"},
+                "pipeline": {"flow_tph": 200.0},
+            },
+        )
+
+        self.assertEqual(rejected.state.terminal_unload_queues["oygarden"], ["ship_b", "ship_a"])
+        self.assertNotIn(("ship_a", "oygarden"), rejected.flows_t)
+        self.assertTrue(
+            any(
+                violation.violation_type == "fifo_unload_required"
+                and violation.entity_id == "ship_a"
+                for violation in rejected.violations
+            )
+        )
+
+        head_unloads = network.step(
+            rejected.state,
+            actions={
+                "oygarden": {"unload_vessel": "ship_b"},
+                "pipeline": {"flow_tph": 200.0},
+            },
+        )
+
+        self.assertAlmostEqual(head_unloads.flows_t[("ship_b", "oygarden")], 200.0)
+        self.assertNotIn(("ship_a", "oygarden"), head_unloads.flows_t)
+        self.assertEqual(head_unloads.state.terminal_unload_queues["oygarden"], ["ship_b", "ship_a"])
+
+        head_unloads.state.vessel_berths.pop("ship_b")
+        next_unloads = network.step(
+            head_unloads.state,
+            actions={
+                "oygarden": {"unload_vessel": "ship_a"},
+                "pipeline": {"flow_tph": 200.0},
+            },
+        )
+
+        self.assertAlmostEqual(next_unloads.flows_t[("ship_a", "oygarden")], 200.0)
+        self.assertEqual(next_unloads.state.terminal_unload_queues["oygarden"], ["ship_a"])
+
+        next_unloads.state.vessel_berths["ship_b"] = "oygarden"
+        returned = network.step(next_unloads.state)
+
+        self.assertEqual(returned.state.terminal_unload_queues["oygarden"], ["ship_a", "ship_b"])
+
     def test_unload_vessel_action_uses_max_feasible_unloading_rate(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=300.0))
@@ -700,6 +833,91 @@ class PhysicalLayerTests(unittest.TestCase):
         self.assertEqual(snapshot["entities"]["brevik"]["type"], "Emitter")
         self.assertEqual(payload["state"]["time_h"], 1.0)
         self.assertEqual(payload["violations"], [])
+
+    def test_pipeline_annual_capacity_uses_rolling_flow_history(self):
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
+        network.add_entity(
+            Pipeline(
+                "pipeline",
+                max_flow_tph=500.0,
+                annual_capacity_tpy=150.0,
+            )
+        )
+        network.add_entity(InjectionWell("well_1", max_injection_tph=500.0))
+        network.connect("oygarden", "pipeline")
+        network.connect("pipeline", "well_1")
+        state = PhysicalState(
+            entity_inventory_t={"oygarden": 100.0},
+            pipeline_flow_history_t={"pipeline": [(0.0, 120.0)]},
+            time_h=1.0,
+        )
+
+        result = network.step(
+            state,
+            actions={"pipeline": {"flow_tph": 100.0}},
+        )
+
+        self.assertAlmostEqual(result.state.last_pipeline_flow_tph["pipeline"], 30.0)
+        self.assertAlmostEqual(result.flows_t[("oygarden", "pipeline")], 30.0)
+        self.assertEqual(
+            result.state.pipeline_flow_history_t["pipeline"][-1],
+            (1.0, 30.0),
+        )
+        self.assertTrue(
+            any(
+                violation.violation_type == "flow_clipped"
+                for violation in result.violations
+            )
+        )
+
+    def test_minimum_stable_injection_clips_small_nonzero_flow(self):
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(Terminal("oygarden", storage_capacity_t=1_000.0, berth_count=1))
+        network.add_entity(Pipeline("pipeline", max_flow_tph=500.0))
+        network.add_entity(
+            InjectionWell(
+                "well_1",
+                max_injection_tph=500.0,
+                min_stable_injection_tph=50.0,
+            )
+        )
+        network.connect("oygarden", "pipeline")
+        network.connect("pipeline", "well_1")
+        state = PhysicalState(entity_inventory_t={"oygarden": 40.0})
+
+        result = network.step(
+            state,
+            actions={"pipeline": {"flow_tph": 40.0}},
+        )
+
+        self.assertAlmostEqual(result.state.last_pipeline_flow_tph["pipeline"], 0.0)
+        self.assertNotIn(("oygarden", "pipeline"), result.flows_t)
+        self.assertTrue(
+            any(
+                violation.violation_type == "minimum_stable_injection_not_met"
+                for violation in result.violations
+            )
+        )
+
+    def test_rate_level_mask_rejects_nonzero_rate_below_minimum_stable_rate(self):
+        network = PhysicalNetwork(time_step_hours=1.0)
+        network.add_entity(
+            InjectionWell(
+                "well_1",
+                max_injection_tph=500.0,
+                min_stable_injection_tph=100.0,
+            )
+        )
+
+        mask = pressure_limited_rate_level_mask(
+            network,
+            PhysicalState(),
+            "well_1",
+            rate_levels_mtpa=(0.0, 0.5, 1.0),
+        )
+
+        self.assertEqual(mask, (True, False, True))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 
 
@@ -47,6 +48,13 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertFalse((ROOT / "src" / "sim" / "scenario.py").exists())
         self.assertFalse((ROOT / "src" / "sim" / "disturbances.py").exists())
 
+    def test_residual_rl_has_no_load_shift_entry_points(self):
+        source = (ROOT / "scripts" / "train_residual_rl.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("scenario_generation.load_shift", source)
+        self.assertNotIn("--load-shift", source)
+        self.assertNotIn("args.load_shift", source)
+
     def test_rl_environment_lives_in_environment_package(self):
         environment_dir = ROOT / "src" / "sim" / "environment"
 
@@ -59,17 +67,38 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertFalse((ROOT / "src" / "sim" / "env_scenarios.py").exists())
         self.assertFalse((ROOT / "src" / "sim" / "gym_env.py").exists())
 
-    def test_reward_modes_hpc_script_defaults_to_probability_window_weather(self):
-        script = (ROOT / "hpc" / "submit_reward_modes_bc.sh").read_text(encoding="utf-8")
+    def test_forecast_encoder_comparison_runner_is_a_script(self):
+        path = ROOT / "scripts" / "compare_forecast_encoders_rl.py"
 
-        self.assertIn('WEATHER_MODE="${WEATHER_MODE:-window}"', script)
+        self.assertTrue(path.exists())
+        source = path.read_text(encoding="utf-8")
+        self.assertIn('if __name__ == "__main__":', source)
+        self.assertIn("generate-demos", source)
+        self.assertIn("train", source)
+        self.assertIn("report", source)
 
-    def test_reward_modes_hpc_script_can_enable_weather_observations(self):
-        script = (ROOT / "hpc" / "submit_reward_modes_bc.sh").read_text(encoding="utf-8")
+    def test_scripts_and_experiments_have_distinct_entry_point_roles(self):
+        script_names = {
+            path.name
+            for path in (ROOT / "scripts").glob("*.py")
+            if path.name != "__init__.py"
+        }
+        experiment_names = {path.name for path in (ROOT / "experiments").glob("*.py")}
 
-        self.assertIn('WEATHER_OBS="${WEATHER_OBS:-1}"', script)
-        self.assertIn('WEATHER_OBS_ARGS=(--weather-obs)', script)
-        self.assertIn('"${WEATHER_OBS_ARGS[@]}"', script)
+        self.assertTrue(
+            all(
+                name.startswith(("build_", "train_"))
+                or name == "compare_forecast_encoders_rl.py"
+                for name in script_names
+            )
+        )
+        self.assertFalse(any(name.startswith("train_") for name in experiment_names))
+        self.assertFalse(script_names & experiment_names)
+
+    def test_hpc_shell_scripts_use_unix_line_endings(self):
+        for path in (ROOT / "hpc").glob("*.sh"):
+            with self.subTest(path=path.name):
+                self.assertNotIn(b"\r\n", path.read_bytes())
 
     def test_action_protocol_lives_in_actions_package(self):
         actions_dir = ROOT / "src" / "sim" / "actions"

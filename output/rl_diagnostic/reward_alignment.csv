@@ -1,9 +1,0 @@
-horizon_h,shaping,controller,storage_rate,episode_reward
-168,off,idle,0.0871,-230.4
-168,off,greedy_shuttle,0.4328,-336.5
-168,on(80/t),idle,0.0871,-37.9
-168,on(80/t),greedy_shuttle,0.4328,620.3
-720,off,idle,0.0201,-5776.1
-720,off,greedy_shuttle,0.8639,-1525.2
-720,on(80/t),idle,0.0201,-5583.7
-720,on(80/t),greedy_shuttle,0.8639,6761.9

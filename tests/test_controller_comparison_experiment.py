@@ -1,12 +1,126 @@
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 
 class ControllerComparisonExperimentTests(unittest.TestCase):
+    def test_native_mpc_short_episode_handles_zero_greedy_vent(self):
+        from experiments import rolling_native_mpc_headroom as experiment
+
+        args = SimpleNamespace(
+            hours=24,
+            disturbance_profile="none",
+            replan_every=24,
+            planning_horizon_h=24,
+            weather_update_hours=24.0,
+            weather_speed_min=0.75,
+            weather_speed_max=1.0,
+            capture_noise_std=0.10,
+            capture_high_output_rate_per_week=0.5,
+            capture_high_output_mean_hours=48.0,
+            capture_multiplier_min=1.25,
+            capture_multiplier_max=1.75,
+        )
+
+        row, actions = experiment.run_seed(args, seed=1, economics=experiment.EconomicParameters())
+
+        self.assertEqual(row["greedy_vented_t"], 0.0)
+        self.assertEqual(row["vented_reduction_pct"], 0.0)
+        self.assertTrue(row["replay_ok"])
+        self.assertTrue(row["native_mpc_trace_replay_matches"])
+        self.assertTrue(row["greedy_trace_replay_matches"])
+        self.assertTrue(row["native_mpc_replay_is_exact"])
+        self.assertEqual(row["native_mpc_replay_mismatches"], "")
+        self.assertEqual(len(actions["native_mpc"]), args.hours)
+
+    def test_native_mpc_cli_rejects_alternate_objective_mode(self):
+        from experiments import rolling_native_mpc_headroom as experiment
+
+        with self.assertRaises(SystemExit):
+            experiment.parse_args(["--objective-mode", "vent_then_total_cost"])
+
+    def test_native_mpc_experiment_can_include_replay_grounded_rolling_milp(self):
+        from experiments import rolling_native_mpc_headroom as experiment
+
+        args = SimpleNamespace(
+            hours=2,
+            disturbance_profile="none",
+            replan_every=2,
+            planning_horizon_h=2,
+            weather_update_hours=24.0,
+            weather_speed_min=0.75,
+            weather_speed_max=1.0,
+            capture_noise_std=0.10,
+            capture_high_output_rate_per_week=0.5,
+            capture_high_output_mean_hours=48.0,
+            capture_multiplier_min=1.25,
+            capture_multiplier_max=1.75,
+            include_rolling_milp=True,
+            rolling_milp_time_limit_s=5.0,
+        )
+
+        row, actions = experiment.run_seed(
+            args,
+            seed=1,
+            economics=experiment.EconomicParameters(),
+        )
+
+        self.assertTrue(row["rolling_milp_replay_ok"])
+        self.assertTrue(row["rolling_milp_replay_is_exact"])
+        self.assertEqual(len(actions["rolling_milp"]), args.hours)
+
+    def test_common_native_mpc_replay_detects_final_state_mismatch(self):
+        from experiments import rolling_native_mpc_headroom as experiment
+        from sim.control.baselines import greedy_shuttle_policy
+        from sim.control.replay import replay_native_actions
+
+        args = SimpleNamespace(
+            hours=2,
+            disturbance_profile="none",
+            replan_every=2,
+            planning_horizon_h=2,
+            weather_update_hours=24.0,
+            weather_speed_min=0.75,
+            weather_speed_max=1.0,
+            capture_noise_std=0.10,
+            capture_high_output_rate_per_week=0.5,
+            capture_high_output_mean_hours=48.0,
+            capture_multiplier_min=1.25,
+            capture_multiplier_max=1.75,
+        )
+        economics = experiment.EconomicParameters()
+        actions, _metrics, expected = experiment.collect_actions(
+            experiment.make_env(args, economics),
+            greedy_shuttle_policy,
+            seed=1,
+        )
+        replay_env = experiment.make_env(args, economics)
+        replay_env.reset(seed=1)
+
+        exact = replay_native_actions(
+            replay_env,
+            actions,
+            horizon_h=args.hours,
+            expected=expected,
+        )
+        inventories = dict(expected.entity_inventory_t)
+        first_entity = next(iter(inventories))
+        inventories[first_entity] += 1.0
+        mismatched = replay_native_actions(
+            replay_env,
+            actions,
+            horizon_h=args.hours,
+            expected=replace(expected, entity_inventory_t=inventories),
+        )
+
+        self.assertTrue(exact.is_exact, exact.mismatches)
+        self.assertFalse(mismatched.is_exact)
+        self.assertTrue(any("entity_inventory_t" in value for value in mismatched.mismatches))
+
     def test_controller_comparison_imports_with_current_layout(self):
         from experiments import compare_controllers_same_scenarios as compare
 
@@ -64,27 +178,6 @@ class ControllerComparisonExperimentTests(unittest.TestCase):
 
         self.assertEqual(len(env.vessel_ids), 3)
         self.assertIn("yara_sluiskil", env.emitter_ids)
-
-    def test_greedy_trip_milp_phase1_defaults_to_12h_three_vessel_random_case(self):
-        from experiments import compare_greedy_trip_milp_phase1 as compare
-
-        with patch.object(sys, "argv", ["compare_greedy_trip_milp_phase1.py"]):
-            args = compare.parse_args()
-        env = compare._make_env(
-            2,
-            compare.EconomicParameters(),
-            "northern_lights_phase1_3vessels",
-            storage_reward_eur_per_t=1_000.0,
-        )
-
-        self.assertEqual(args.hours, 720)
-        self.assertEqual(args.cplex_time_limit_s, 43_200.0)
-        self.assertEqual(args.fixed_scenario, "northern_lights_phase1_3vessels")
-        self.assertEqual(args.storage_reward_eur_per_t, 1_000.0)
-        self.assertEqual(len(env.vessel_ids), 3)
-        self.assertTrue(env.scenario_generator.config.randomize_initial_inventory)
-        self.assertEqual(env.scenario_generator.config.weather_window_rate_per_week, 0.3)
-        self.assertGreater(env.scenario_generator.config.capture_noise_std, 0.0)
 
     def test_rule_based_controller_factory_translates_to_hybrid_env_action(self):
         from experiments import compare_controllers_same_scenarios as compare

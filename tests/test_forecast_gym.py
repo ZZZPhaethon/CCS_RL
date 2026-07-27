@@ -1,0 +1,446 @@
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+import numpy as np
+import pytest
+
+from sim.environment.forecast_gym import ForecastGymEnv, forecast_policy_observation
+from sim.environment.forecast import current_state_feature_names
+from sim.environment.gym_adapter import flat_action_mask
+from sim.train import make_native_env
+
+
+def _native():
+    return make_native_env(
+        episode_hours=2,
+        scenario_context_hours=169,
+        scenario="northern_lights_phase1_3vessels",
+        weather_mode="block",
+    )
+
+
+def test_state_flat_and_tcn_observation_shapes():
+    state_env = ForecastGymEnv(_native(), "state")
+    flat_env = ForecastGymEnv(_native(), "flat")
+    tcn_env = ForecastGymEnv(_native(), "tcn")
+
+    state, _ = state_env.reset(seed=4)
+    flat, _ = flat_env.reset(seed=4)
+    structured, _ = tcn_env.reset(seed=4)
+
+    assert state.shape == (51,)
+    assert flat.shape == (51 + 168 * 9,)
+    assert structured["state"].shape == (51,)
+    assert structured["forecast"].shape == (168, 9)
+    assert np.allclose(flat[:51], state)
+    assert np.allclose(flat[51:].reshape(168, 9), structured["forecast"])
+
+
+def test_operation_mode_variants_append_modes_to_current_state_only():
+    native = _native()
+    native.reset(seed=4)
+    base_state = forecast_policy_observation(native, "state")
+    state_mode = forecast_policy_observation(native, "state_mode")
+    tcn_mode = forecast_policy_observation(native, "tcn_mode")
+    future_mlp = forecast_policy_observation(native, "future_mlp")
+    future_mlp_mode = forecast_policy_observation(native, "future_mlp_mode")
+    mode_size = len(native.vessel_ids) * 5
+
+    assert state_mode.shape == (len(base_state) + mode_size,)
+    np.testing.assert_array_equal(state_mode[: len(base_state)], base_state)
+    modes = state_mode[-mode_size:].reshape(len(native.vessel_ids), 5)
+    np.testing.assert_array_equal(modes.sum(axis=1), np.ones(len(native.vessel_ids)))
+    np.testing.assert_array_equal(tcn_mode["state"], state_mode)
+    np.testing.assert_array_equal(future_mlp["state"], base_state)
+    np.testing.assert_array_equal(future_mlp_mode["state"], state_mode)
+    assert tcn_mode["forecast"].shape == (168, 9)
+    assert future_mlp_mode["forecast"].shape == (168, 9)
+
+
+def test_tcn_mode_destination_appends_sailing_target_without_changing_legacy_variant():
+    native = _native()
+    native.reset(seed=4)
+    vessel_id = native.vessel_ids[0]
+    origin_id = native.emitter_ids[0]
+    terminal_id = native.terminal_ids[0]
+    other_emitter_id = native.emitter_ids[1]
+    native.simulator.state.vessel_berths.pop(vessel_id, None)
+    native.simulator.vessel_states[vessel_id].update(
+        {
+            "mode": "sailing",
+            "berth": None,
+            "origin": origin_id,
+            "destination": terminal_id,
+            "progress": 0.5,
+        }
+    )
+
+    legacy_before = forecast_policy_observation(native, "tcn_mode")
+    destination_before = forecast_policy_observation(native, "tcn_mode_destination")
+    native.simulator.vessel_states[vessel_id]["destination"] = other_emitter_id
+    legacy_after = forecast_policy_observation(native, "tcn_mode")
+    destination_after = forecast_policy_observation(native, "tcn_mode_destination")
+    destination_size = len(native.vessel_ids) * (
+        len(native.terminal_ids) + len(native.emitter_ids)
+    )
+
+    np.testing.assert_array_equal(legacy_before["state"], legacy_after["state"])
+    np.testing.assert_array_equal(
+        destination_before["state"][:-destination_size],
+        legacy_before["state"],
+    )
+    assert not np.array_equal(
+        destination_before["state"][-destination_size:],
+        destination_after["state"][-destination_size:],
+    )
+    wrapped = ForecastGymEnv(_native(), "tcn_mode_destination")
+    observation, _ = wrapped.reset(seed=4)
+    assert wrapped.observation_space["state"].shape == observation["state"].shape
+    gnn_observation = forecast_policy_observation(native, "gnn_mode_destination")
+    np.testing.assert_array_equal(gnn_observation["state"], destination_after["state"])
+    np.testing.assert_array_equal(
+        gnn_observation["forecast"], destination_after["forecast"]
+    )
+
+    state_env = ForecastGymEnv(_native(), "state_mode")
+    tcn_env = ForecastGymEnv(_native(), "tcn_mode")
+    state_obs, _ = state_env.reset(seed=4)
+    tcn_obs, _ = tcn_env.reset(seed=4)
+    assert state_env.observation_space.contains(state_obs)
+    assert tcn_env.observation_space.contains(tcn_obs)
+
+
+def test_replan_phase_variant_matches_live_hour_and_observation_space():
+    native = _native()
+    native.reset(seed=4)
+
+    at_replan = forecast_policy_observation(
+        native,
+        "fixed_scale_tcn_mode_destination_replan_phase",
+    )
+    np.testing.assert_array_equal(at_replan["state"][-2:], [0.0, 1.0])
+
+    native.simulator.state.time_h = 1.0
+    after_replan = forecast_policy_observation(
+        native,
+        "fixed_scale_tcn_mode_destination_replan_phase",
+    )
+    np.testing.assert_allclose(after_replan["state"][-2:], [1.0 / 23.0, 0.0])
+
+    wrapped = ForecastGymEnv(
+        _native(),
+        "fixed_scale_tcn_mode_destination_replan_phase",
+    )
+    observation, _ = wrapped.reset(seed=4)
+    assert wrapped.observation_space["state"].shape == (80,)
+    assert wrapped.observation_space.contains(observation)
+
+
+def test_oracle_candidate_variant_requires_and_appends_candidate_index():
+    native = _native()
+    native.reset(seed=4)
+    variant = "fixed_scale_tcn_mode_destination_replan_phase_oracle_candidate"
+
+    with pytest.raises(ValueError, match="candidate index"):
+        forecast_policy_observation(native, variant)
+    observation = forecast_policy_observation(
+        native,
+        variant,
+        oracle_candidate_index=3,
+    )
+
+    np.testing.assert_array_equal(
+        observation["state"][-8:],
+        np.eye(8, dtype=np.float32)[3],
+    )
+    wrapped = ForecastGymEnv(_native(), variant, oracle_candidate_index=3)
+    wrapped_observation, _ = wrapped.reset(seed=4)
+    assert wrapped.observation_space["state"].shape == (88,)
+    assert wrapped.observation_space.contains(wrapped_observation)
+
+
+def test_learned_plan_context_variant_appends_continuous_context():
+    native = _native()
+    native.reset(seed=4)
+    variant = "fixed_scale_tcn_mode_destination_replan_phase_learned_plan_context"
+    context = np.linspace(0.0, 1.0, 8, dtype=np.float32)
+
+    observation = forecast_policy_observation(
+        native,
+        variant,
+        learned_plan_context=context,
+    )
+
+    np.testing.assert_array_equal(observation["state"][-8:], context)
+    wrapped = ForecastGymEnv(_native(), variant, learned_plan_context=context)
+    wrapped_observation, _ = wrapped.reset(seed=4)
+    assert wrapped.observation_space["state"].shape == (88,)
+    assert wrapped.observation_space.contains(wrapped_observation)
+
+
+@pytest.mark.parametrize(
+    ("variant", "zero"),
+    [
+        ("gated_past24_mlp_mode_destination", False),
+        ("past24_mlp_mode_destination", False),
+        ("past24_zero_mlp_mode_destination", True),
+    ],
+)
+def test_past_mlp_observation_is_strictly_pre_action_and_padded(variant, zero):
+    wrapped = ForecastGymEnv(_native(), variant)
+    observation, _ = wrapped.reset(seed=4)
+
+    assert set(observation) == {"state", "past", "forecast"}
+    assert observation["state"].shape == (78,)
+    assert observation["past"].shape == (24, 83)
+    np.testing.assert_array_equal(observation["past"], 0.0)
+    initial_state = observation["state"].copy()
+
+    action = np.zeros(len(wrapped.action_space.nvec), dtype=np.int64)
+    observation, *_ = wrapped.step(action)
+
+    if zero:
+        np.testing.assert_array_equal(observation["past"], 0.0)
+    else:
+        np.testing.assert_array_equal(observation["past"][:-1], 0.0)
+        np.testing.assert_array_equal(observation["past"][-1, :78], initial_state)
+        np.testing.assert_array_equal(observation["past"][-1, 78:82], 0.0)
+        assert observation["past"][-1, -1] == 1.0
+    assert wrapped.observation_space.contains(observation)
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "state", "flat", "tcn", "state_mode", "tcn_mode",
+        "future_mlp", "future_mlp_mode",
+        "gnn_mode_destination", "larger_mlp_mode_destination",
+        "edge_gnn_mode_destination",
+        "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    ],
+)
+def test_terminal_observation_retains_declared_shape(variant):
+    env = ForecastGymEnv(_native(), variant)
+    observation, _ = env.reset(seed=4)
+    action = np.zeros(len(env.action_space.nvec), dtype=np.int64)
+
+    observation, _, terminated, truncated, _ = env.step(action)
+    assert not terminated
+    assert not truncated
+    if variant == "flat":
+        assert np.any(observation[51:] != 0.0)
+    elif variant in {
+        "tcn", "tcn_mode", "future_mlp", "future_mlp_mode",
+        "gnn_mode_destination",
+        "larger_mlp_mode_destination", "edge_gnn_mode_destination",
+        "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    }:
+        assert np.any(observation["forecast"] != 0.0)
+
+    observation, _, terminated, truncated, _ = env.step(action)
+    assert not terminated
+    assert truncated
+    assert env.observation_space.contains(observation)
+    if variant == "flat":
+        assert np.any(observation[51:] != 0.0)
+    elif variant in {
+        "tcn", "tcn_mode", "future_mlp", "future_mlp_mode",
+        "gnn_mode_destination",
+        "larger_mlp_mode_destination", "edge_gnn_mode_destination",
+        "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    }:
+        assert np.any(observation["forecast"] != 0.0)
+
+
+def test_dummy_vec_env_bootstraps_from_real_terminal_forecast():
+    from stable_baselines3.common.vec_env import DummyVecEnv
+
+    vec_env = DummyVecEnv([lambda: ForecastGymEnv(_native(), "tcn")])
+    _observation = vec_env.reset()
+    action = np.zeros((1, 4), dtype=np.int64)
+
+    pre_terminal, _, dones, _ = vec_env.step(action)
+    assert not dones[0]
+
+    _reset_observation, _, dones, infos = vec_env.step(action)
+    assert dones[0]
+    assert infos[0]["TimeLimit.truncated"] is True
+    terminal = infos[0]["terminal_observation"]
+    assert terminal["forecast"].shape == (168, 9)
+    assert np.allclose(terminal["forecast"][:-1], pre_terminal["forecast"][0, 1:])
+    assert np.any(terminal["forecast"][-1] != 0.0)
+
+
+def test_terminal_state_uses_timeout_hour_disturbances():
+    from stable_baselines3.common.vec_env import DummyVecEnv
+
+    wrapped = ForecastGymEnv(_native(), "tcn")
+    vec_env = DummyVecEnv([lambda: wrapped])
+    _observation = vec_env.reset()
+    emitter_id = wrapped.env.emitter_ids[0]
+    well_id = wrapped.env.well_ids[0]
+    wrapped.env.scenario.emitter_availability[emitter_id][2] = 0.123
+    wrapped.env.scenario.injectivity_factor[well_id][2] = 0.456
+    wrapped.env.scenario.well_available[well_id][2] = False
+    action = np.zeros((1, 4), dtype=np.int64)
+
+    _observation, _, dones, _ = vec_env.step(action)
+    assert not dones[0]
+    _observation, _, dones, infos = vec_env.step(action)
+
+    assert dones[0]
+    terminal_state = infos[0]["terminal_observation"]["state"]
+    names = current_state_feature_names(wrapped.env)
+    assert terminal_state[names.index(f"{emitter_id}.availability")] == pytest.approx(
+        0.123
+    )
+    assert terminal_state[names.index(f"{well_id}.injectivity")] == pytest.approx(
+        0.456
+    )
+    assert terminal_state[names.index(f"{well_id}.available")] == 0.0
+
+
+def test_action_masks_preserve_native_multidiscrete_order():
+    env = ForecastGymEnv(_native(), "state")
+    env.reset(seed=4)
+
+    expected = flat_action_mask(
+        env.env.vessel_action_mask(), env.env.well_rate_action_mask()
+    )
+
+    assert np.array_equal(env.action_masks(), expected)
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "state", "flat", "tcn", "state_mode", "tcn_mode",
+        "future_mlp", "future_mlp_mode",
+        "gnn_mode_destination", "larger_mlp_mode_destination",
+        "edge_gnn_mode_destination",
+        "future_mlp_mode_destination",
+        "balanced_edge_gnn_mode_destination",
+        "balanced_edge_gnn_future_mlp_mode_destination",
+        "fixed_scale_larger_mlp_mode_destination",
+        "fixed_scale_edge_gnn_mode_destination",
+        "stable_tcn_mode_destination",
+        "fixed_scale_tcn_mode_destination",
+    ],
+)
+def test_policy_wrapper_forwards_observation_mask_and_native_action(variant):
+    from sim.environment.forecast_gym import make_forecast_ppo_policy
+
+    captured = {}
+
+    class FakeModel:
+        def predict(self, observation, deterministic=True, action_masks=None):
+            captured["observation"] = observation
+            captured["deterministic"] = deterministic
+            captured["action_masks"] = action_masks
+            return np.array([1, 2, 3, 4], dtype=np.int64), None
+
+    env = _native()
+    env.reset(seed=4)
+    action = make_forecast_ppo_policy(FakeModel(), variant)(env)
+
+    assert action == {"vessels": [1, 2, 3], "wells": [4]}
+    assert not captured["deterministic"]
+    assert np.array_equal(
+        captured["action_masks"],
+        flat_action_mask(env.vessel_action_mask(), env.well_rate_action_mask()),
+    )
+    if variant == "state":
+        assert captured["observation"].shape == (51,)
+    elif variant == "state_mode":
+        assert captured["observation"].shape == (66,)
+    elif variant == "flat":
+        assert captured["observation"].shape == (51 + 168 * 9,)
+    else:
+        expected_state = {
+            "tcn": 51,
+            "tcn_mode": 66,
+            "future_mlp": 51,
+            "future_mlp_mode": 66,
+            "gnn_mode_destination": 78,
+            "larger_mlp_mode_destination": 78,
+            "edge_gnn_mode_destination": 78,
+            "future_mlp_mode_destination": 78,
+            "balanced_edge_gnn_mode_destination": 78,
+            "balanced_edge_gnn_future_mlp_mode_destination": 78,
+            "fixed_scale_larger_mlp_mode_destination": 78,
+            "fixed_scale_edge_gnn_mode_destination": 78,
+            "stable_tcn_mode_destination": 78,
+            "fixed_scale_tcn_mode_destination": 78,
+        }[variant]
+        assert captured["observation"]["state"].shape == (expected_state,)
+        assert captured["observation"]["forecast"].shape == (168, 9)
+
+
+def test_policy_wrapper_rejects_nonpositive_temperature():
+    from sim.environment.forecast_gym import make_forecast_ppo_policy
+
+    with pytest.raises(ValueError, match="temperature"):
+        make_forecast_ppo_policy(object(), "tcn", temperature=0.0)
+
+
+def test_forecast_gym_interfaces_are_exported():
+    from sim.environment import (
+        ForecastGymEnv as ExportedForecastGymEnv,
+        forecast_policy_observation,
+        make_forecast_ppo_policy,
+    )
+
+    assert ExportedForecastGymEnv is ForecastGymEnv
+    assert callable(forecast_policy_observation)
+    assert callable(make_forecast_ppo_policy)
+
+
+def test_core_environment_import_does_not_require_optional_rl_dependencies():
+    source_root = Path(__file__).parents[1] / "src"
+    code = """
+import builtins
+
+real_import = builtins.__import__
+
+def import_without_rl(name, *args, **kwargs):
+    if name.split('.')[0] in {'numpy', 'gymnasium'}:
+        raise ImportError(f'blocked optional dependency: {name}')
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = import_without_rl
+from sim.environment import CCSEnv
+assert CCSEnv.__name__ == 'CCSEnv'
+"""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(source_root)
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=source_root.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

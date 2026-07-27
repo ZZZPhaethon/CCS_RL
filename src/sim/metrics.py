@@ -35,6 +35,9 @@ class EpisodeMetrics:
     vented_t: float = 0.0
     in_transit_t: float = 0.0          # captured CO2 not yet stored at episode end
     in_transit_growth_t: float = 0.0   # end minus start captured-but-not-yet-stored CO2
+    emitter_inventory_t: float = 0.0
+    vessel_inventory_t: float = 0.0
+    terminal_inventory_t: float = 0.0
     loss_rate: float = 0.0             # vented / captured: short-horizon truth
     storage_rate: float = 0.0          # stored / captured: only meaningful over a long horizon
     annual_storage_gap_t: float = 0.0  # target*captured - stored (long-horizon obligation only)
@@ -75,6 +78,9 @@ class EpisodeMetrics:
             f"  vented (lost)        : {self.vented_t:,.0f} t   loss rate {self.loss_rate:.2%}",
             f"  in-transit inventory : {self.in_transit_t:,.0f} t   "
             f"(changed {self.in_transit_growth_t:+,.0f} t this episode)",
+            f"  emitter inventory    : {self.emitter_inventory_t:,.0f} t",
+            f"  vessel inventory     : {self.vessel_inventory_t:,.0f} t",
+            f"  terminal inventory   : {self.terminal_inventory_t:,.0f} t",
             f"  storage rate         : {self.storage_rate:.1%}  [long-horizon KPI]",
             f"  annual storage gap   : {self.annual_storage_gap_t:,.0f} t  [long-horizon KPI]",
             f"  operating cost       : EUR {self.operating_cost:,.0f}",
@@ -165,6 +171,10 @@ class _MetricsRecorder:
         captured = env.cumulative_captured_t
         stored = env.cumulative_stored_t
         in_transit = env._in_transit_inventory()
+        final_inventory = env.simulator.state.entity_inventory_t
+        emitter_inventory = sum(final_inventory.get(entity_id, 0.0) for entity_id in env.emitter_ids)
+        vessel_inventory = sum(final_inventory.get(entity_id, 0.0) for entity_id in env.vessel_ids)
+        terminal_inventory = sum(final_inventory.get(entity_id, 0.0) for entity_id in env.terminal_ids)
         annual_gap_t = max(0.0, env.config.storage_target_rate * captured - stored)
         cost_per_stored = ledger.operating_cost / stored if stored > _EPS else None
         total_cost_per_stored = ledger.total_cost / stored if stored > _EPS else None
@@ -177,6 +187,9 @@ class _MetricsRecorder:
             vented_t=ledger.vented_t,
             in_transit_t=in_transit,
             in_transit_growth_t=in_transit - env.initial_in_transit_t,
+            emitter_inventory_t=emitter_inventory,
+            vessel_inventory_t=vessel_inventory,
+            terminal_inventory_t=terminal_inventory,
             loss_rate=env.loss_rate(),
             storage_rate=env.storage_rate(),
             annual_storage_gap_t=annual_gap_t,

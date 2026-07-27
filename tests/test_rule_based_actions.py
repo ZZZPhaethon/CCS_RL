@@ -96,6 +96,12 @@ class RuleBasedActionGeneratorTests(unittest.TestCase):
         self.state.entity_inventory_t["northern_pathfinder"] = 7500.0
         self.generator.next_action_frame(self.state)
 
+        self.assertFalse(hasattr(self.generator, "_terminal_unload_queues"))
+        self.assertEqual(
+            self.state.terminal_unload_queues["oygarden_terminal"],
+            ["northern_pathfinder"],
+        )
+
         self.state.vessel_berths["northern_pioneer"] = "oygarden_terminal"
         self.state.entity_inventory_t["northern_pioneer"] = 7500.0
 
@@ -103,6 +109,10 @@ class RuleBasedActionGeneratorTests(unittest.TestCase):
         committed = ActionResolver(self.network).resolve(frame)
 
         self.assertEqual(committed.actions["oygarden_terminal"]["unload_vessel"], "northern_pathfinder")
+        self.assertEqual(
+            self.state.terminal_unload_queues["oygarden_terminal"],
+            ["northern_pathfinder", "northern_pioneer"],
+        )
 
     def test_pipeline_flow_is_capped_by_selected_well_capacity(self):
         terminal = self.network.entities["oygarden_terminal"]

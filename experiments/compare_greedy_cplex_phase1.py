@@ -29,8 +29,6 @@ def _scenario_config(hours: int) -> ScenarioConfig:
         capture_noise_std=0.0,
         capture_outage_rate_per_week=0.0,
         well_maintenance_rate_per_week=0.0,
-        injectivity_max_decline=0.0,
-        injectivity_noise_std=0.0,
     )
 
 

@@ -3,6 +3,7 @@ import unittest
 from sim.actions import ActionFrame, ActionProposal
 from sim.entities import Emitter, InjectionWell, PhysicalState, Pipeline, Terminal, Vessel
 from sim.network import PhysicalNetwork
+from sim.routes import route_distance_km
 from sim.simulator import PhysicalSimulator
 
 
@@ -178,6 +179,12 @@ class PhysicalSimulatorTests(unittest.TestCase):
         self.assertEqual(dynamic_leg["origin"], "source_a")
         self.assertEqual(dynamic_leg["destination"], "source_b")
         self.assertGreater(len(dynamic_leg["coordinates"]), 2)
+        self.assertEqual(dynamic_leg["coordinates"][0], (59.05, 9.70))
+        self.assertEqual(dynamic_leg["coordinates"][-1], (59.86, 10.84))
+        self.assertAlmostEqual(
+            dynamic_leg["distance_km"],
+            round(route_distance_km(dynamic_leg["coordinates"]), 2),
+        )
         self.assertFalse(record.vessel_positions["ship_1"]["at_berth"])
 
     def test_step_record_preserves_proposed_committed_and_executed_actions(self):

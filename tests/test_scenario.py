@@ -1,3 +1,4 @@
+from dataclasses import fields
 import unittest
 import sim.scenario_generation as scenario_generation
 
@@ -40,8 +41,6 @@ def _quiet_config(**overrides) -> ScenarioConfig:
         capture_outage_rate_per_week=0.0,
         weather_window_rate_per_week=0.0,
         well_maintenance_rate_per_week=0.0,
-        injectivity_max_decline=0.0,
-        injectivity_noise_std=0.0,
         randomize_initial_inventory=False,
     )
     base.update(overrides)
@@ -122,7 +121,11 @@ class ScenarioGeneratorTests(unittest.TestCase):
                 return 0.42
 
         rng = FakeRng()
-        config = ScenarioConfig(capture_noise_std=0.30, capture_outage_rate_per_week=0.0)
+        config = ScenarioConfig(
+            capture_noise_std=0.30,
+            capture_outage_rate_per_week=0.0,
+            capture_high_output_rate_per_week=0.0,
+        )
         series = _capture_availability_series(rng, n_steps=1, dt=1.0, config=config)
         self.assertEqual(series, [0.42])
         self.assertEqual(rng.gauss_args, (1.0, 0.30))
@@ -175,6 +178,23 @@ class ScenarioGeneratorTests(unittest.TestCase):
         self.assertEqual(min(speeds), 0.6)
         self.assertTrue(all(0.6 <= value <= 1.0 for value in speeds))
 
+    def test_block_weather_is_shared_and_constant_within_each_update_interval(self):
+        network = _network()
+        network.add_entity(Vessel("ship_2", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0))
+        config = _quiet_config(
+            episode_hours=72,
+            weather_process="block",
+            weather_update_hours=24,
+            weather_update_speed_factor_range=(0.75, 0.95),
+        )
+
+        scenario = ScenarioGenerator(config=config, seed=14).sample(network)
+
+        speeds = scenario.vessel_speed_factor["ship_1"]
+        self.assertEqual(speeds, scenario.vessel_speed_factor["ship_2"])
+        self.assertTrue(all(len(set(speeds[start:start + 24])) == 1 for start in range(0, 72, 24)))
+        self.assertGreater(len({speeds[0], speeds[24], speeds[48]}), 1)
+
     def test_randomized_initial_inventory_respects_capacity_fractions(self):
         network = _network()
         config = ScenarioConfig(
@@ -195,14 +215,21 @@ class ScenarioGeneratorTests(unittest.TestCase):
         config = ScenarioConfig()
         self.assertEqual(config.capture_noise_std, 0.30)
         self.assertEqual(config.capture_outage_mean_hours, 12.0)
+        self.assertEqual(config.capture_high_output_rate_per_week, 0.5)
         self.assertEqual(config.weather_window_rate_per_week, 0.3)
+        self.assertEqual(config.weather_window_speed_factor_range, (0.6, 0.8))
         self.assertEqual(config.well_maintenance_mean_hours, 24.0)
 
-    def test_injectivity_disturbance_defaults_to_nominal(self):
-        config = ScenarioConfig()
-        self.assertEqual(config.injectivity_max_decline, 0.0)
-        self.assertEqual(config.injectivity_noise_std, 0.0)
-        self.assertEqual(config.injectivity_warmstart_min, 1.0)
+    def test_injectivity_decline_configuration_is_not_exposed(self):
+        field_names = {field.name for field in fields(ScenarioConfig)}
+        obsolete = {
+            "injectivity_max_decline",
+            "injectivity_floor",
+            "injectivity_noise_std",
+            "injectivity_warmstart_min",
+        }
+        self.assertTrue(obsolete.isdisjoint(field_names))
+
         scenario = ScenarioGenerator(config=ScenarioConfig(warm_start=True), seed=1).sample(
             _network(with_reservoir=True)
         )
@@ -211,7 +238,7 @@ class ScenarioGeneratorTests(unittest.TestCase):
 
 class WarmStartTests(unittest.TestCase):
     def test_warm_start_off_keeps_slow_vars_nominal(self):
-        config = ScenarioConfig(warm_start=False, injectivity_noise_std=0.0, injectivity_max_decline=0.0)
+        config = ScenarioConfig(warm_start=False)
         scenario = ScenarioGenerator(config=config, seed=1).sample(_network(with_reservoir=True))
         self.assertNotIn("aurora", scenario.initial_inventory_t)  # cold reservoir
         self.assertEqual(scenario.injectivity_factor["well_1"][0], 1.0)  # full injectivity
@@ -226,17 +253,6 @@ class WarmStartTests(unittest.TestCase):
         self.assertLessEqual(fill, 0.6 * reservoir.pressure_limited_capacity_t())
         # A pre-filled reservoir means pressure no longer starts at full margin.
         self.assertLess(reservoir.pressure_margin_bar(fill), reservoir.pressure_margin_bar(0.0))
-
-    def test_explicit_warm_start_can_vary_initial_injectivity_below_one(self):
-        config = ScenarioConfig(warm_start=True, injectivity_warmstart_min=0.5)
-        starts = {
-            ScenarioGenerator(config=config, seed=s).sample(_network(with_reservoir=True))
-            .injectivity_factor["well_1"][0]
-            for s in range(8)
-        }
-        self.assertTrue(any(start < 1.0 for start in starts))
-        self.assertTrue(all(0.5 <= start <= 1.0 for start in starts))
-
 
 class ScenarioApplyTests(unittest.TestCase):
     def _scenario(self) -> Scenario:

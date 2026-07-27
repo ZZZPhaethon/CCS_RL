@@ -51,6 +51,52 @@ class EnvSpaceTests(unittest.TestCase):
         self.assertTrue(all(isinstance(x, float) for x in obs))
         self.assertTrue(all(-1e6 < x < 1e6 for x in obs))
 
+    def test_global_weather_observation_is_compact(self):
+        base = _env()
+        env = _env(include_weather_obs=True, weather_observation_layout="global")
+        obs = env.reset(seed=0)
+        names = env.feature_names
+        destination_count = len(env.terminal_ids) + len(env.emitter_ids)
+
+        self.assertEqual(
+            len(obs),
+            base.observation_size + 5 + len(env.vessel_ids) * destination_count,
+        )
+        self.assertEqual(len(obs), env.observation_size)
+        self.assertNotIn("hour_of_year_sin", names)
+        self.assertNotIn("hour_of_year_cos", names)
+        self.assertEqual(names.count("weather.speed_24h_mean"), 1)
+        self.assertIn("vessel_a.to_source_b.travel_hours_now", names)
+
+    def test_leg_weather_observation_exposes_candidate_leg_forecasts(self):
+        env = _env(include_weather_obs=True, weather_observation_layout="leg")
+        obs = env.reset(seed=0)
+        names = env.feature_names
+
+        self.assertEqual(len(obs), env.observation_size)
+        self.assertNotIn("hour_of_year_sin", names)
+        self.assertNotIn("hour_of_year_cos", names)
+        self.assertIn("vessel_a.to_terminal.leg_speed_168h_min", names)
+        self.assertIn("vessel_a.to_source_b.leg_speed_24h_mean", names)
+        self.assertIn("vessel_a.to_source_b.travel_hours_now", names)
+        self.assertIn("vessel_b.to_source_a.leg_speed_now", names)
+
+        env.scenario.leg_speed_factor = {
+            "source_a->source_b": [0.5] * 24 + [0.25] * 24,
+            "source_a->terminal": [0.8] * 48,
+        }
+        obs = env._observation()
+
+        self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_now")], 0.5)
+        self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_24h_mean")], 0.5)
+        self.assertAlmostEqual(obs[names.index("vessel_a.to_source_b.leg_speed_168h_min")], 0.25)
+        self.assertAlmostEqual(obs[names.index("vessel_a.to_source_a.travel_hours_now")], 0.0)
+        self.assertGreater(obs[names.index("vessel_a.to_source_b.travel_hours_now")], 0.0)
+
+    def test_unknown_weather_observation_layout_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "weather_observation_layout"):
+            _env(include_weather_obs=True, weather_observation_layout="unknown")
+
     def test_vessel_action_mask_shape_matches_vessel_action_dims(self):
         env = _env()
         env.reset(seed=0)
@@ -59,6 +105,30 @@ class EnvSpaceTests(unittest.TestCase):
 
 
 class EnvDynamicsTests(unittest.TestCase):
+    def test_terminal_fifo_head_uses_arrival_order_and_requeues_returning_vessel(self):
+        env = _env()
+        env.reset(seed=0)
+        terminal_id = env.terminal_ids[0]
+        state = env.simulator.state
+        state.entity_inventory_t["vessel_b"] = 300.0
+        state.vessel_berths["vessel_b"] = terminal_id
+
+        self.assertEqual(env._terminal_unload_head(terminal_id, set()), "vessel_b")
+
+        state.entity_inventory_t["vessel_a"] = 300.0
+        state.vessel_berths["vessel_a"] = terminal_id
+
+        self.assertEqual(env._terminal_unload_head(terminal_id, set()), "vessel_b")
+        self.assertEqual(state.terminal_unload_queues[terminal_id], ["vessel_b", "vessel_a"])
+        self.assertEqual(env._terminal_unload_head(terminal_id, {"vessel_b"}), "vessel_a")
+
+        state.vessel_berths.pop("vessel_b")
+        self.assertEqual(env._terminal_unload_head(terminal_id, set()), "vessel_a")
+
+        state.vessel_berths["vessel_b"] = terminal_id
+        self.assertEqual(env._terminal_unload_head(terminal_id, set()), "vessel_a")
+        self.assertEqual(state.terminal_unload_queues[terminal_id], ["vessel_a", "vessel_b"])
+
     def test_partially_loaded_vessel_can_sail_to_terminal_by_default(self):
         env = _env()
         env.reset(seed=0)
@@ -77,8 +147,29 @@ class EnvDynamicsTests(unittest.TestCase):
 
         self.assertFalse(vessel_a_mask[VESSEL_GO_TERMINAL])
 
-    def test_loaded_vessel_at_terminal_can_leave(self):
+    def test_loaded_vessel_at_terminal_must_wait_by_default(self):
         env = _env(enforce_full_load_dispatch=False)
+        env.reset(seed=0)
+        vessel_id = "vessel_a"
+        env.simulator.state.entity_inventory_t[vessel_id] = 1.0
+        env.simulator.state.vessel_berths[vessel_id] = env.terminal_ids[0]
+        env.simulator.vessel_states[vessel_id] = {
+            "mode": "berthed",
+            "berth": env.terminal_ids[0],
+            "origin": env.terminal_ids[0],
+            "destination": env.terminal_ids[0],
+            "progress": 0.0,
+        }
+
+        vessel_mask = env.vessel_action_mask()[env.vessel_ids.index(vessel_id)]
+
+        self.assertEqual(vessel_mask, [True] + [False] * (len(vessel_mask) - 1))
+
+    def test_loaded_vessel_at_terminal_can_leave(self):
+        env = _env(
+            enforce_full_load_dispatch=False,
+            require_empty_terminal_departure=False,
+        )
         env.reset(seed=0)
         vessel_id = "vessel_a"
         env.simulator.state.entity_inventory_t[vessel_id] = 1.0
@@ -94,6 +185,37 @@ class EnvDynamicsTests(unittest.TestCase):
         vessel_a_mask = env.vessel_action_mask()[env.vessel_ids.index(vessel_id)]
 
         self.assertTrue(vessel_a_mask[env.vessel_go_emitter_action("source_a")])
+
+    def test_loaded_vessel_cannot_bypass_terminal_departure_mask(self):
+        env = _env(enforce_full_load_dispatch=False)
+        env.reset(seed=0)
+        vessel_id = "vessel_a"
+        terminal_id = env.terminal_ids[0]
+        env.simulator.state.entity_inventory_t[vessel_id] = 1.0
+        env.simulator.state.vessel_berths[vessel_id] = terminal_id
+        env.simulator.vessel_states[vessel_id] = {
+            "mode": "berthed",
+            "berth": terminal_id,
+            "origin": terminal_id,
+            "destination": terminal_id,
+            "progress": 0.0,
+        }
+        actions = {
+            "vessels": [
+                env.vessel_go_emitter_action("source_a"),
+                VESSEL_WAIT,
+            ],
+            "wells": [MIN_WELL_RATE_INDEX] * len(env.well_ids),
+        }
+
+        proposals = env._build_proposals(actions)
+
+        self.assertFalse(
+            any(
+                proposal.entity_id == vessel_id and proposal.verb == "sail_to"
+                for proposal in proposals
+            )
+        )
 
     def test_vessels_start_at_emitters_and_can_sail_partially_loaded(self):
         env = _env(enforce_full_load_dispatch=False)

@@ -29,7 +29,6 @@ mask exposes which destination choices are physically legal, while
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from numbers import Integral
 
 from ..actions import ActionFrame, ActionProposal
@@ -50,6 +49,7 @@ from ..operations.pressure_limits import (
     mtpa_to_tph,
     pressure_limited_rate_level_mask,
 )
+from ..operations.unloading import sync_terminal_unload_queue
 
 # Vessel action ids. Emitter actions are dynamic:
 # VESSEL_GO_EMITTER_BASE + env.emitter_ids.index(emitter_id).
@@ -100,16 +100,19 @@ class CCSEnvConfig:
     vent_first_vent_eur_per_t: float = 10_000.0
     overflow_risk_eur_per_t: float = 100.0
     overflow_risk_lookahead_h: float = 24.0
-    # Business dispatch constraints (full vessel before sailing to the terminal;
-    # unload before leaving it). Off by default so RL can learn partial-load
-    # dispatch when avoiding venting is worth an extra trip. Turn on only for the
-    # old curriculum-style behaviour.
+    # Require a full vessel before sailing to the terminal. Off by default so RL
+    # can learn partial-load dispatch when avoiding venting is worth an extra trip.
     enforce_full_load_dispatch: bool = False
-    # Expose weather speed factors (current + 24 h/168 h forecast) and an annual
-    # clock. Leg-level wave data is preferred; probability-window weather falls
-    # back to vessel-level factors. Off by default so existing no-weather models
-    # keep their observation size.
+    # Keep terminal unloading independent from the emitter departure rule:
+    # partial-load dispatch remains legal, but a vessel cannot leave the terminal
+    # while it still carries cargo.
+    require_empty_terminal_departure: bool = True
+    # Expose weather speed factors (current + 24 h/168 h forecast). Global
+    # probability-window weather uses one shared forecast plus per-route travel
+    # times; leg weather keeps per-route forecasts. Off by default so existing
+    # no-weather models keep their observation size.
     include_weather_obs: bool = False
+    weather_observation_layout: str = "leg"
     # Expose a per-vessel emitter assignment (the high-level "goal") in the
     # observation: for each vessel, a one-hot over emitters marking which it is
     # meant to serve. This is what makes the policy goal-conditioned, so it can
@@ -133,6 +136,11 @@ class CCSEnv:
     ) -> None:
         self.network = network
         self.config = config or CCSEnvConfig()
+        if self.config.weather_observation_layout not in {"global", "leg"}:
+            raise ValueError(
+                "weather_observation_layout must be 'global' or 'leg', "
+                f"got {self.config.weather_observation_layout!r}."
+            )
         self.scenario_generator = scenario_generator or ScenarioGenerator()
         self.cost_model = cost_model or CostModel()
         self.locations = locations
@@ -232,17 +240,30 @@ class CCSEnv:
         for rid in self.reservoir_ids:
             names += [f"{rid}.pressure_margin"]
         if self.config.include_weather_obs:
-            names += ["hour_of_year_sin", "hour_of_year_cos"]
-            for vid in self.vessel_ids:
-                for label, _destination_id in self._weather_destination_slots():
+            if self.config.weather_observation_layout == "global":
+                names += [
+                    "weather.speed_now",
+                    "weather.speed_24h_mean",
+                    "weather.speed_24h_min",
+                    "weather.speed_168h_mean",
+                    "weather.speed_168h_min",
+                ]
+                for vid in self.vessel_ids:
                     names += [
-                        f"{vid}.{label}.leg_speed_now",
-                        f"{vid}.{label}.leg_speed_24h_mean",
-                        f"{vid}.{label}.leg_speed_24h_min",
-                        f"{vid}.{label}.leg_speed_168h_mean",
-                        f"{vid}.{label}.leg_speed_168h_min",
-                        f"{vid}.{label}.travel_hours_now",
+                        f"{vid}.{label}.travel_hours_now"
+                        for label, _destination_id in self._weather_destination_slots()
                     ]
+            else:
+                for vid in self.vessel_ids:
+                    for label, _destination_id in self._weather_destination_slots():
+                        names += [
+                            f"{vid}.{label}.leg_speed_now",
+                            f"{vid}.{label}.leg_speed_24h_mean",
+                            f"{vid}.{label}.leg_speed_24h_min",
+                            f"{vid}.{label}.leg_speed_168h_mean",
+                            f"{vid}.{label}.leg_speed_168h_min",
+                            f"{vid}.{label}.travel_hours_now",
+                        ]
         if self.config.include_goal_obs:
             for vid in self.vessel_ids:
                 names += [f"{vid}.goal_{eid}" for eid in self.emitter_ids]
@@ -425,11 +446,17 @@ class CCSEnv:
             return [True] + [False] * (self.vessel_action_count - 1)  # mid-voyage: can only WAIT
         berth = vstate["berth"]
         at_terminal = berth == route["destination"]
+        cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
+        if (
+            self.config.require_empty_terminal_departure
+            and at_terminal
+            and cargo_t > 1e-9
+        ):
+            return [True] + [False] * (self.vessel_action_count - 1)
         if not self.config.enforce_full_load_dispatch:
             mask = [True, not at_terminal]
             mask.extend(berth != emitter_id for emitter_id in self.emitter_ids)
             return mask
-        cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
         vessel = self.network.entities[vessel_id]
         # Business constraint: a loaded vessel at the terminal must finish
         # unloading before it may leave (can only WAIT).
@@ -528,9 +555,15 @@ class CCSEnv:
             destination = self._vessel_action_destination(vessel_id, choice)
             if destination == berth:
                 destination = None
+            cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
+            route = self._routes[vessel_id]
+            if (
+                self.config.require_empty_terminal_departure
+                and berth == route["destination"]
+                and cargo_t > 1e-9
+            ):
+                destination = None
             if self.config.enforce_full_load_dispatch:
-                cargo_t = self.simulator.state.entity_inventory_t.get(vessel_id, 0.0)
-                route = self._routes[vessel_id]
                 vessel = self.network.entities[vessel_id]
                 # A loaded vessel at the terminal must unload before leaving.
                 if berth == route["destination"] and cargo_t > 1e-9:
@@ -576,15 +609,15 @@ class CCSEnv:
                 proposals.append(self._proposal(terminal_id, "unload_vessel", {"vessel_id": head}))
 
     def _terminal_unload_head(self, terminal_id: str, departing) -> str | None:
-        candidates = []
-        for vessel_id in self.vessel_ids:
-            if vessel_id in departing:
-                continue
-            if self.simulator.state.vessel_berths.get(vessel_id) != terminal_id:
-                continue
-            if self.simulator.state.entity_inventory_t.get(vessel_id, 0.0) > 1e-9:
-                candidates.append(vessel_id)
-        return sorted(candidates)[0] if candidates else None
+        terminal = self.network.entities[terminal_id]
+        assert isinstance(terminal, Terminal)
+        queue = sync_terminal_unload_queue(
+            self.network,
+            terminal,
+            self.simulator.state,
+            excluded_vessel_ids=set(departing),
+        )
+        return queue[0] if queue else None
 
     def _injection_proposals(self, well_rate_indices, proposals) -> None:
         desired: dict[str, float] = {}
@@ -660,10 +693,11 @@ class CCSEnv:
             span = reservoir.max_pressure_bar - reservoir.initial_pressure_bar
             obs += [_safe_div(reservoir.pressure_margin_bar(inv), span) if span > 0 else 1.0]
         if self.config.include_weather_obs:
-            hour_angle = 2.0 * math.pi * ((state.time_h % 8760.0) / 8760.0)
-            obs += [math.sin(hour_angle), math.cos(hour_angle)]
-            for vid in self.vessel_ids:
-                obs += self._weather_observation_for_vessel(vid)
+            if self.config.weather_observation_layout == "global":
+                obs += self._global_weather_observation()
+            else:
+                for vid in self.vessel_ids:
+                    obs += self._weather_observation_for_vessel(vid)
         if self.config.include_goal_obs:
             for vid in self.vessel_ids:
                 obs += [1.0 if self.goal_assignment.get(eid) == vid else 0.0 for eid in self.emitter_ids]
@@ -677,6 +711,35 @@ class CCSEnv:
         slots = [(f"to_{terminal_id}", terminal_id) for terminal_id in self.terminal_ids]
         slots.extend((f"to_{emitter_id}", emitter_id) for emitter_id in self.emitter_ids)
         return slots
+
+    def _global_current_weather_feature_names(self) -> list[str]:
+        names = ["weather.speed_now"]
+        for vessel_id in self.vessel_ids:
+            names += [
+                f"{vessel_id}.{label}.travel_hours_now"
+                for label, _destination_id in self._weather_destination_slots()
+            ]
+        return names
+
+    def _global_current_weather_observation(self) -> list[float]:
+        vessel_id = self.vessel_ids[0]
+        now = self._weather_speed_at("", vessel_id, 0)
+        values = [now]
+        for current_vessel_id in self.vessel_ids:
+            route = self._routes[current_vessel_id]
+            origin_id = self._weather_reference_origin(current_vessel_id)
+            for _label, destination_id in self._weather_destination_slots():
+                values.append(
+                    self._normalized_travel_hours(origin_id, destination_id, route, now)
+                )
+        return values
+
+    def _global_weather_observation(self) -> list[float]:
+        vessel_id = self.vessel_ids[0]
+        mean24, min24 = self._weather_speed_forecast("", vessel_id, 24)
+        mean168, min168 = self._weather_speed_forecast("", vessel_id, 168)
+        current = self._global_current_weather_observation()
+        return [current[0], mean24, min24, mean168, min168, *current[1:]]
 
     def _weather_observation_for_vessel(self, vessel_id: str) -> list[float]:
         route = self._routes[vessel_id]

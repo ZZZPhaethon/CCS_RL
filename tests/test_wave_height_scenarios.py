@@ -49,8 +49,6 @@ def _quiet_config(**overrides) -> ScenarioConfig:
         capture_outage_rate_per_week=0.0,
         weather_window_rate_per_week=0.0,
         well_maintenance_rate_per_week=0.0,
-        injectivity_max_decline=0.0,
-        injectivity_noise_std=0.0,
         randomize_initial_inventory=False,
     )
     base.update(overrides)
@@ -337,8 +335,6 @@ class LegWaveClimatologyScenarioGeneratorTests(unittest.TestCase):
                     weather_window_mean_hours=1_000.0,
                     weather_window_speed_factor_range=(0.6, 0.6),
                     well_maintenance_rate_per_week=0.0,
-                    injectivity_max_decline=0.0,
-                    injectivity_noise_std=0.0,
                     randomize_initial_inventory=False,
                 ),
                 fixed_start_hour_of_year=0,

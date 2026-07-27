@@ -37,6 +37,7 @@ def make_native_env(
     overflow_risk_lookahead_h: float = 24.0,
     carbon_price_eur_per_t: float | None = None,
     enforce_full_load_dispatch: bool = False,
+    require_empty_terminal_departure: bool = True,
     scenario: str = "northern_lights_phase1",
     include_goal_obs: bool = False,
     capture_noise_std: float = 0.30,
@@ -44,8 +45,10 @@ def make_native_env(
     leg_wave_slowdown_multiplier: float = 1.0,
     leg_wave_speed_factor_floor: float = 0.0,
     weather_mode: str = "window",
+    weather_window_rate_per_week: float = 1.0,
     wave_height_nc_paths: str | Path | list[str | Path] | None = None,
     lstm_prediction_csv: str | Path | None = None,
+    scenario_context_hours: int = 169,
 ):
     """A native CCSEnv on the real Phase 1 network configured for RL.
 
@@ -56,6 +59,8 @@ def make_native_env(
     otherwise rewards idling until the delayed venting penalty kicks in.
     ``include_weather_obs`` exposes weather speed factors + seasonality in the
     observation so the policy can react to rough weather.
+    ``scenario_context_hours`` defaults to 169 so a terminal observation after
+    a 720-hour episode still has a complete 168-hour continuation forecast.
     ``carbon_price_eur_per_t`` is the single, economically-faithful knob: it sets
     both the venting carbon tax and (by default) the stored-CO2 credit to the
     same value, so storing and avoiding a vent are worth the same (symmetric).
@@ -85,15 +90,17 @@ def make_native_env(
             overflow_risk_eur_per_t=overflow_risk_eur_per_t,
             overflow_risk_lookahead_h=overflow_risk_lookahead_h,
             enforce_full_load_dispatch=enforce_full_load_dispatch,
+            require_empty_terminal_departure=require_empty_terminal_departure,
             include_goal_obs=include_goal_obs,
         ),
         scenario_config=ScenarioConfig(
-            episode_hours=episode_hours,
+            episode_hours=episode_hours + scenario_context_hours,
             warm_start=warm_start,
             capture_noise_std=capture_noise_std,
             emitter_initial_fill_range=(0.0, initial_inventory_fill_max),
             terminal_initial_fill_range=(0.0, initial_inventory_fill_max),
             reservoir_initial_pressure_fill_range=(0.0, initial_inventory_fill_max),
+            weather_window_rate_per_week=weather_window_rate_per_week,
             leg_wave_slowdown_multiplier=leg_wave_slowdown_multiplier,
             leg_wave_speed_factor_floor=leg_wave_speed_factor_floor,
         ),

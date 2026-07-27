@@ -97,6 +97,27 @@ class RunEpisodeTests(unittest.TestCase):
         shuttle = run_episode(_env(), greedy_shuttle_policy, seed=8)
         self.assertLess(shuttle.in_transit_growth_t, idle.in_transit_growth_t)
 
+    def test_episode_metrics_split_end_inventory_by_stage(self):
+        env = _env()
+        metrics = run_episode(env, greedy_shuttle_policy, seed=9)
+        inventory = env.simulator.state.entity_inventory_t
+
+        self.assertAlmostEqual(
+            metrics.emitter_inventory_t,
+            sum(inventory.get(entity_id, 0.0) for entity_id in env.emitter_ids),
+        )
+        self.assertAlmostEqual(
+            metrics.vessel_inventory_t,
+            sum(inventory.get(entity_id, 0.0) for entity_id in env.vessel_ids),
+        )
+        self.assertAlmostEqual(
+            metrics.terminal_inventory_t,
+            sum(inventory.get(entity_id, 0.0) for entity_id in env.terminal_ids),
+        )
+        report = metrics.report()
+        for token in ("emitter inventory", "vessel inventory", "terminal inventory"):
+            self.assertIn(token, report)
+
 
 class HorizonModeTests(unittest.TestCase):
     def test_storage_goal_config_is_not_supported(self):

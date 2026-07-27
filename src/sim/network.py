@@ -111,6 +111,7 @@ class PhysicalNetwork:
                 distribute_pipeline_outflow(self, next_state, flows, actions, pipeline_id, outflow_t)
 
         apply_loading(self, next_state, actions, flows, violations)
+        self._record_pipeline_flow_history(next_state)
         self._record_injection_rate_history(next_state)
 
         final_mass_t = sum(next_state.entity_inventory_t.values())
@@ -175,3 +176,17 @@ class PhysicalNetwork:
             if not history and abs(rate_tph) <= 1e-12:
                 continue
             history.append((interval_start_h, rate_tph))
+
+    def _record_pipeline_flow_history(self, state: PhysicalState) -> None:
+        interval_start_h = state.time_h - self.time_step_hours
+        window_start_h = interval_start_h - 365.25 * 24.0
+        for pipeline_id in self._entities_of_type(Pipeline):
+            history = state.pipeline_flow_history_t.setdefault(pipeline_id, [])
+            history[:] = [
+                entry for entry in history if entry[0] > window_start_h
+            ]
+            amount_t = (
+                state.last_pipeline_flow_tph.get(pipeline_id, 0.0)
+                * self.time_step_hours
+            )
+            history.append((interval_start_h, amount_t))

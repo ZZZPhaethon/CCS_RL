@@ -13,9 +13,11 @@ class PhysicalState:
     last_vent_tph: dict[str, float] = field(default_factory=dict)
     cumulative_vent_t: dict[str, float] = field(default_factory=dict)
     last_pipeline_flow_tph: dict[str, float] = field(default_factory=dict)
+    pipeline_flow_history_t: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     last_injection_flow_tph: dict[str, float] = field(default_factory=dict)
     injection_rate_history_tph: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     vessel_berths: dict[str, str] = field(default_factory=dict)
+    terminal_unload_queues: dict[str, list[str]] = field(default_factory=dict)
 
     # Time-varying disturbance overrides (the "ξ_t" channel).
     # Each maps entity_id -> a runtime override that takes precedence over the
@@ -38,12 +40,20 @@ class PhysicalState:
             last_vent_tph=dict(self.last_vent_tph),
             cumulative_vent_t=dict(self.cumulative_vent_t),
             last_pipeline_flow_tph=dict(self.last_pipeline_flow_tph),
+            pipeline_flow_history_t={
+                pipeline_id: list(history)
+                for pipeline_id, history in self.pipeline_flow_history_t.items()
+            },
             last_injection_flow_tph=dict(self.last_injection_flow_tph),
             injection_rate_history_tph={
                 well_id: list(history)
                 for well_id, history in self.injection_rate_history_tph.items()
             },
             vessel_berths=dict(self.vessel_berths),
+            terminal_unload_queues={
+                terminal_id: list(queue)
+                for terminal_id, queue in self.terminal_unload_queues.items()
+            },
             emitter_availability=dict(self.emitter_availability),
             well_available=dict(self.well_available),
             injectivity_factor=dict(self.injectivity_factor),
@@ -60,12 +70,20 @@ class PhysicalState:
             "last_vent_tph": dict(self.last_vent_tph),
             "cumulative_vent_t": dict(self.cumulative_vent_t),
             "last_pipeline_flow_tph": dict(self.last_pipeline_flow_tph),
+            "pipeline_flow_history_t": {
+                pipeline_id: list(history)
+                for pipeline_id, history in self.pipeline_flow_history_t.items()
+            },
             "last_injection_flow_tph": dict(self.last_injection_flow_tph),
             "injection_rate_history_tph": {
                 well_id: list(history)
                 for well_id, history in self.injection_rate_history_tph.items()
             },
             "vessel_berths": dict(self.vessel_berths),
+            "terminal_unload_queues": {
+                terminal_id: list(queue)
+                for terminal_id, queue in self.terminal_unload_queues.items()
+            },
             "emitter_availability": dict(self.emitter_availability),
             "well_available": dict(self.well_available),
             "injectivity_factor": dict(self.injectivity_factor),
