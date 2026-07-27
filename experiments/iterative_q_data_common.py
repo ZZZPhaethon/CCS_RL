@@ -27,6 +27,7 @@ from sim.environment.vessel_mode import (
     vessel_operation_mode_feature_names,
     vessel_sailing_destination_feature_names,
 )
+from sim.simulator import SimulatorStepCounter
 
 
 DEFAULT_VARIANT = "future_mlp_mode_destination"
@@ -74,7 +75,10 @@ def _compare_args(args):
     )
 
 
-def make_native_env(args):
+def make_native_env(
+    args,
+    simulator_step_counter: SimulatorStepCounter | None = None,
+):
     protocol = str(getattr(args, "scenario_protocol", "q_original"))
     if protocol == "q_original":
         env = compare.make_experiment_env(
@@ -112,9 +116,12 @@ def make_native_env(args):
                 require_empty_terminal_departure=True,
                 well_control_mode="automatic_max",
             ),
+            simulator_step_counter=simulator_step_counter,
         )
     else:  # pragma: no cover - guarded by CLI choices
         raise ValueError(f"unknown scenario protocol: {protocol}")
+    if simulator_step_counter is not None:
+        env.simulator_step_counter = simulator_step_counter
     env.config.reward_scale = float(args.reward_scale)
     return env
 
@@ -136,9 +143,12 @@ def scenario_difficulties(args) -> dict[str, str]:
     }
 
 
-def make_event_env(args) -> EventJointResidualGymEnv:
+def make_event_env(
+    args,
+    simulator_step_counter: SimulatorStepCounter | None = None,
+) -> EventJointResidualGymEnv:
     return EventJointResidualGymEnv(
-        make_native_env(args),
+        make_native_env(args, simulator_step_counter),
         str(args.variant),
         include_episode_progress=True,
         greedy_control_variate=False,
@@ -160,10 +170,14 @@ def metrics(env) -> dict[str, float]:
     }
 
 
-def greedy_baseline(args, seed: int) -> tuple[np.ndarray, dict[str, float]]:
+def greedy_baseline(
+    args,
+    seed: int,
+    simulator_step_counter: SimulatorStepCounter | None = None,
+) -> tuple[np.ndarray, dict[str, float]]:
     """Run Greedy once and retain its hourly economic rewards."""
 
-    env = make_native_env(args)
+    env = make_native_env(args, simulator_step_counter)
     env.reset(seed=int(seed))
     rewards = []
     while env.t < env.n_steps:

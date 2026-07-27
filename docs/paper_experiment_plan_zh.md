@@ -166,6 +166,8 @@ q_t^{pressure}
 
 其中 \(I_t^{terminal}\) 是可供注入的 terminal inventory，其他三项分别表示设备、当期 injectivity 和压力约束允许的最大注入率。若现有 simulator 已将压力限制合并进 `injectivity`，实现中只保留一个对应上限，不能重复扣减。
 
+该速率使用连续值（t/h），不再向下映射到预设的 Mtpa 离散档位。离散井动作仅保留在旧版 `agent_selected` 兼容接口中，不用于正式实验。
+
 公平性要求：
 
 - PPO、Event-Residual PPO 和 Iterative Q 的 action space/candidate actions 中移除井注入率；
@@ -809,6 +811,7 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 3. **确认信息协议**：perfect forecast 还是 realistic/noisy forecast；
 4. **实现并验证统一 simulator-step counter**，完成 PPO/Event-Residual PPO 目标对齐和 Rolling MILP Greedy-only warm start；
 5. 使用单训练 seed 完成六种控制器的 smoke test，并确认 Rolling MILP 无 incumbent 时能明确终止和记错；
+   - 实现进度：统一 runner 已完成 Fixed-Assignment、Greedy、Rolling MILP 和 Full-horizon MILP 的单 validation-seed 联调；Rolling MILP 已验证 Greedy-only warm start、无 shifted warm start、无 fallback、限时 incumbent 执行和 replay 记录。三种学习方法需在目标对齐后的 checkpoint 可用后接入同一 runner。
 6. 完成 E2 和 E3 的单 seed 筛选，锁定 Iterative Q P4 配置；
 7. 运行 4,800-root Iterative Q，测得并记录 \(B_{4800}\)；
 8. 在 \(\le B_{4800}\) 下训练目标对齐的 Centralized PPO 和 Event-Residual PPO，并锁定 validation-best checkpoint；
@@ -826,7 +829,7 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 ## 9. 正式实验开始前的锁定清单
 
 - [ ] 主方法和 baseline 名称已固定；
-- [ ] Fixed-Assignment 与 Greedy 的行为不重复；
+- [x] Fixed-Assignment 与 Greedy 的行为不重复：三船正式场景的 5 个 validation seeds 中，两者在可行动状态的决策分歧率为 42.76%，Fixed-Assignment 始终保持一船一 emitter，而 Greedy 会跨 emitter 调度；
 - [x] 总成本公式、经济参数和 penalty 已在机器可读协议中固定；
 - [x] 共同 compact trip cleanup terminal value 已固定；
 - [x] 共享的最大可行井注入函数已实现，正式协议下所有控制器的上层动作空间均已移除井注入率；
@@ -843,7 +846,7 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 - [x] 训练、验证、legacy-development 和正式测试 seed 范围已写入 manifest；
 - [ ] 训练模型不能读取测试 seeds；
 - [ ] 若 4,800 roots 曾根据当前正式 test 结果确定，则这些 seeds 已降级为 development，另建未触碰的正式 test set；
-- [ ] Simulator step accounting 已实现；
+- [x] Simulator step accounting 已实现：在 `PhysicalSimulator.step()` 成功推进后统一累计 calls 与 simulated hours；深拷贝的 Q root/candidate 共享同一计数器，数据集 metadata 和 summary 均记录实际用量；
 - [ ] 所有方法能输出同一套 per-seed metrics；
 - [ ] 统计脚本已在 toy data 上验证；
 - [ ] 轨迹案例的自动选择规则已实现；

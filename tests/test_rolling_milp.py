@@ -227,12 +227,13 @@ class RollingMilpInterfaceTests(unittest.TestCase):
             ("automatic", []),
         )
 
-    def test_controller_enables_shifted_warm_start_by_default(self):
+    def test_controller_defaults_to_greedy_only_warm_start(self):
         controller = RollingMilpController(
             _cold_env(),
         )
 
-        self.assertTrue(controller.shifted_milp_warm_start)
+        self.assertFalse(controller.shifted_milp_warm_start)
+        self.assertEqual(controller.warm_start_mode, "greedy")
         self.assertTrue(controller.terminal_cleanup_value)
         self.assertIsNone(controller.mip_gap_rel)
         self.assertEqual(controller.terminal_cleanup_mip_start_mode, "partial")

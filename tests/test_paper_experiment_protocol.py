@@ -11,7 +11,6 @@ from sim.control.event_based.residual_rl_v4.scenario import (
     ReplayableDifficultyScenarioGenerator,
 )
 from sim.economics import EconomicParameters
-from sim.operations.pressure_limits import WELL_RATE_LEVELS_MTPA
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,9 +52,12 @@ def test_locked_protocol_matches_shared_source_constants() -> None:
     assert tuple(
         protocol["forecast_protocol"]["learning_methods"]["windows_hours"]
     ) == FORECAST_WINDOWS_H
-    assert tuple(
-        protocol["control_scope"]["well_control"]["rate_levels_mtpa"]
-    ) == WELL_RATE_LEVELS_MTPA
+    well_control = protocol["control_scope"]["well_control"]
+    assert (
+        well_control["mode"]
+        == "automatic_continuous_maximum_feasible_rate"
+    )
+    assert well_control["rate_unit"] == "tonnes_per_hour"
     assert parameters["carbon_price_eur_per_t"] == defaults.carbon_price_eur_per_t
     assert parameters["conditioning_eur_per_t"] == defaults.conditioning_eur_per_t
     assert (

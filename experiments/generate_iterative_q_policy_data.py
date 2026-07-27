@@ -19,6 +19,7 @@ import numpy as np
 import torch
 
 from experiments import iterative_q_data_common as common
+from sim.simulator import SimulatorStepCounter
 from experiments.evaluate_iterative_action_q import (
     _load_model,
     expected_q_for_observation,
@@ -138,8 +139,17 @@ def _step(wrapper, action):
     return observation, bool(terminated or truncated)
 
 
-def prepare_root(args, model, metadata, policy_config, seed, window_index, device):
-    wrapper = common.make_event_env(args)
+def prepare_root(
+    args,
+    model,
+    metadata,
+    policy_config,
+    seed,
+    window_index,
+    device,
+    simulator_step_counter=None,
+):
+    wrapper = common.make_event_env(args, simulator_step_counter)
     observation, _info = wrapper.reset_native_seed(int(seed))
     gate_state = {"used_windows": set(), "override_events": 0}
     follow = int(metadata["follow_action_index"])
@@ -237,6 +247,7 @@ def generate_dataset(args):
     records = []
     root_action_counts = []
     skipped_roots = 0
+    simulator_step_counter = SimulatorStepCounter()
     window_indices = (
         list(range(len(policy_config["windows_h"])))
         if args.window_indices is None
@@ -248,7 +259,14 @@ def generate_dataset(args):
         candidate_index = 0
         for window_index in window_indices:
             root = prepare_root(
-                args, model, metadata, policy_config, seed, window_index, device
+                args,
+                model,
+                metadata,
+                policy_config,
+                seed,
+                window_index,
+                device,
+                simulator_step_counter,
             )
             if root is None:
                 skipped_roots += 1
@@ -310,7 +328,7 @@ def generate_dataset(args):
     data["window_index"] = np.asarray(
         [record["window_index"] for record in records], dtype=np.int8
     )
-    schema_wrapper = common.make_event_env(args)
+    schema_wrapper = common.make_event_env(args, simulator_step_counter)
     schema_wrapper.reset_native_seed(int(args.seeds[0]))
     metadata_json = {
         "kind": "iterative_q_policy_rollin_data",
@@ -337,6 +355,7 @@ def generate_dataset(args):
         "rollin_checkpoint": str(checkpoint_path),
         "rollin_checkpoint_sha256": lock["checkpoint_sha256"],
         "policy_windows_h": policy_config["windows_h"],
+        "training_simulator_usage": simulator_step_counter.snapshot().as_dict(),
         "configuration": vars(args),
     }
     data["metadata_json"] = np.asarray(
@@ -355,6 +374,7 @@ def generate_dataset(args):
         "worse_candidates": int((targets < -1e-6).sum()),
         "mean_saving_eur": float(targets.mean() / float(args.reward_scale)),
         "best_saving_eur": float(targets.max() / float(args.reward_scale)),
+        **simulator_step_counter.snapshot().as_dict(),
     }
     print(json.dumps(summary, indent=2), flush=True)
     return summary

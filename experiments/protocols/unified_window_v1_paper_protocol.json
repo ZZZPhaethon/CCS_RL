@@ -70,16 +70,9 @@
       "unloading_rate"
     ],
     "well_control": {
-      "mode": "automatic_highest_feasible_discrete_rate",
-      "rate_levels_mtpa": [
-        0.0,
-        0.5,
-        1.0,
-        1.5,
-        2.0,
-        2.5
-      ],
-      "selection_rule": "choose the highest rate index allowed by availability, injectivity and pressure constraints; choose OFF when the well is unavailable",
+      "mode": "automatic_continuous_maximum_feasible_rate",
+      "rate_unit": "tonnes_per_hour",
+      "selection_rule": "request the continuous maximum rate allowed by availability, equipment capacity, injectivity and pressure constraints; request zero when unavailable or below the minimum stable rate",
       "actual_flow_limits": [
         "terminal inventory",
         "pipeline/manifold capacity",
@@ -207,7 +200,7 @@
       "Iterative Action-Q P4"
     ],
     "measured_value": null,
-    "measurement_status": "pending_simulator_step_counter"
+    "measurement_status": "counter_implemented_measurement_pending"
   },
   "formal_online_controllers": [
     "Fixed-Assignment Heuristic",

@@ -231,7 +231,7 @@ s_{t+1}=f(s_t,a_t,\xi_t),
 - loading/unloading rate；
 - terminal buffer；
 - well availability、injectivity 和 pressure constraints；
-- 共享的底层井控制器：井可用时按照 terminal inventory、equipment、injectivity 和 pressure constraints 下的最大可行速率自动注入，维护时注入率为零；
+- 共享的底层井控制器：井可用时按照 terminal inventory、equipment、injectivity 和 pressure constraints 下的连续最大可行速率自动注入，维护时注入率为零；
 - 井注入率不属于任何上层控制器的动作空间；
 - legal-action mask。
 
