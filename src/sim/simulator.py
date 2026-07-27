@@ -12,6 +12,65 @@ from .routes import route_distance_km, sea_route
 Coordinate = tuple[float, float]
 
 
+@dataclass(frozen=True)
+class SimulatorStepUsage:
+    """Cumulative use of the bottom-level physical simulator."""
+
+    calls: int = 0
+    simulated_hours: float = 0.0
+
+    @property
+    def hour_steps(self) -> float:
+        """Equivalent one-hour simulator steps."""
+        return self.simulated_hours
+
+    def __sub__(self, earlier: SimulatorStepUsage) -> SimulatorStepUsage:
+        calls = self.calls - earlier.calls
+        simulated_hours = self.simulated_hours - earlier.simulated_hours
+        if calls < 0 or simulated_hours < -1e-9:
+            raise ValueError("Simulator usage snapshots must be subtracted in chronological order.")
+        return SimulatorStepUsage(calls=calls, simulated_hours=max(0.0, simulated_hours))
+
+    def as_dict(self) -> dict[str, int | float]:
+        return {
+            "simulator_step_calls": self.calls,
+            "simulator_simulated_hours": self.simulated_hours,
+            "simulator_hour_steps": self.hour_steps,
+        }
+
+
+class SimulatorStepCounter:
+    """Shared counter for every successful physical-network advance.
+
+    Deep-copied planning environments deliberately retain this same counter so
+    candidate rollouts are included in the training-compute budget.
+    """
+
+    def __init__(self) -> None:
+        self._calls = 0
+        self._simulated_hours = 0.0
+
+    def record_step(self, simulated_hours: float) -> None:
+        if simulated_hours <= 0.0:
+            raise ValueError("simulated_hours must be positive.")
+        self._calls += 1
+        self._simulated_hours += float(simulated_hours)
+
+    def snapshot(self) -> SimulatorStepUsage:
+        return SimulatorStepUsage(
+            calls=self._calls,
+            simulated_hours=self._simulated_hours,
+        )
+
+    def reset(self) -> None:
+        self._calls = 0
+        self._simulated_hours = 0.0
+
+    def __deepcopy__(self, memo: dict[int, object]) -> SimulatorStepCounter:
+        memo[id(self)] = self
+        return self
+
+
 @dataclass
 class SimulationStepRecord:
     action_frame: ActionFrame
@@ -40,11 +99,13 @@ class PhysicalSimulator:
         state: PhysicalState,
         routes: dict[str, dict[str, Any]] | None = None,
         locations: dict[str, Coordinate] | None = None,
+        step_counter: SimulatorStepCounter | None = None,
     ) -> None:
         self.network = network
         self.state = state.copy()
         self.routes = routes or {}
         self.locations = locations or {}
+        self.step_counter = step_counter or SimulatorStepCounter()
         self.resolver = ActionResolver(network)
         self.vessel_states = self._initial_vessel_states()
         self.state.vessel_berths = self._vessel_berths_from_states()
@@ -54,6 +115,7 @@ class PhysicalSimulator:
         self._start_vessel_voyages(committed.actions)
         self.state.vessel_berths = self._vessel_berths_from_states()
         result = self.network.step(self.state, self._physical_actions(committed.actions))
+        self.step_counter.record_step(self.network.time_step_hours)
         self.state = result.state
         self._advance_vessel_voyages(self.network.time_step_hours)
         self.state.vessel_berths = self._vessel_berths_from_states()

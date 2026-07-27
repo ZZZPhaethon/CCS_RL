@@ -10,10 +10,12 @@ aggregates mean/std so baselines and policies can be compared on equal footing.
 from __future__ import annotations
 
 import statistics
+import time
 from dataclasses import asdict, dataclass
 from typing import Callable
 
 from .environment import CCSEnv
+from .simulator import SimulatorStepUsage
 
 Policy = Callable[[CCSEnv], dict[str, list]]
 
@@ -55,6 +57,14 @@ class EpisodeMetrics:
     net: float = 0.0
     cost_per_stored_t: float | None = None
     total_cost_per_stored_t: float | None = None
+
+    # Vessel activity diagnostics.
+    vessel_sailing_hours: float = 0.0
+    vessel_waiting_hours: float = 0.0
+    vessel_loading_hours: float = 0.0
+    vessel_unloading_hours: float = 0.0
+    loaded_t: float = 0.0
+    unloaded_t: float = 0.0
 
     # Operational quality / resilience KPIs.
     throttle_hours: int = 0
@@ -178,6 +188,17 @@ class _MetricsRecorder:
         annual_gap_t = max(0.0, env.config.storage_target_rate * captured - stored)
         cost_per_stored = ledger.operating_cost / stored if stored > _EPS else None
         total_cost_per_stored = ledger.total_cost / stored if stored > _EPS else None
+        parameters = env.cost_model.parameters
+        sailing_rate = parameters.vessel_fuel_eur_per_h_sailing
+        hoteling_rate = parameters.hoteling_fuel_eur_per_h
+        sailing_hours = ledger.vessel_fuel / sailing_rate if sailing_rate > _EPS else 0.0
+        loading_hours = ledger.loading / hoteling_rate if hoteling_rate > _EPS else 0.0
+        unloading_hours = ledger.unloading / hoteling_rate if hoteling_rate > _EPS else 0.0
+        total_vessel_hours = env.t * env.network.time_step_hours * len(env.vessel_ids)
+        waiting_hours = max(
+            0.0,
+            total_vessel_hours - sailing_hours - loading_hours - unloading_hours,
+        )
         return EpisodeMetrics(
             horizon_hours=env.n_steps * env.network.time_step_hours,
             storage_target_rate=env.config.storage_target_rate,
@@ -205,6 +226,12 @@ class _MetricsRecorder:
             net=ledger.net,
             cost_per_stored_t=cost_per_stored,
             total_cost_per_stored_t=total_cost_per_stored,
+            vessel_sailing_hours=sailing_hours,
+            vessel_waiting_hours=waiting_hours,
+            vessel_loading_hours=loading_hours,
+            vessel_unloading_hours=unloading_hours,
+            loaded_t=ledger.loaded_t,
+            unloaded_t=ledger.unloaded_t,
             throttle_hours=self.throttle_hours,
             well_switch_count=self.well_switch_count,
             berth_wait_vessel_hours=self.berth_wait_vessel_hours,
@@ -215,17 +242,109 @@ class _MetricsRecorder:
         )
 
 
-def run_episode(env: CCSEnv, policy: Policy, seed: int | None = None) -> EpisodeMetrics:
-    """Roll out ``policy`` for one episode and return its KPIs."""
+@dataclass
+class ExperimentRecord:
+    """CSV/JSON-friendly record for one formal controller evaluation."""
+
+    controller: str
+    seed: int | None
+    metrics: EpisodeMetrics
+    wall_clock_seconds: float
+    controller_decision_calls: int
+    simulator_usage: SimulatorStepUsage
+    terminal_cleanup_operating_cost: float = 0.0
+    terminal_cleanup_included: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        row = self.metrics.as_dict()
+        episode_operating_cost = self.metrics.operating_cost
+        episode_total_cost = self.metrics.total_cost
+        reported_operating_cost = episode_operating_cost + self.terminal_cleanup_operating_cost
+        reported_total_cost = episode_total_cost + self.terminal_cleanup_operating_cost
+        stored_t = self.metrics.stored_t
+        row.update(
+            {
+                "controller": self.controller,
+                "seed": self.seed,
+                "wall_clock_seconds": self.wall_clock_seconds,
+                "controller_decision_calls": self.controller_decision_calls,
+                **self.simulator_usage.as_dict(),
+                "episode_operating_cost": episode_operating_cost,
+                "episode_total_cost": episode_total_cost,
+                "terminal_cleanup_operating_cost": self.terminal_cleanup_operating_cost,
+                "terminal_cleanup_included": self.terminal_cleanup_included,
+                "operating_cost": reported_operating_cost,
+                "total_cost": reported_total_cost,
+                "cost_per_stored_t": (
+                    reported_operating_cost / stored_t if stored_t > _EPS else None
+                ),
+                "total_cost_per_stored_t": (
+                    reported_total_cost / stored_t if stored_t > _EPS else None
+                ),
+            }
+        )
+        return row
+
+
+def _rollout_episode(
+    env: CCSEnv,
+    policy: Policy,
+    seed: int | None,
+) -> tuple[EpisodeMetrics, float, int, SimulatorStepUsage]:
+    usage_before = env.simulator_step_usage()
+    started_at = time.perf_counter()
     env.reset(seed=seed)
     recorder = _MetricsRecorder(env)
+    decision_calls = 0
     done = False
     while not done:
         action = policy(env)
+        decision_calls += 1
         _obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
         recorder.record_step(reward, info)
-    return recorder.result()
+    wall_clock_seconds = time.perf_counter() - started_at
+    usage = env.simulator_step_usage() - usage_before
+    return recorder.result(), wall_clock_seconds, decision_calls, usage
+
+
+def run_episode(env: CCSEnv, policy: Policy, seed: int | None = None) -> EpisodeMetrics:
+    """Roll out ``policy`` for one episode and return its KPIs."""
+    metrics, _wall_clock_seconds, _decision_calls, _usage = _rollout_episode(
+        env,
+        policy,
+        seed,
+    )
+    return metrics
+
+
+def run_recorded_episode(
+    env: CCSEnv,
+    policy: Policy,
+    *,
+    controller: str,
+    seed: int | None = None,
+    terminal_cleanup_cost: Callable[[CCSEnv], float] | None = None,
+) -> ExperimentRecord:
+    """Roll out one controller and return the formal experiment record."""
+    metrics, wall_clock_seconds, decision_calls, usage = _rollout_episode(
+        env,
+        policy,
+        seed,
+    )
+    cleanup_cost = float(terminal_cleanup_cost(env)) if terminal_cleanup_cost else 0.0
+    if cleanup_cost < 0.0:
+        raise ValueError("terminal cleanup operating cost must be non-negative.")
+    return ExperimentRecord(
+        controller=controller,
+        seed=seed,
+        metrics=metrics,
+        wall_clock_seconds=wall_clock_seconds,
+        controller_decision_calls=decision_calls,
+        simulator_usage=usage,
+        terminal_cleanup_operating_cost=cleanup_cost,
+        terminal_cleanup_included=terminal_cleanup_cost is not None,
+    )
 
 
 def evaluate(

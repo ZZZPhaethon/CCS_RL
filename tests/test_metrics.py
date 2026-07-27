@@ -1,4 +1,5 @@
 import unittest
+from copy import deepcopy
 
 from sim.control.baselines import greedy_shuttle_policy, idle_policy
 from sim.environment import CCSEnv, CCSEnvConfig
@@ -7,6 +8,7 @@ from sim.metrics import (
     aggregate_metrics,
     evaluate,
     run_episode,
+    run_recorded_episode,
 )
 from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
 from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
@@ -41,8 +43,55 @@ class RunEpisodeTests(unittest.TestCase):
         self.assertAlmostEqual(metrics.reconditioning, env.ledger.reconditioning)
         self.assertAlmostEqual(metrics.loading, env.ledger.loading)
         self.assertAlmostEqual(metrics.unloading, env.ledger.unloading)
+        self.assertAlmostEqual(metrics.loaded_t, env.ledger.loaded_t)
+        self.assertAlmostEqual(metrics.unloaded_t, env.ledger.unloaded_t)
+        total_activity = (
+            metrics.vessel_sailing_hours
+            + metrics.vessel_waiting_hours
+            + metrics.vessel_loading_hours
+            + metrics.vessel_unloading_hours
+        )
+        self.assertAlmostEqual(total_activity, metrics.elapsed_hours * len(env.vessel_ids))
         self.assertAlmostEqual(metrics.total_cost_per_stored_t, metrics.total_cost / metrics.stored_t)
         self.assertEqual(metrics.horizon_hours, 48)
+
+    def test_formal_record_includes_cleanup_timing_and_simulator_usage(self):
+        env = _env(episode_hours=4)
+
+        record = run_recorded_episode(
+            env,
+            idle_policy,
+            controller="Idle test",
+            seed=2,
+            terminal_cleanup_cost=lambda _env: 123.0,
+        )
+        row = record.as_dict()
+
+        self.assertEqual(row["controller"], "Idle test")
+        self.assertEqual(row["controller_decision_calls"], 4)
+        self.assertEqual(row["simulator_step_calls"], 4)
+        self.assertEqual(row["simulator_hour_steps"], 4.0)
+        self.assertEqual(row["terminal_cleanup_operating_cost"], 123.0)
+        self.assertEqual(row["total_cost"], row["episode_total_cost"] + 123.0)
+        self.assertGreaterEqual(row["wall_clock_seconds"], 0.0)
+
+    def test_planning_rollouts_are_counted_in_formal_record(self):
+        env = _env(episode_hours=4)
+
+        def one_step_lookahead_policy(current_env):
+            candidate = deepcopy(current_env)
+            candidate.step(idle_policy(candidate))
+            return idle_policy(current_env)
+
+        row = run_recorded_episode(
+            env,
+            one_step_lookahead_policy,
+            controller="Planning test",
+            seed=3,
+        ).as_dict()
+
+        self.assertEqual(row["controller_decision_calls"], 4)
+        self.assertEqual(row["simulator_step_calls"], 8)
 
     def test_kpis_are_in_sensible_ranges(self):
         metrics = run_episode(_env(), greedy_shuttle_policy, seed=3)

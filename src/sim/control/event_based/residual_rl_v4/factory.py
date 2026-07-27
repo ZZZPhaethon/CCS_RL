@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from sim.control.event_based.rl.reward import HighLevelRewardConfig
+from sim.simulator import SimulatorStepCounter
 
 from sim.control.event_based.residual_rl_v3.factory import (
     make_risk_gated_native_env,
@@ -33,6 +34,7 @@ def make_tail_robust_native_env(
     gate_mode: str = "soft",
     outside_risk_intervention_penalty: float = 0.02,
     override_windows_h: tuple[tuple[float, float], ...] = (),
+    simulator_step_counter: SimulatorStepCounter | None = None,
 ):
     """Build a native v4 environment without a replay wrapper.
 
@@ -65,6 +67,7 @@ def make_tail_robust_native_env(
             if scenario_protocol == "unified_window_v1"
             else "agent_selected"
         ),
+        simulator_step_counter=simulator_step_counter,
     )
 
 
@@ -88,6 +91,7 @@ def make_tail_replay_gym_env(
     replay_capacity: int = 20,
     minimum_replay_pool: int = 4,
     override_windows_h: tuple[tuple[float, float], ...] = (),
+    simulator_step_counter: SimulatorStepCounter | None = None,
 ) -> TailFailureReplayGymEnv:
     """Build one curriculum and failure-replay training environment.
 
@@ -109,6 +113,7 @@ def make_tail_replay_gym_env(
             outside_risk_intervention_penalty
         ),
         override_windows_h=override_windows_h,
+        simulator_step_counter=simulator_step_counter,
     )
     return TailFailureReplayGymEnv(
         native,

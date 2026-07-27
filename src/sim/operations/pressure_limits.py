@@ -155,6 +155,36 @@ def bottomhole_pressure_limited_rate_tph(
     return max(0.0, min(max_rate_tph, (limit_bar - base_pressure_bar) / slope_bar_per_tph))
 
 
+def maximum_feasible_well_rate_tph(
+    network,
+    state: PhysicalState,
+    well_id: str,
+    physical_max_rate_tph: float,
+    *,
+    evaluation_time_h: float | None = None,
+    interval_start_h: float | None = None,
+) -> float:
+    """Return the continuous maximum feasible request for one well."""
+    well = network.entities[well_id]
+    assert isinstance(well, InjectionWell)
+    physical_max_rate_tph = max(0.0, float(physical_max_rate_tph))
+    pressure_max_rate_tph = bottomhole_pressure_limited_rate_tph(
+        network,
+        state,
+        well_id,
+        physical_max_rate_tph,
+        evaluation_time_h=evaluation_time_h,
+        interval_start_h=interval_start_h,
+    )
+    feasible_rate_tph = min(
+        physical_max_rate_tph,
+        max(0.0, pressure_max_rate_tph),
+    )
+    if feasible_rate_tph < well.min_stable_injection_tph - 1e-9:
+        return 0.0
+    return feasible_rate_tph
+
+
 def pressure_limited_rate_level_mask(
     network,
     state: PhysicalState,
@@ -171,7 +201,7 @@ def pressure_limited_rate_level_mask(
         physical_max_rate_tph = well.max_injection_tph
     well = network.entities[well_id]
     assert isinstance(well, InjectionWell)
-    pressure_max_rate_tph = bottomhole_pressure_limited_rate_tph(
+    feasible_rate_tph = maximum_feasible_well_rate_tph(
         network,
         state,
         well_id,
@@ -179,7 +209,6 @@ def pressure_limited_rate_level_mask(
         evaluation_time_h=evaluation_time_h,
         interval_start_h=interval_start_h,
     )
-    feasible_rate_tph = min(max(0.0, physical_max_rate_tph), pressure_max_rate_tph)
     return tuple(
         mtpa_to_tph(rate_mtpa) <= feasible_rate_tph + 1e-9
         and (

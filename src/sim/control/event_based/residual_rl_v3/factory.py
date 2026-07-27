@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from sim.control.event_based.rl.reward import HighLevelRewardConfig
 from sim.environment import CCSEnvConfig, build_phase1_env
+from sim.simulator import SimulatorStepCounter
 
 from sim.control.event_based.residual_rl.scenario import MixedDifficultyScenarioGenerator
 from sim.control.event_based.residual_rl_v2.curriculum import (
@@ -38,6 +39,7 @@ def make_risk_gated_native_env(
     override_windows_h: tuple[tuple[float, float], ...] = (),
     scenario_generator=None,
     well_control_mode: str = "agent_selected",
+    simulator_step_counter: SimulatorStepCounter | None = None,
 ) -> RiskGatedResidualDispatchEnv:
     """Build one native v3 environment.
 
@@ -58,6 +60,7 @@ def make_risk_gated_native_env(
             reward_mode="vent_first",
             well_control_mode=well_control_mode,
         ),
+        simulator_step_counter=simulator_step_counter,
     )
     return RiskGatedResidualDispatchEnv(
         physical_env,
@@ -93,6 +96,7 @@ def make_risk_gated_gym_env(
     episode_seed_min: int = 100_000,
     episode_seed_max: int = 999_999,
     well_control_mode: str = "agent_selected",
+    simulator_step_counter: SimulatorStepCounter | None = None,
 ) -> MaskedResidualGymEnv:
     """Build one Gym-compatible v3 environment.
 
@@ -113,6 +117,7 @@ def make_risk_gated_gym_env(
             outside_risk_intervention_penalty
         ),
         well_control_mode=well_control_mode,
+        simulator_step_counter=simulator_step_counter,
     )
     return MaskedResidualGymEnv(
         native,
@@ -137,6 +142,7 @@ def make_curriculum_risk_gated_gym_env(
     episode_seed_min: int = 100_000,
     episode_seed_max: int = 999_999,
     well_control_mode: str = "agent_selected",
+    simulator_step_counter: SimulatorStepCounter | None = None,
 ) -> CurriculumMaskedResidualGymEnv:
     """Build one curriculum-aware v3 Gym environment.
 
@@ -157,6 +163,7 @@ def make_curriculum_risk_gated_gym_env(
             outside_risk_intervention_penalty
         ),
         well_control_mode=well_control_mode,
+        simulator_step_counter=simulator_step_counter,
     )
     return CurriculumMaskedResidualGymEnv(
         native,

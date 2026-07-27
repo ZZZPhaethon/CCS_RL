@@ -1,13 +1,32 @@
 import unittest
+from copy import deepcopy
 
 from sim.actions import ActionFrame, ActionProposal
 from sim.entities import Emitter, InjectionWell, PhysicalState, Pipeline, Terminal, Vessel
 from sim.network import PhysicalNetwork
 from sim.routes import route_distance_km
-from sim.simulator import PhysicalSimulator
+from sim.simulator import PhysicalSimulator, SimulatorStepCounter
 
 
 class PhysicalSimulatorTests(unittest.TestCase):
+    def test_shared_counter_records_calls_and_simulated_hours(self):
+        network = PhysicalNetwork(time_step_hours=2.0)
+        counter = SimulatorStepCounter()
+        simulator = PhysicalSimulator(network, PhysicalState(), step_counter=counter)
+
+        simulator.step(ActionFrame(time_h=0.0, proposals=[]))
+        simulator.step(ActionFrame(time_h=2.0, proposals=[]))
+
+        usage = counter.snapshot()
+        self.assertEqual(usage.calls, 2)
+        self.assertEqual(usage.simulated_hours, 4.0)
+        self.assertEqual(usage.hour_steps, 4.0)
+
+    def test_deepcopy_keeps_one_shared_counter(self):
+        counter = SimulatorStepCounter()
+
+        self.assertIs(deepcopy(counter), counter)
+
     def test_sail_to_moves_vessel_off_berth_and_blocks_loading_until_arrival(self):
         network = PhysicalNetwork(time_step_hours=1.0)
         network.add_entity(Vessel("ship_1", capacity_t=800.0, loading_rate_tph=800.0, unloading_rate_tph=800.0, speed_knots=10.0))
