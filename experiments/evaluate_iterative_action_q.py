@@ -24,9 +24,14 @@ from sim.control.iterative_action_q import (
     IterativeActionQuantileQ,
     IterativeForecastActionQuantileQ,
     IterativeFutureActionQuantileQ,
+    IterativeResidualFutureActionQuantileQ,
 )
 from sim.environment.event_residual_gym import EventJointResidualGymEnv
-from sim.environment.forecast import masked_future_forecast_observation
+from sim.environment.forecast import (
+    masked_forecast_band_summary_observation,
+    masked_forecast_summary_observation,
+    masked_future_forecast_observation,
+)
 
 from experiments import iterative_q_data_common as common
 
@@ -47,6 +52,11 @@ def parse_args(argv=None):
     parser.add_argument("--episode-hours", type=int, default=720)
     parser.add_argument("--reward-scale", type=float, default=1e-5)
     parser.add_argument("--gates", nargs="+", default=list(DEFAULT_GATES))
+    parser.add_argument(
+        "--future-ablation",
+        choices=("none", "mean"),
+        default="none",
+    )
     parser.add_argument("--device", default="auto")
     common.add_scenario_protocol_arguments(parser)
     args = parser.parse_args(argv)
@@ -245,7 +255,10 @@ def _load_model(args, device):
         "action_feature_size": int(configuration["action_feature_size"]),
     }
     q_head = configuration.get("q_head")
-    if q_head == "iterative_action_q_future_v4_24_72":
+    if q_head in (
+        "iterative_action_q_future_v4_24_72",
+        "iterative_action_q_future_summary",
+    ):
         model = IterativeFutureActionQuantileQ(
             metadata["state_feature_names"],
             metadata["future_feature_names"],
@@ -254,6 +267,32 @@ def _load_model(args, device):
             future_std=normalization["future_std"],
             **model_arguments,
         ).to(device)
+        if q_head == "iterative_action_q_future_summary":
+            if "future_summary_bands_h" in metadata:
+                model.forecast_summary_bands_h = tuple(
+                    (int(start), int(end))
+                    for start, end in metadata["future_summary_bands_h"]
+                )
+            else:
+                model.forecast_summary_windows_h = tuple(
+                    int(value) for value in metadata["future_summary_windows_h"]
+                )
+    elif q_head == "iterative_action_q_future_residual_summary":
+        model = IterativeResidualFutureActionQuantileQ(
+            metadata["state_feature_names"],
+            metadata["future_feature_names"],
+            metadata["joint_actions"],
+            future_mean=normalization["future_mean"],
+            future_std=normalization["future_std"],
+            future_residual_scale_limit=float(
+                configuration["future_residual_scale_limit"]
+            ),
+            future_dropout=float(configuration["future_dropout"]),
+            **model_arguments,
+        ).to(device)
+        model.forecast_summary_windows_h = tuple(
+            int(value) for value in metadata["future_summary_windows_h"]
+        )
     elif q_head == "iterative_action_q_future_168":
         model = IterativeForecastActionQuantileQ(
             metadata["state_feature_names"],
@@ -283,14 +322,39 @@ def _tensor_observation(observation, device):
     return state[None, None]
 
 
-def expected_q_for_observation(model, observation, env, device) -> np.ndarray:
+def expected_q_for_observation(
+    model,
+    observation,
+    env,
+    device,
+    future_ablation="none",
+) -> np.ndarray:
     states = _tensor_observation(observation, device)
     with torch.no_grad():
-        if isinstance(model, IterativeFutureActionQuantileQ):
+        if isinstance(
+            model,
+            (
+                IterativeFutureActionQuantileQ,
+                IterativeResidualFutureActionQuantileQ,
+            ),
+        ):
+            if future_ablation == "mean":
+                summary_values = model.future_mean.detach().cpu().numpy()
+            else:
+                windows_h = getattr(model, "forecast_summary_windows_h", None)
+                bands_h = getattr(model, "forecast_summary_bands_h", None)
+                if bands_h is not None:
+                    summary_values = masked_forecast_band_summary_observation(
+                        env, bands_h
+                    )
+                elif windows_h is not None:
+                    summary_values = masked_forecast_summary_observation(
+                        env, windows_h
+                    )
+                else:
+                    summary_values = future_summary_observation(env)
             summary = torch.as_tensor(
-                future_summary_observation(env),
-                dtype=torch.float32,
-                device=device,
+                summary_values, dtype=torch.float32, device=device
             )[None, None]
             q = model(states, summary)
         elif isinstance(model, IterativeForecastActionQuantileQ):
@@ -340,6 +404,7 @@ def evaluate_gate(
                 observation,
                 wrapper.env,
                 device,
+                args.future_ablation,
             )
             action, decision = select_safe_action(
                 expected_q,

@@ -5,6 +5,7 @@ from sim.control.iterative_action_q import (
     IterativeActionQuantileQ,
     IterativeForecastActionQuantileQ,
     IterativeFutureActionQuantileQ,
+    IterativeResidualFutureActionQuantileQ,
     quantile_huber_loss,
 )
 
@@ -83,6 +84,34 @@ def test_iterative_future_q_uses_v4_summary_shape():
         torch.randn(2, 1, 14),
     )
     assert q.shape == (2, 1, 2, 2, 3)
+
+
+def test_residual_future_q_starts_as_exact_state_only_model():
+    base = _model()
+    names = _features()
+    model = IterativeResidualFutureActionQuantileQ(
+        names,
+        [f"future_{index}" for index in range(8)],
+        base.joint_action_indices.tolist(),
+        state_mean=np.zeros(len(names)),
+        state_std=np.ones(len(names)),
+        future_mean=np.zeros(8),
+        future_std=np.ones(8),
+        return_scale=4.0,
+        heads=3,
+        quantiles=7,
+    )
+    compatible = {
+        key: value
+        for key, value in base.state_dict().items()
+        if key in model.state_dict()
+    }
+    model.load_state_dict(compatible, strict=False)
+    states = torch.randn(2, 1, len(names))
+    futures = torch.randn(2, 1, 8)
+    assert torch.equal(model(states, futures), base(states))
+    model(states, futures).mean().backward()
+    assert model.future_scale.grad is not None
 
 
 def test_iterative_forecast_q_encoders_use_masked_168h_shape():

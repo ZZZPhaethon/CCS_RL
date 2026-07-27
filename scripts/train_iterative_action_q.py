@@ -18,8 +18,76 @@ from sim.control.iterative_action_q import (
     IterativeActionQuantileQ,
     IterativeForecastActionQuantileQ,
     IterativeFutureActionQuantileQ,
+    IterativeResidualFutureActionQuantileQ,
     quantile_huber_loss,
 )
+from sim.environment.forecast import (
+    masked_forecast_band_summary,
+    masked_forecast_summary,
+)
+
+
+FORECAST_SUMMARY_WINDOWS = {
+    "forecast_summary_24_72": (24, 72),
+    "forecast_summary_168": (168,),
+    "forecast_summary_24_72_168": (24, 72, 168),
+}
+FORECAST_SUMMARY_BANDS = {
+    "forecast_summary_bands_24_72_168": ((0, 24), (24, 72), (72, 168)),
+}
+
+
+def forecast_summary_feature_names(metadata, windows_h):
+    capture_names = [
+        name.split(".", 1)[1]
+        for name in metadata["forecast_feature_names"]
+        if name.startswith("capture.")
+    ]
+    if len(capture_names) != 3:
+        capture_names = ["emitter_0", "emitter_1", "emitter_2"]
+    names = []
+    for window_h in windows_h:
+        names.extend(
+            f"{emitter}.effective_capture_mean_{window_h}h"
+            for emitter in capture_names
+        )
+        names.extend(
+            (
+                f"well.available_mean_{window_h}h",
+                f"well.injectivity_min_{window_h}h",
+                f"fleet.speed_mean_{window_h}h",
+                f"fleet.speed_min_{window_h}h",
+                f"valid_fraction_{window_h}h",
+            )
+        )
+    return names
+
+
+def forecast_band_summary_feature_names(metadata, bands_h):
+    capture_names = [
+        name.split(".", 1)[1]
+        for name in metadata["forecast_feature_names"]
+        if name.startswith("capture.")
+    ]
+    if len(capture_names) != 3:
+        capture_names = ["emitter_0", "emitter_1", "emitter_2"]
+    names = []
+    for start_h, end_h in bands_h:
+        label = f"{start_h}_{end_h}h"
+        names.extend(
+            f"{emitter}.effective_capture_mean_{label}"
+            for emitter in capture_names
+        )
+        names.extend(
+            (
+                f"well.available_mean_{label}",
+                f"well.injectivity_min_{label}",
+                f"fleet.speed_mean_{label}",
+                f"fleet.speed_min_{label}",
+                f"valid_fraction_{label}",
+            )
+        )
+    return names
 
 
 def parse_args(argv=None):
@@ -30,7 +98,13 @@ def parse_args(argv=None):
     parser.add_argument("--out-dir", required=True)
     parser.add_argument(
         "--observation-input",
-        choices=("state_only", "v4_future_24_72", "forecast_168"),
+        choices=(
+            "state_only",
+            "v4_future_24_72",
+            "forecast_168",
+            *FORECAST_SUMMARY_WINDOWS,
+            *FORECAST_SUMMARY_BANDS,
+        ),
         default="state_only",
     )
     parser.add_argument(
@@ -58,6 +132,15 @@ def parse_args(argv=None):
     parser.add_argument("--ranking-temperature", type=float, default=0.5)
     parser.add_argument("--model-seed", type=int, default=0)
     parser.add_argument(
+        "--future-fusion",
+        choices=("concat", "residual_frozen", "residual_tune"),
+        default="concat",
+    )
+    parser.add_argument("--future-residual-scale-limit", type=float, default=0.25)
+    parser.add_argument("--future-dropout", type=float, default=0.0)
+    parser.add_argument("--root-sample-fraction", type=float, default=1.0)
+    parser.add_argument("--root-sample-seed", type=int, default=0)
+    parser.add_argument(
         "--checkpoint-selection-metric",
         choices=("composite", "top1_mean_return"),
         default="composite",
@@ -83,6 +166,17 @@ def parse_args(argv=None):
         parser.error("learning rates, weights, and temperature must be positive")
     if not 0.0 < args.bootstrap_probability <= 1.0:
         parser.error("bootstrap probability must be in (0, 1]")
+    if not 0.0 < args.root_sample_fraction <= 1.0:
+        parser.error("root sample fraction must be in (0, 1]")
+    if args.future_residual_scale_limit <= 0.0:
+        parser.error("future residual scale limit must be positive")
+    if not 0.0 <= args.future_dropout < 1.0:
+        parser.error("future dropout must be in [0, 1)")
+    if (
+        args.future_fusion != "concat"
+        and args.observation_input not in FORECAST_SUMMARY_WINDOWS
+    ):
+        parser.error("residual future fusion requires a forecast summary input")
     if min(
         args.ranking_coefficient,
         args.listwise_coefficient,
@@ -217,6 +311,44 @@ def dataset_normalization(
                 "forecast_std": np.maximum(values.std(axis=0), 1e-5),
             }
         )
+    elif observation_input in FORECAST_SUMMARY_WINDOWS:
+        unique_root_summaries = []
+        windows_h = FORECAST_SUMMARY_WINDOWS[observation_input]
+        for data, _metadata in rows:
+            if "future_forecasts" not in data:
+                raise ValueError("summary-aware training requires future_forecasts")
+            keys = np.stack((data["scenario_seed"], data["root_time_h"]), axis=1)
+            _unique, first_indices = np.unique(keys, axis=0, return_index=True)
+            forecasts = data["future_forecasts"][np.sort(first_indices), 0]
+            unique_root_summaries.append(
+                masked_forecast_summary(forecasts, windows_h)
+            )
+        summaries = np.concatenate(unique_root_summaries)
+        normalization.update(
+            {
+                "future_mean": summaries.mean(axis=0),
+                "future_std": np.maximum(summaries.std(axis=0), 1e-5),
+            }
+        )
+    elif observation_input in FORECAST_SUMMARY_BANDS:
+        unique_root_summaries = []
+        bands_h = FORECAST_SUMMARY_BANDS[observation_input]
+        for data, _metadata in rows:
+            if "future_forecasts" not in data:
+                raise ValueError("summary-aware training requires future_forecasts")
+            keys = np.stack((data["scenario_seed"], data["root_time_h"]), axis=1)
+            _unique, first_indices = np.unique(keys, axis=0, return_index=True)
+            forecasts = data["future_forecasts"][np.sort(first_indices), 0]
+            unique_root_summaries.append(
+                masked_forecast_band_summary(forecasts, bands_h)
+            )
+        summaries = np.concatenate(unique_root_summaries)
+        normalization.update(
+            {
+                "future_mean": summaries.mean(axis=0),
+                "future_std": np.maximum(summaries.std(axis=0), 1e-5),
+            }
+        )
     return normalization
 
 
@@ -226,11 +358,27 @@ class GroupedDenseActionDataset(Dataset):
         data,
         follow_action_index: int | None = None,
         observation_input: str = "state_only",
+        root_sample_fraction: float = 1.0,
+        root_sample_seed: int = 0,
     ):
         keys = np.stack((data["scenario_seed"], data["root_time_h"]), axis=1)
         self.groups = []
         self.root_hours = []
-        for key in np.unique(keys, axis=0):
+        self.root_keys = []
+        unique_keys = np.unique(keys, axis=0)
+        if root_sample_fraction < 1.0:
+            rng = np.random.default_rng(root_sample_seed)
+            selected = []
+            time_buckets = unique_keys[:, 1] // 48
+            for bucket in np.unique(time_buckets):
+                bucket_keys = unique_keys[time_buckets == bucket]
+                count = max(1, int(np.floor(len(bucket_keys) * root_sample_fraction)))
+                indices = np.sort(
+                    rng.choice(len(bucket_keys), size=count, replace=False)
+                )
+                selected.append(bucket_keys[indices])
+            unique_keys = np.concatenate(selected, axis=0)
+        for key in unique_keys:
             indices = np.flatnonzero(np.all(keys == key, axis=1))
             reference_state = data["states"][indices[0], 0]
             if not np.allclose(data["states"][indices, 0], reference_state):
@@ -259,6 +407,38 @@ class GroupedDenseActionDataset(Dataset):
                     raise ValueError(
                         "same-root future forecasts are not identical"
                     )
+            elif observation_input in FORECAST_SUMMARY_WINDOWS:
+                if "future_forecasts" not in data:
+                    raise ValueError(
+                        "summary-aware training requires future_forecasts"
+                    )
+                reference_forecast = data["future_forecasts"][indices[0], 0]
+                if not np.allclose(
+                    data["future_forecasts"][indices, 0], reference_forecast
+                ):
+                    raise ValueError(
+                        "same-root future forecasts are not identical"
+                    )
+                reference_future = masked_forecast_summary(
+                    reference_forecast,
+                    FORECAST_SUMMARY_WINDOWS[observation_input],
+                )
+            elif observation_input in FORECAST_SUMMARY_BANDS:
+                if "future_forecasts" not in data:
+                    raise ValueError(
+                        "summary-aware training requires future_forecasts"
+                    )
+                reference_forecast = data["future_forecasts"][indices[0], 0]
+                if not np.allclose(
+                    data["future_forecasts"][indices, 0], reference_forecast
+                ):
+                    raise ValueError(
+                        "same-root future forecasts are not identical"
+                    )
+                reference_future = masked_forecast_band_summary(
+                    reference_forecast,
+                    FORECAST_SUMMARY_BANDS[observation_input],
+                )
             else:
                 reference_future = np.empty(0, dtype=np.float32)
             actions = data["actions"][indices, 0].astype(np.int64)
@@ -289,6 +469,7 @@ class GroupedDenseActionDataset(Dataset):
                 )
             )
             self.root_hours.append(int(key[1]))
+            self.root_keys.append((int(key[0]), int(key[1])))
         self.max_actions = max(len(group[2]) for group in self.groups)
 
     def __len__(self):
@@ -312,14 +493,25 @@ class GroupedDenseActionDataset(Dataset):
         )
 
 
-def _combined_dataset(rows, follow_action_index, observation_input):
+def _combined_dataset(
+    rows,
+    follow_action_index,
+    observation_input,
+    root_sample_fraction=1.0,
+    root_sample_seed=0,
+):
     datasets = [
         GroupedDenseActionDataset(
             data,
             None if metadata.get("anchors_in_data", False) else follow_action_index,
             observation_input,
+            root_sample_fraction,
+            int(
+                np.random.SeedSequence([root_sample_seed, dataset_index])
+                .generate_state(1)[0]
+            ),
         )
-        for data, metadata in rows
+        for dataset_index, (data, metadata) in enumerate(rows)
     ]
     max_actions = max(dataset.max_actions for dataset in datasets)
     for dataset in datasets:
@@ -338,7 +530,12 @@ def selected_action_quantiles(q: torch.Tensor, actions: torch.Tensor) -> torch.T
 def model_quantiles(model, state, future, device):
     states = state[:, None].to(device)
     if isinstance(
-        model, (IterativeFutureActionQuantileQ, IterativeForecastActionQuantileQ)
+        model,
+        (
+            IterativeFutureActionQuantileQ,
+            IterativeResidualFutureActionQuantileQ,
+            IterativeForecastActionQuantileQ,
+        ),
     ):
         futures = future[:, None].to(device)
         return model(states, futures)
@@ -476,7 +673,11 @@ def run(args):
             for _data, metadata in all_rows
         ):
             raise ValueError("dataset schema mismatch for future_feature_names")
-    elif args.observation_input == "forecast_168":
+    elif (
+        args.observation_input == "forecast_168"
+        or args.observation_input in FORECAST_SUMMARY_WINDOWS
+        or args.observation_input in FORECAST_SUMMARY_BANDS
+    ):
         if "forecast_feature_names" not in train_metadata:
             raise ValueError("forecast-aware training requires forecast feature names")
         if any(
@@ -507,9 +708,14 @@ def run(args):
         for key in ("state_feature_names", "joint_actions"):
             if source["metadata"][key] != train_metadata[key]:
                 raise ValueError(f"initial checkpoint schema mismatch for {key}")
-        if source["configuration"].get(
+        source_observation = source["configuration"].get(
             "observation_input", "state_only"
-        ) != args.observation_input:
+        )
+        state_base_for_residual = (
+            args.future_fusion != "concat"
+            and source_observation == "state_only"
+        )
+        if source_observation != args.observation_input and not state_base_for_residual:
             raise ValueError("initial checkpoint observation input mismatch")
         if (
             args.observation_input == "forecast_168"
@@ -522,12 +728,22 @@ def run(args):
             normalization_keys.extend(("future_mean", "future_std"))
         elif args.observation_input == "forecast_168":
             normalization_keys.extend(("forecast_mean", "forecast_std"))
-        normalization = {
-            key: source["normalization"][key] for key in normalization_keys
-        }
+        elif args.observation_input in FORECAST_SUMMARY_WINDOWS:
+            normalization_keys.extend(("future_mean", "future_std"))
+        elif args.observation_input in FORECAST_SUMMARY_BANDS:
+            normalization_keys.extend(("future_mean", "future_std"))
+        for key in ("state_mean", "state_std", "return_scale"):
+            normalization[key] = source["normalization"][key]
+        if not state_base_for_residual:
+            for key in normalization_keys[3:]:
+                normalization[key] = source["normalization"][key]
     follow_index = int(train_metadata["follow_action_index"])
     train_dataset = _combined_dataset(
-        train_rows, follow_index, args.observation_input
+        train_rows,
+        follow_index,
+        args.observation_input,
+        args.root_sample_fraction,
+        args.root_sample_seed,
     )
     validation_dataset = _combined_dataset(
         validation_rows, follow_index, args.observation_input
@@ -571,6 +787,40 @@ def run(args):
             forecast_encoder=args.forecast_encoder,
             **model_arguments,
         ).to(device)
+    elif args.observation_input in FORECAST_SUMMARY_WINDOWS:
+        windows_h = FORECAST_SUMMARY_WINDOWS[args.observation_input]
+        feature_names = forecast_summary_feature_names(
+            train_metadata, windows_h
+        )
+        if args.future_fusion == "concat":
+            model = IterativeFutureActionQuantileQ(
+                train_metadata["state_feature_names"],
+                feature_names,
+                train_metadata["joint_actions"],
+                **model_arguments,
+            ).to(device)
+        else:
+            model = IterativeResidualFutureActionQuantileQ(
+                train_metadata["state_feature_names"],
+                feature_names,
+                train_metadata["joint_actions"],
+                future_residual_scale_limit=args.future_residual_scale_limit,
+                future_dropout=args.future_dropout,
+                **model_arguments,
+            ).to(device)
+        model.forecast_summary_windows_h = windows_h
+    elif args.observation_input in FORECAST_SUMMARY_BANDS:
+        bands_h = FORECAST_SUMMARY_BANDS[args.observation_input]
+        feature_names = forecast_band_summary_feature_names(
+            train_metadata, bands_h
+        )
+        model = IterativeFutureActionQuantileQ(
+            train_metadata["state_feature_names"],
+            feature_names,
+            train_metadata["joint_actions"],
+            **model_arguments,
+        ).to(device)
+        model.forecast_summary_bands_h = bands_h
     else:
         model = IterativeActionQuantileQ(
             train_metadata["state_feature_names"],
@@ -586,6 +836,13 @@ def run(args):
             if key in target_state and target_state[key].shape == value.shape
         }
         model.load_state_dict(compatible, strict=False)
+    if args.future_fusion == "residual_frozen":
+        for name, parameter in model.named_parameters():
+            parameter.requires_grad_(
+                name.startswith("future_")
+                and not name.startswith("future_mean")
+                and not name.startswith("future_std")
+            )
     head_parameters = []
     base_parameters = []
     for name, parameter in model.named_parameters():
@@ -742,8 +999,28 @@ def run(args):
         "state_only": "iterative_action_q",
         "v4_future_24_72": "iterative_action_q_future_v4_24_72",
         "forecast_168": "iterative_action_q_future_168",
+        "forecast_summary_24_72": "iterative_action_q_future_summary",
+        "forecast_summary_168": "iterative_action_q_future_summary",
+        "forecast_summary_24_72_168": "iterative_action_q_future_summary",
+        "forecast_summary_bands_24_72_168": "iterative_action_q_future_summary",
     }[args.observation_input]
+    if args.future_fusion != "concat":
+        configuration["q_head"] = "iterative_action_q_future_residual_summary"
     checkpoint_metadata = dict(train_metadata)
+    if args.observation_input in FORECAST_SUMMARY_WINDOWS:
+        windows_h = FORECAST_SUMMARY_WINDOWS[args.observation_input]
+        checkpoint_metadata["future_summary_windows_h"] = list(windows_h)
+        checkpoint_metadata["future_feature_names"] = (
+            forecast_summary_feature_names(train_metadata, windows_h)
+        )
+    elif args.observation_input in FORECAST_SUMMARY_BANDS:
+        bands_h = FORECAST_SUMMARY_BANDS[args.observation_input]
+        checkpoint_metadata["future_summary_bands_h"] = [
+            list(band) for band in bands_h
+        ]
+        checkpoint_metadata["future_feature_names"] = (
+            forecast_band_summary_feature_names(train_metadata, bands_h)
+        )
     checkpoint_metadata["training_data_sources"] = list(args.train_data)
     checkpoint_metadata["validation_data_sources"] = list(args.validation_data)
     checkpoint = {

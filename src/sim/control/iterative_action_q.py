@@ -306,6 +306,103 @@ class IterativeFutureActionQuantileQ(IterativeActionQuantileQ):
         return self.quantiles_from_features(features)
 
 
+class IterativeResidualFutureActionQuantileQ(IterativeActionQuantileQ):
+    """Add a bounded future-conditioned residual to a state-only Q model."""
+
+    def __init__(
+        self,
+        state_feature_names: list[str],
+        future_feature_names: list[str],
+        joint_actions: np.ndarray | list[list[int]],
+        *,
+        state_mean: np.ndarray,
+        state_std: np.ndarray,
+        future_mean: np.ndarray,
+        future_std: np.ndarray,
+        return_scale: float,
+        heads: int = 5,
+        quantiles: int = 51,
+        hidden_size: int = 128,
+        prior_scale: float = 0.25,
+        action_embedding_size: int = 16,
+        action_feature_size: int = 64,
+        future_residual_scale_limit: float = 0.25,
+        future_dropout: float = 0.0,
+    ) -> None:
+        if not future_feature_names:
+            raise ValueError("future_feature_names must not be empty")
+        if future_residual_scale_limit <= 0.0:
+            raise ValueError("future_residual_scale_limit must be positive")
+        if not 0.0 <= future_dropout < 1.0:
+            raise ValueError("future_dropout must be in [0, 1)")
+        super().__init__(
+            state_feature_names,
+            joint_actions,
+            state_mean=state_mean,
+            state_std=state_std,
+            return_scale=return_scale,
+            heads=heads,
+            quantiles=quantiles,
+            hidden_size=hidden_size,
+            prior_scale=prior_scale,
+            action_embedding_size=action_embedding_size,
+            action_feature_size=action_feature_size,
+        )
+        future_mean_array = np.asarray(future_mean, dtype=np.float32)
+        future_std_array = np.asarray(future_std, dtype=np.float32)
+        expected_shape = (len(future_feature_names),)
+        if (
+            future_mean_array.shape != expected_shape
+            or future_std_array.shape != expected_shape
+        ):
+            raise ValueError("future normalization shape does not match feature names")
+        self.register_buffer(
+            "future_mean", torch.as_tensor(future_mean_array, dtype=torch.float32)
+        )
+        self.register_buffer(
+            "future_std", torch.as_tensor(future_std_array, dtype=torch.float32)
+        )
+        self.future_encoder = nn.Sequential(
+            nn.Linear(len(future_feature_names), 32),
+            nn.SiLU(),
+            nn.Dropout(future_dropout),
+        )
+        self.future_residual = nn.Sequential(
+            nn.Linear(hidden_size + 32, hidden_size),
+            nn.SiLU(),
+            nn.LayerNorm(hidden_size, elementwise_affine=False),
+        )
+        self.future_scale = nn.Parameter(torch.zeros(()))
+        self.future_residual_scale_limit = float(future_residual_scale_limit)
+
+    def forward(
+        self,
+        states: torch.Tensor,
+        future_summaries: torch.Tensor,
+    ) -> torch.Tensor:
+        if states.shape[:2] != future_summaries.shape[:2]:
+            raise ValueError("state and future batch/sequence shapes must match")
+        batch, sequence = states.shape[:2]
+        normalized_state = (states - self.state_mean) / self.state_std
+        normalized_future = (
+            future_summaries - self.future_mean
+        ) / self.future_std
+        encoded = self.state_encoder(normalized_state.reshape(batch * sequence, -1))
+        projected = self.state_projection(encoded)
+        base_features = self.stateless_gate(projected)
+        future_features = self.future_encoder(
+            normalized_future.reshape(batch * sequence, -1)
+        )
+        residual = self.future_residual(
+            torch.cat((base_features, future_features), dim=1)
+        )
+        scale = self.future_residual_scale_limit * torch.tanh(self.future_scale)
+        features = (base_features + scale * residual).reshape(
+            batch, sequence, -1
+        )
+        return self.quantiles_from_features(features)
+
+
 class ForecastGRU(nn.Module):
     """Encode a right-padded forecast using its valid-horizon channel."""
 

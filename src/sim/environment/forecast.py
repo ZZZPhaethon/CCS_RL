@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from .env import CCSEnv
 
 FORECAST_HORIZON_H = 168
@@ -103,3 +105,135 @@ def masked_future_forecast_observation(
     rows = [[*row, 1.0] for row in values]
     rows.extend([[0.0] * (channel_count + 1) for _ in range(horizon - valid_steps)])
     return rows
+
+
+def masked_forecast_summary(
+    forecast: np.ndarray | list[list[float]],
+    windows_h: tuple[int, ...],
+) -> np.ndarray:
+    """Summarise masked hourly physics over one or more look-ahead windows."""
+
+    values = np.asarray(forecast, dtype=np.float32)
+    if values.ndim < 2 or values.shape[-1] != 10:
+        raise ValueError("masked forecast must end with shape [hours, 10]")
+    summaries = []
+    for window_h in windows_h:
+        window = int(window_h)
+        if window <= 0 or window > values.shape[-2]:
+            raise ValueError("summary windows must be within the forecast horizon")
+        part = values[..., :window, :]
+        mask = part[..., -1] > 0.5
+        has_valid = mask.any(axis=-1)
+        count = np.maximum(mask.sum(axis=-1, keepdims=True), 1)
+        masked = np.where(mask[..., None], part[..., :-1], 0.0)
+        mean = masked.sum(axis=-2) / count
+        injectivity = np.where(
+            has_valid,
+            np.where(mask, part[..., 7], np.inf).min(axis=-1),
+            0.0,
+        )
+        weather_min = np.where(
+            has_valid,
+            np.where(mask, part[..., 8], np.inf).min(axis=-1),
+            0.0,
+        )
+        valid_fraction = mask.mean(axis=-1)
+        summaries.extend(
+            (
+                mean[..., 0],
+                mean[..., 1],
+                mean[..., 2],
+                mean[..., 6],
+                injectivity,
+                mean[..., 8],
+                weather_min,
+                valid_fraction,
+            )
+        )
+    return np.stack(summaries, axis=-1).astype(np.float32, copy=False)
+
+
+def masked_forecast_band_summary(
+    forecast: np.ndarray | list[list[float]],
+    bands_h: tuple[tuple[int, int], ...],
+) -> np.ndarray:
+    """Summarise non-overlapping forecast bands without cumulative duplication."""
+
+    values = np.asarray(forecast, dtype=np.float32)
+    summaries = []
+    for start_h, end_h in bands_h:
+        start = int(start_h)
+        end = int(end_h)
+        if start < 0 or end <= start or end > values.shape[-2]:
+            raise ValueError("summary bands must be ordered inside the forecast horizon")
+        summaries.append(
+            masked_forecast_summary(values[..., start:end, :], (end - start,))
+        )
+    return np.concatenate(summaries, axis=-1).astype(np.float32, copy=False)
+
+
+def masked_forecast_summary_observation(
+    env: CCSEnv,
+    windows_h: tuple[int, ...],
+    horizon_h: int = FORECAST_HORIZON_H,
+) -> np.ndarray:
+    return masked_forecast_summary(
+        masked_future_forecast_observation(env, horizon_h=horizon_h),
+        windows_h,
+    )
+
+
+def masked_forecast_band_summary_observation(
+    env: CCSEnv,
+    bands_h: tuple[tuple[int, int], ...],
+    horizon_h: int = FORECAST_HORIZON_H,
+) -> np.ndarray:
+    return masked_forecast_band_summary(
+        masked_future_forecast_observation(env, horizon_h=horizon_h),
+        bands_h,
+    )
+
+
+def masked_forecast_summary_feature_names(
+    env: CCSEnv,
+    windows_h: tuple[int, ...],
+) -> tuple[str, ...]:
+    names = []
+    for window_h in windows_h:
+        names.extend(
+            f"{emitter_id}.effective_capture_mean_{window_h}h"
+            for emitter_id in env.emitter_ids
+        )
+        names.extend(
+            (
+                f"{env.well_ids[0]}.available_mean_{window_h}h",
+                f"{env.well_ids[0]}.injectivity_min_{window_h}h",
+                f"fleet.speed_mean_{window_h}h",
+                f"fleet.speed_min_{window_h}h",
+                f"valid_fraction_{window_h}h",
+            )
+        )
+    return tuple(names)
+
+
+def masked_forecast_band_summary_feature_names(
+    env: CCSEnv,
+    bands_h: tuple[tuple[int, int], ...],
+) -> tuple[str, ...]:
+    names = []
+    for start_h, end_h in bands_h:
+        label = f"{start_h}_{end_h}h"
+        names.extend(
+            f"{emitter_id}.effective_capture_mean_{label}"
+            for emitter_id in env.emitter_ids
+        )
+        names.extend(
+            (
+                f"{env.well_ids[0]}.available_mean_{label}",
+                f"{env.well_ids[0]}.injectivity_min_{label}",
+                f"fleet.speed_mean_{label}",
+                f"fleet.speed_min_{label}",
+                f"valid_fraction_{label}",
+            )
+        )
+    return tuple(names)

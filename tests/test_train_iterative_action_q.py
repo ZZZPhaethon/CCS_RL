@@ -102,6 +102,38 @@ def test_grouped_dense_dataset_appends_follow_and_deduplicates():
     assert root_hour == 10
 
 
+def test_grouped_dense_dataset_stratified_root_sampling_is_reproducible():
+    rows = []
+    for seed in range(20):
+        for root_hour in (24, 72, 120):
+            for action in (0, 1):
+                rows.append((seed, root_hour, action))
+    data = {
+        "scenario_seed": np.asarray([row[0] for row in rows]),
+        "root_time_h": np.asarray([row[1] for row in rows]),
+        "states": np.asarray(
+            [[[row[0], row[1]]] for row in rows], dtype=np.float32
+        ),
+        "actions": np.asarray([[row[2]] for row in rows]),
+        "return_to_go": np.asarray(
+            [[row[0] - row[2]] for row in rows], dtype=np.float32
+        ),
+    }
+    first = GroupedDenseActionDataset(
+        data, root_sample_fraction=0.8, root_sample_seed=17
+    )
+    repeated = GroupedDenseActionDataset(
+        data, root_sample_fraction=0.8, root_sample_seed=17
+    )
+    different = GroupedDenseActionDataset(
+        data, root_sample_fraction=0.8, root_sample_seed=18
+    )
+    assert len(first) == 48
+    assert first.root_keys == repeated.root_keys
+    assert first.root_keys != different.root_keys
+    assert sorted(set(first.root_hours)) == [24, 72, 120]
+
+
 def test_dataset_normalization_is_self_contained(tmp_path):
     path = tmp_path / "train.npz"
     _dataset(path, "train", [10, 11])
@@ -253,3 +285,115 @@ def test_full_forecast_training_uses_selected_encoder(tmp_path):
     assert checkpoint["configuration"]["q_head"] == "iterative_action_q_future_168"
     assert checkpoint["configuration"]["forecast_encoder"] == "gru"
     assert checkpoint["normalization"]["forecast_mean"].shape == (9,)
+
+
+def test_nonoverlapping_forecast_summary_training(tmp_path):
+    train_path = tmp_path / "train_summary.npz"
+    validation_path = tmp_path / "validation_summary.npz"
+    out_dir = tmp_path / "out_summary"
+    _dataset(train_path, "train", [10, 11], include_forecast=True)
+    _dataset(validation_path, "validation", [20, 21], include_forecast=True)
+    args = parse_args(
+        [
+            "--train-data",
+            str(train_path),
+            "--validation-data",
+            str(validation_path),
+            "--out-dir",
+            str(out_dir),
+            "--observation-input",
+            "forecast_summary_bands_24_72_168",
+            "--epochs",
+            "1",
+            "--patience",
+            "1",
+            "--batch-size",
+            "2",
+            "--heads",
+            "2",
+            "--quantiles",
+            "3",
+            "--action-embedding-size",
+            "4",
+            "--action-feature-size",
+            "8",
+            "--device",
+            "cpu",
+        ]
+    )
+    run(args)
+    checkpoint = torch.load(
+        out_dir / "iterative_action_q.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert checkpoint["configuration"]["q_head"] == "iterative_action_q_future_summary"
+    assert checkpoint["metadata"]["future_summary_bands_h"] == [
+        [0, 24],
+        [24, 72],
+        [72, 168],
+    ]
+    assert checkpoint["normalization"]["future_mean"].shape == (24,)
+
+
+def test_residual_summary_training_starts_from_state_checkpoint(tmp_path):
+    train_path = tmp_path / "train_residual.npz"
+    validation_path = tmp_path / "validation_residual.npz"
+    state_dir = tmp_path / "state"
+    residual_dir = tmp_path / "residual"
+    _dataset(train_path, "train", [10, 11], include_forecast=True)
+    _dataset(validation_path, "validation", [20, 21], include_forecast=True)
+    common = [
+        "--train-data",
+        str(train_path),
+        "--validation-data",
+        str(validation_path),
+        "--epochs",
+        "1",
+        "--patience",
+        "1",
+        "--batch-size",
+        "2",
+        "--heads",
+        "2",
+        "--quantiles",
+        "3",
+        "--action-embedding-size",
+        "4",
+        "--action-feature-size",
+        "8",
+        "--device",
+        "cpu",
+    ]
+    run(parse_args([*common, "--out-dir", str(state_dir)]))
+    summary = run(
+        parse_args(
+            [
+                *common,
+                "--out-dir",
+                str(residual_dir),
+                "--initial-checkpoint",
+                str(state_dir / "iterative_action_q.pt"),
+                "--observation-input",
+                "forecast_summary_168",
+                "--future-fusion",
+                "residual_frozen",
+            ]
+        )
+    )
+    checkpoint = torch.load(
+        residual_dir / "iterative_action_q.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert summary["loaded_pretrained_tensors"] > 0
+    assert (
+        checkpoint["configuration"]["q_head"]
+        == "iterative_action_q_future_residual_summary"
+    )
+    trainable = [
+        name
+        for name, parameter in checkpoint["model_state_dict"].items()
+        if name.startswith("future_") and parameter.is_floating_point()
+    ]
+    assert "future_scale" in trainable

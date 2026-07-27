@@ -25,6 +25,12 @@ from .forecast import (
     forecast_channel_names,
     future_forecast_observation,
     masked_future_forecast_observation,
+    masked_forecast_summary,
+    masked_forecast_band_summary,
+    masked_forecast_band_summary_feature_names,
+    masked_forecast_band_summary_observation,
+    masked_forecast_summary_feature_names,
+    masked_forecast_summary_observation,
 )
 
 _FORECAST_GYM_EXPORTS = frozenset(
@@ -67,5 +73,11 @@ __all__ = [
     "forecast_policy_observation",
     "future_forecast_observation",
     "masked_future_forecast_observation",
+    "masked_forecast_summary",
+    "masked_forecast_band_summary",
+    "masked_forecast_band_summary_feature_names",
+    "masked_forecast_band_summary_observation",
+    "masked_forecast_summary_feature_names",
+    "masked_forecast_summary_observation",
     "make_forecast_ppo_policy",
 ]

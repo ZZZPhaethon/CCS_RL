@@ -7,6 +7,8 @@ from sim.environment.forecast import (
     current_state_observation,
     forecast_channel_names,
     future_forecast_observation,
+    masked_forecast_band_summary,
+    masked_forecast_summary,
     masked_future_forecast_observation,
 )
 from sim.train import make_native_env
@@ -118,3 +120,16 @@ def test_masked_forecast_hides_post_episode_context():
     assert np.all(forecast[:20, -1] == 1.0)
     assert np.all(forecast[20:, -1] == 0.0)
     assert np.all(forecast[20:, :-1] == 0.0)
+
+    summary = masked_forecast_summary(forecast, (24, 72, 168))
+    assert summary.shape == (24,)
+    np.testing.assert_allclose(
+        summary[[7, 15, 23]],
+        [20 / 24, 20 / 72, 20 / 168],
+    )
+    bands = masked_forecast_band_summary(
+        forecast, ((0, 24), (24, 72), (72, 168))
+    )
+    assert bands.shape == (24,)
+    assert np.isfinite(bands).all()
+    np.testing.assert_allclose(bands[[7, 15, 23]], [20 / 24, 0.0, 0.0])
