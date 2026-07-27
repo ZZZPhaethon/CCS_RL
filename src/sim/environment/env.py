@@ -11,19 +11,19 @@ applies the scenario disturbances, and prices the outcome with the
 The interface is gym-style (``reset`` / ``step`` returning
 ``(obs, reward, done, info)``) but intentionally has **no numpy or gymnasium
 dependency** so it stays importable anywhere. Observations are flat ``list[float]``
-and the native action is a dictionary with discrete vessel choices plus
-discrete well rate-level indices.
+and the native action is a dictionary with discrete vessel choices. Legacy
+environments may additionally expose discrete well rate-level indices.
 
 Controls (section 7.2 of the research note):
 - per vessel: ``WAIT`` / ``GO_TERMINAL`` / ``GO_EMITTER[id]``;
-- per well: a discrete injection-rate level index over
-  ``(0.0, 0.5, 1.0, 1.5, 2.0, 2.5)`` Mt/y.
+- in legacy ``agent_selected`` mode only, per well: a discrete injection-rate
+  level index over ``(0.0, 0.5, 1.0, 1.5, 2.0, 2.5)`` Mt/y.
 
 Loading at any emitter berth and unloading at the terminal are issued
 automatically (they are never the interesting decision); the agent chooses which
-emitter or terminal to send vessels to and how hard to inject. A vessel action
-mask exposes which destination choices are physically legal, while
-``well_rate_action_mask()`` exposes the currently feasible well rate levels.
+emitter or terminal to send vessels to. In ``automatic_max`` mode, the
+environment also chooses the highest currently feasible well rate. A vessel
+action mask exposes which destination choices are physically legal.
 """
 
 from __future__ import annotations
@@ -119,6 +119,11 @@ class CCSEnvConfig:
     # execute an arbitrary assignment (from a heuristic or an LLM) and transfer
     # zero-shot to new layouts. Off by default (keeps the observation size).
     include_goal_obs: bool = False
+    # Formal paper experiments use automatic_max: controllers choose vessel
+    # dispatch only and the environment requests the highest currently feasible
+    # well rate. agent_selected preserves the historical hybrid action interface
+    # solely for reproducing earlier experiments.
+    well_control_mode: str = "agent_selected"
 
 
 class CCSEnv:
@@ -136,6 +141,14 @@ class CCSEnv:
     ) -> None:
         self.network = network
         self.config = config or CCSEnvConfig()
+        if self.config.well_control_mode not in {
+            "agent_selected",
+            "automatic_max",
+        }:
+            raise ValueError(
+                "well_control_mode must be 'agent_selected' or 'automatic_max', "
+                f"got {self.config.well_control_mode!r}."
+            )
         if self.config.weather_observation_layout not in {"global", "leg"}:
             raise ValueError(
                 "weather_observation_layout must be 'global' or 'leg', "
@@ -192,14 +205,24 @@ class CCSEnv:
         return [self.vessel_action_count] * len(self.vessel_ids)
 
     def well_rate_bounds(self) -> list[tuple[float, float]]:
+        if self.automatic_well_control:
+            return []
         return [self._well_rate_bound(wid) for wid in self.well_ids]
 
     @property
     def well_rate_action_dims(self) -> list[int]:
+        if self.automatic_well_control:
+            return []
         return [len(WELL_RATE_LEVELS_MTPA)] * len(self.well_ids)
 
     def well_rate_levels_mtpa(self) -> list[float]:
+        if self.automatic_well_control:
+            return []
         return list(WELL_RATE_LEVELS_MTPA)
+
+    @property
+    def automatic_well_control(self) -> bool:
+        return self.config.well_control_mode == "automatic_max"
 
     def action_spec(self) -> dict[str, object]:
         return {
@@ -414,13 +437,19 @@ class CCSEnv:
         vessel_mask = self.vessel_action_mask()
         well_mask = self.well_rate_action_mask()
         bounds = self.well_rate_bounds()
-        return {
+        info = {
             "action_mask": vessel_mask,
             "vessel_action_mask": vessel_mask,
             "well_rate_action_mask": well_mask,
             "well_rate_levels_mtpa": self.well_rate_levels_mtpa(),
             "well_rate_bounds": bounds,
+            "well_control_mode": self.config.well_control_mode,
         }
+        if self.automatic_well_control:
+            info["automatic_well_rate_indices"] = (
+                self.automatic_well_rate_indices()
+            )
+        return info
 
     def action_mask(self) -> list[list[bool]]:
         return self.vessel_action_mask()
@@ -432,12 +461,20 @@ class CCSEnv:
         return mask
 
     def well_rate_action_mask(self) -> list[list[bool]]:
+        if self.automatic_well_control:
+            return []
         return [self._well_rate_action_mask(well_id) for well_id in self.well_ids]
 
     def highest_feasible_well_rate_index(self, well_id: str) -> int:
         mask = self._well_rate_action_mask(well_id)
         feasible = [index for index, allowed in enumerate(mask) if allowed]
         return feasible[-1] if feasible else OFF_WELL_RATE_INDEX
+
+    def automatic_well_rate_indices(self) -> list[int]:
+        return [
+            self.highest_feasible_well_rate_index(well_id)
+            for well_id in self.well_ids
+        ]
 
     def _vessel_mask(self, vessel_id: str) -> list[bool]:
         vstate = self.simulator.vessel_states[vessel_id]
@@ -500,20 +537,33 @@ class CCSEnv:
     # -- action translation ----------------------------------------------
     def _normalize_action(self, action: CCSAction) -> dict[str, list]:
         if not isinstance(action, dict):
-            raise ValueError("Expected action dict with 'vessels' and 'wells' entries.")
-        if "vessels" not in action or "wells" not in action:
-            raise ValueError("Expected action dict with 'vessels' and 'wells' entries.")
+            raise ValueError("Expected an action dictionary.")
+        if "vessels" not in action:
+            raise ValueError("Expected action dict with a 'vessels' entry.")
+        if self.automatic_well_control and "wells" in action:
+            raise ValueError(
+                "well actions are forbidden when well_control_mode='automatic_max'"
+            )
+        if not self.automatic_well_control and "wells" not in action:
+            raise ValueError(
+                "Expected action dict with 'vessels' and 'wells' entries "
+                "when well_control_mode='agent_selected'."
+            )
 
         vessel_actions = list(action["vessels"])
-        well_rate_indices = list(action["wells"])
         if len(vessel_actions) != len(self.vessel_ids):
             raise ValueError(
                 f"Expected {len(self.vessel_ids)} vessel actions, got {len(vessel_actions)}."
             )
-        if len(well_rate_indices) != len(self.well_ids):
-            raise ValueError(
-                f"Expected {len(self.well_ids)} well rate actions, got {len(well_rate_indices)}."
-            )
+        if self.automatic_well_control:
+            well_rate_indices = self.automatic_well_rate_indices()
+        else:
+            well_rate_indices = list(action["wells"])
+            if len(well_rate_indices) != len(self.well_ids):
+                raise ValueError(
+                    f"Expected {len(self.well_ids)} well rate actions, "
+                    f"got {len(well_rate_indices)}."
+                )
 
         return {
             "vessels": [int(choice) for choice in vessel_actions],

@@ -14,6 +14,18 @@ from ..environment import CCSEnv
 NativeAction = dict[str, list[int]]
 
 
+def action_for_well_control_mode(
+    env: CCSEnv,
+    action: Mapping,
+) -> NativeAction:
+    """Adapt an internal solver trace to the environment control boundary."""
+
+    adapted = {"vessels": [int(value) for value in action["vessels"]]}
+    if not env.automatic_well_control:
+        adapted["wells"] = [int(value) for value in action["wells"]]
+    return adapted
+
+
 @dataclass(frozen=True)
 class ReplayTolerances:
     mass_t: float = 1e-6

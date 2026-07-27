@@ -14,12 +14,12 @@ from sim.scenario_generation import ScenarioConfig, ScenarioGenerator
 from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
 
 
-def _gym_env() -> "CCSGymEnv":
+def _gym_env(**config) -> "CCSGymEnv":
     native = CCSEnv(
         make_toy_two_source_network(),
         TOY_TWO_SOURCE_LOCATIONS,
         scenario_generator=ScenarioGenerator(config=ScenarioConfig(episode_hours=24)),
-        config=CCSEnvConfig(episode_hours=24),
+        config=CCSEnvConfig(episode_hours=24, **config),
     )
     return CCSGymEnv(native)
 
@@ -81,6 +81,25 @@ class GymWrapperTests(unittest.TestCase):
         self.assertEqual(action, {"vessels": [1, 2], "wells": [3, 4]})
         self.assertFalse(captured["deterministic"])
         self.assertEqual(captured["action_masks"].shape, (sum(env.vessel_action_dims + env.well_rate_action_dims),))
+
+    def test_automatic_well_mode_ppo_action_contains_vessels_only(self):
+        captured = {}
+
+        class FakeModel:
+            def predict(self, obs, deterministic=True, action_masks=None):
+                captured["action_masks"] = action_masks
+                return np.array([1, 2], dtype=np.int64), None
+
+        env = _gym_env(well_control_mode="automatic_max").env
+        env.reset(seed=0)
+
+        action = make_ppo_policy(FakeModel())(env)
+
+        self.assertEqual(action, {"vessels": [1, 2]})
+        self.assertEqual(
+            captured["action_masks"].shape,
+            (sum(env.vessel_action_dims),),
+        )
 
 
 if __name__ == "__main__":

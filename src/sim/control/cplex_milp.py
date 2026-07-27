@@ -43,7 +43,12 @@ from ..routes import route_distance_km, sea_route
 from ..scenario_generation import Scenario
 from ..scenario_generation.disturbance_resolver import terminal_berth_count
 from .objective import control_objective_value, control_objective_weights
-from .replay import ReplayExpectation, ReplayTolerances, replay_native_actions
+from .replay import (
+    ReplayExpectation,
+    ReplayTolerances,
+    action_for_well_control_mode,
+    replay_native_actions,
+)
 
 KNOTS_TO_KMH = 1.852
 
@@ -2016,6 +2021,14 @@ def solve_full_scenario_with_cplex(
                 for rate_index in well_rate_options[(well_id, t)]
             ) == 1
             prob += well_inj[(well_id, t)] <= well_request[(well_id, t)]
+    _add_automatic_well_choice_constraints(
+        prob,
+        env,
+        well_choice,
+        well_inj,
+        well_rate_options,
+        H,
+    )
 
     max_hourly_injection_t = max(
         (
@@ -2113,7 +2126,14 @@ def solve_full_scenario_with_cplex(
                 )
                 <= manifold.max_flow_tph
             )
-    _add_single_well_dynamic_bhp_constraints(prob, env, well_inj, H)
+    _add_single_well_dynamic_bhp_constraints(
+        prob,
+        env,
+        well_inj,
+        H,
+        well_choice=well_choice,
+        well_rate_options=well_rate_options,
+    )
 
     initial_terminal_t = sum(float(state.entity_inventory_t.get(tid, 0.0)) for tid in env.terminal_ids)
     prob += terminal_stock[0] == initial_terminal_t
@@ -3119,7 +3139,10 @@ def replay_full_scenario_cplex_plan(
     )
     report = replay_native_actions(
         env,
-        result.native_actions_by_hour,
+        [
+            action_for_well_control_mode(env, action)
+            for action in result.native_actions_by_hour
+        ],
         horizon_h=result.horizon_h,
         expected=expectation,
         tolerances=ReplayTolerances(
@@ -3431,7 +3454,10 @@ def _seed_terminal_cleanup_mip_start(
     replay_env = copy.deepcopy(env)
     replay = replay_native_actions(
         replay_env,
-        native_actions_by_hour,
+        [
+            action_for_well_control_mode(replay_env, action)
+            for action in native_actions_by_hour
+        ],
         horizon_h=horizon_h,
         copy_env=False,
     )
@@ -3498,6 +3524,12 @@ def _apply_native_action_mip_start(
     shortfall=None,
     required_storage_t: float | None = None,
 ) -> None:
+    if getattr(env, "automatic_well_control", False):
+        native_actions_by_hour = _automatic_well_warm_start_actions(
+            env,
+            native_actions_by_hour,
+            horizon_h,
+        )
     for var in arc_vars.values():
         var.setInitialValue(0)
     selected_arc_indices, selected_wait_node = (
@@ -3663,6 +3695,39 @@ def _warm_start_well_rate_index(native_actions_by_hour: list[dict[str, list[int]
         return int(native_actions_by_hour[t]["wells"][well_index])
     except (IndexError, KeyError, TypeError, ValueError):
         return 0
+
+
+def _automatic_well_warm_start_actions(
+    env,
+    native_actions_by_hour: list[dict[str, list[int]]],
+    horizon_h: int,
+) -> list[dict[str, list[int]]]:
+    replay_env = copy.deepcopy(env)
+    augmented: list[dict[str, list[int]]] = []
+    for t, raw_action in enumerate(native_actions_by_hour):
+        action = action_for_well_control_mode(replay_env, raw_action)
+        with_wells = {
+            "vessels": list(action["vessels"]),
+            "wells": replay_env.automatic_well_rate_indices(),
+        }
+        augmented.append(with_wells)
+        if t + 1 >= horizon_h:
+            continue
+        try:
+            replay_env.step(action)
+        except (RuntimeError, ValueError):
+            break
+    augmented.extend(
+        {
+            "vessels": [
+                int(value)
+                for value in raw_action.get("vessels", [])
+            ],
+            "wells": [0 for _well_id in env.well_ids],
+        }
+        for raw_action in native_actions_by_hour[len(augmented):]
+    )
+    return augmented
 
 
 def _native_action_destination(env, vessel_id: str, action: int) -> str | None:
@@ -4017,10 +4082,7 @@ def _replay_native_action_unloads(
     for t in range(min(horizon_h, len(native_actions_by_hour))):
         raw = native_actions_by_hour[t]
         try:
-            action = {
-                "vessels": [int(value) for value in raw["vessels"]],
-                "wells": [int(value) for value in raw["wells"]],
-            }
+            action = action_for_well_control_mode(replay_env, raw)
         except (KeyError, TypeError, ValueError):
             break
         if not _native_action_is_executable(replay_env, action):
@@ -4058,10 +4120,14 @@ def _replay_native_action_unloads(
 
 
 def _native_action_is_executable(env, action: dict[str, list[int]]) -> bool:
-    for choices, masks in (
+    choices_and_masks = [
         (action["vessels"], env.vessel_action_mask()),
-        (action["wells"], env.well_rate_action_mask()),
-    ):
+    ]
+    if not getattr(env, "automatic_well_control", False):
+        choices_and_masks.append(
+            (action["wells"], env.well_rate_action_mask())
+        )
+    for choices, masks in choices_and_masks:
         if len(choices) != len(masks):
             return False
         if any(choice < 0 or choice >= len(mask) or not mask[choice] for choice, mask in zip(choices, masks)):
@@ -4558,7 +4624,17 @@ def _well_rate_options_by_hour(env, scenario: Scenario, horizon_h: int) -> dict[
         for well_id in env.well_ids:
             physical_max = _physical_well_max_tph(env, future_state, well_id)
             if _uses_single_well_dynamic_bhp(env, well_id):
-                mask = tuple(mtpa_to_tph(rate_mtpa) <= physical_max + 1e-9 for rate_mtpa in WELL_RATE_LEVELS_MTPA)
+                well = env.network.entities[well_id]
+                assert isinstance(well, InjectionWell)
+                mask = tuple(
+                    mtpa_to_tph(rate_mtpa) <= physical_max + 1e-9
+                    and (
+                        rate_mtpa <= 1e-12
+                        or mtpa_to_tph(rate_mtpa)
+                        >= well.min_stable_injection_tph - 1e-9
+                    )
+                    for rate_mtpa in WELL_RATE_LEVELS_MTPA
+                )
             else:
                 mask = pressure_limited_rate_level_mask(
                     env.network,
@@ -4586,7 +4662,123 @@ def _uses_single_well_dynamic_bhp(env, well_id: str) -> bool:
     return upstream_wells == [well_id]
 
 
-def _add_single_well_dynamic_bhp_constraints(prob, env, well_inj, horizon_h: int) -> None:
+def _add_automatic_well_choice_constraints(
+    prob,
+    env,
+    well_choice,
+    well_inj,
+    well_rate_options,
+    horizon_h: int,
+) -> None:
+    """Make the MILP reproduce the environment's automatic well-rate rule."""
+    if not getattr(env, "automatic_well_control", False):
+        return
+
+    state = env.simulator.state
+    start_h = _current_start_hour(env)
+    dt = float(env.network.time_step_hours)
+    for well_id in env.well_ids:
+        if not _uses_single_well_dynamic_bhp(env, well_id):
+            for t in range(horizon_h):
+                highest_index = max(well_rate_options[(well_id, t)])
+                prob += well_choice[(well_id, t, highest_index)] == 1
+            continue
+
+        reservoir_id = env.network._single_downstream_of_type(
+            well_id,
+            Reservoir,
+        )
+        reservoir = env.network.entities[reservoir_id]
+        assert isinstance(reservoir, Reservoir)
+        alpha = _reservoir_pressure_bar_per_tonne(reservoir)
+        initial_inventory_t = float(
+            state.entity_inventory_t.get(reservoir_id, 0.0)
+        )
+        reservoir_pressure_const = (
+            reservoir.initial_pressure_bar + alpha * initial_inventory_t
+        )
+        limit_bar = float(reservoir.well_bottomhole_pressure_limit_bar)
+
+        for t in range(horizon_h):
+            evaluation_h = start_h + (t + 1) * dt
+            response_const, response_coeffs = (
+                _single_well_line_source_response_terms(
+                    env,
+                    well_id,
+                    horizon_index=t,
+                    evaluation_h=evaluation_h,
+                )
+            )
+            pressure_coeffs = [
+                alpha * dt + response_coeffs[tau]
+                for tau in range(t + 1)
+            ]
+            pressure_before_current = (
+                reservoir_pressure_const
+                + response_const
+                + pulp.lpSum(
+                    pressure_coeffs[tau] * well_inj[(well_id, tau)]
+                    for tau in range(t)
+                )
+            )
+            option_indices = sorted(
+                well_rate_options[(well_id, t)],
+                key=lambda index: WELL_RATE_LEVELS_MTPA[index],
+            )
+            option_rates_tph = [
+                mtpa_to_tph(WELL_RATE_LEVELS_MTPA[index])
+                for index in option_indices
+            ]
+            max_pressure_span = abs(
+                reservoir_pressure_const + response_const - limit_bar
+            )
+            for tau in range(t + 1):
+                prior_rates = [
+                    mtpa_to_tph(
+                        WELL_RATE_LEVELS_MTPA[index]
+                    )
+                    for index in well_rate_options[(well_id, tau)]
+                ]
+                max_pressure_span += (
+                    max(prior_rates, default=0.0)
+                    * abs(pressure_coeffs[tau])
+                )
+            pressure_big_m = max(1.0, max_pressure_span + 1.0)
+
+            for position, (rate_index, rate_tph) in enumerate(
+                zip(option_indices, option_rates_tph)
+            ):
+                selected = well_choice[(well_id, t, rate_index)]
+                candidate_pressure = (
+                    pressure_before_current
+                    + pressure_coeffs[t] * rate_tph
+                )
+                if rate_tph > 1e-12:
+                    prob += candidate_pressure <= (
+                        limit_bar + pressure_big_m * (1 - selected)
+                    )
+                if position + 1 < len(option_indices):
+                    next_rate_tph = option_rates_tph[position + 1]
+                    next_pressure = (
+                        pressure_before_current
+                        + pressure_coeffs[t] * next_rate_tph
+                    )
+                    prob += next_pressure >= (
+                        limit_bar
+                        + 1e-7
+                        - pressure_big_m * (1 - selected)
+                    )
+
+
+def _add_single_well_dynamic_bhp_constraints(
+    prob,
+    env,
+    well_inj,
+    horizon_h: int,
+    *,
+    well_choice=None,
+    well_rate_options=None,
+) -> None:
     """Add decision-dependent BHP constraints for true single-well reservoirs.
 
     Multi-well interference is intentionally left to the existing pressure mask
@@ -4618,7 +4810,34 @@ def _add_single_well_dynamic_bhp_constraints(prob, env, well_inj, horizon_h: int
                 response_coeffs[tau] * well_inj[(well_id, tau)]
                 for tau in range(t + 1)
             )
-            prob += reservoir_pressure_const + alpha * cumulative_injected_expr + line_source_expr <= limit_bar
+            pressure_expr = (
+                reservoir_pressure_const
+                + alpha * cumulative_injected_expr
+                + line_source_expr
+            )
+            if well_choice is None or well_rate_options is None:
+                prob += pressure_expr <= limit_bar
+                continue
+
+            maximum_pressure_span = abs(
+                reservoir_pressure_const + response_const - limit_bar
+            )
+            for tau in range(t + 1):
+                maximum_rate_tph = max(
+                    (
+                        mtpa_to_tph(WELL_RATE_LEVELS_MTPA[index])
+                        for index in well_rate_options[(well_id, tau)]
+                    ),
+                    default=0.0,
+                )
+                maximum_pressure_span += maximum_rate_tph * abs(
+                    alpha * dt + response_coeffs[tau]
+                )
+            pressure_big_m = max(1.0, maximum_pressure_span + 1.0)
+            prob += pressure_expr <= (
+                limit_bar
+                + pressure_big_m * well_choice[(well_id, t, 0)]
+            )
 
 
 def _reservoir_pressure_bar_per_tonne(reservoir: Reservoir) -> float:

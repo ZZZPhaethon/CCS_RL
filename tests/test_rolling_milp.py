@@ -46,7 +46,7 @@ from sim.scenario_generation import Scenario, ScenarioConfig, ScenarioGenerator
 from tests.fixtures.toy_networks import TOY_TWO_SOURCE_LOCATIONS, make_toy_two_source_network
 
 
-def _cold_env(cap_hours: int = 600) -> CCSEnv:
+def _cold_env(cap_hours: int = 600, **env_config) -> CCSEnv:
     # Cold start (no initial inventory) so the MILP bound and the controllers face
     # the same empty-system task.
     return CCSEnv(
@@ -55,11 +55,11 @@ def _cold_env(cap_hours: int = 600) -> CCSEnv:
         scenario_generator=ScenarioGenerator(
             config=ScenarioConfig(episode_hours=cap_hours, randomize_initial_inventory=False)
         ),
-        config=CCSEnvConfig(episode_hours=cap_hours),
+        config=CCSEnvConfig(episode_hours=cap_hours, **env_config),
     )
 
 
-def _no_capture_env(cap_hours: int = 24) -> CCSEnv:
+def _no_capture_env(cap_hours: int = 24, **env_config) -> CCSEnv:
     network = PhysicalNetwork(time_step_hours=1.0)
     network.add_entity(Emitter("source", nominal_capture_tph=0.0, buffer_capacity_t=1_000.0))
     network.add_entity(Vessel("ship", capacity_t=500.0, loading_rate_tph=500.0, unloading_rate_tph=500.0, speed_knots=100.0))
@@ -80,7 +80,7 @@ def _no_capture_env(cap_hours: int = 24) -> CCSEnv:
         scenario_generator=ScenarioGenerator(
             config=ScenarioConfig(episode_hours=cap_hours, randomize_initial_inventory=False)
         ),
-        config=CCSEnvConfig(episode_hours=cap_hours),
+        config=CCSEnvConfig(episode_hours=cap_hours, **env_config),
         routes={
             "ship": {
                 "origin": "source",
@@ -160,6 +160,26 @@ def _two_source_one_ship_fast_env() -> CCSEnv:
 
 
 class RollingMilpInterfaceTests(unittest.TestCase):
+    def test_automatic_well_mode_returns_vessel_control_only(self):
+        env = _cold_env(24, well_control_mode="automatic_max")
+        env.reset(seed=0)
+        controller = RollingMilpController(env, replan_every=12)
+        controller._plan_origin_h = 0.0
+        controller._has_active_plan = True
+        controller._native_actions_by_hour = [
+            {
+                "vessels": [VESSEL_WAIT] * len(env.vessel_ids),
+                "wells": [0] * len(env.well_ids),
+            }
+        ]
+
+        action = controller.policy(env)
+
+        self.assertEqual(
+            action,
+            {"vessels": [VESSEL_WAIT] * len(env.vessel_ids)},
+        )
+
     def test_warm_start_score_includes_terminal_cleanup_value(self):
         env = _no_capture_env(cap_hours=2)
         env.reset(seed=1)

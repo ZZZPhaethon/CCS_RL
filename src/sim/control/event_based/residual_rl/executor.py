@@ -61,10 +61,8 @@ class ResidualRuleExecutor:
         assignment = balanced_capture_assignment(env)
         env.set_goal_assignment(assignment)
         action = make_cluster_shuttle_policy(env, assignment)(env)
-        action["wells"] = [
-            env.highest_feasible_well_rate_index(well_id)
-            for well_id in env.well_ids
-        ]
+        if not env.automatic_well_control:
+            action["wells"] = env.automatic_well_rate_indices()
         target = self.intervention.emitter_id
         if self.intervention.kind == "keep_default" or target is None:
             self.last_overridden_vessels = ()
@@ -138,4 +136,3 @@ def _travel_hours(env: CCSEnv, vessel_id: str, destination_id: str) -> float:
         return inf
     distance_km = env._leg_distance_km(origin_id, destination_id, route)
     return max(0.0, distance_km / (effective_speed * 1.852))
-

@@ -21,6 +21,13 @@
 - Rolling MILP 使用经过 simulator replay 验证的 Greedy trajectory 作为唯一 warm start，不使用 Native MPC 候选 warm start、shifted previous-plan warm start 或执行 fallback；
 - 所有正式结论均来自预先锁定的测试 seeds，不能使用测试集选择模型、阈值或超参数。
 
+机器可读的设计锁与 seed manifest 分别保存在：
+
+- `experiments/protocols/unified_window_v1_paper_protocol.json`；
+- `experiments/protocols/unified_window_v1_seed_manifest.json`。
+
+其中旧的 `8,000,001–8,000,030` 已登记为 development-only；正式测试预留全新的 `9,000,001–9,000,030`，在所有配置锁定前不得运行。
+
 ---
 
 ## 2. 核心论文主张与证据
@@ -135,7 +142,7 @@ Warm start 只用于初始化 MILP 求解，不等于求解失败后的控制 fa
 - 船舶、terminal、well 和 reservoir 参数；
 - 经济参数和总成本定义；
 - action feasibility mask 和物理安全约束；
-- terminal cleanup 或有限时域末端处理方式；
+- 共同的 compact trip cleanup 末端价值：720 h 后停止新增 capture、关闭 cleanup 扰动，将剩余 CO₂ 完成封存，并把该 cleanup operating cost 计入所有方法的 terminal return 和报告总成本；
 - 相同 seed 下的扰动轨迹。
 
 任何方法不得拥有单独放宽的容量、装卸、航行、注入或压力约束。
@@ -313,13 +320,14 @@ E1 的三种学习方法使用同一最大训练预算：
 
 | 指标 | 作用 | 主表是否展示 |
 |---|---|---|
-| Total cost (EUR) | 核心优化目标 | 是 |
+| Total cost (EUR) | 720 h episode cost + common compact trip cleanup operating cost | 是 |
 | Paired cost difference vs Greedy | 主要统计结论 | 是 |
 | Total cost per stored tonne (EUR/t) | 经济效率 | 是 |
 | Vented CO₂ (t) / loss rate | 碳损失 | 是 |
 | Stored CO₂ (t) / storage rate | 封存效果 | 是 |
 | Operating cost (EUR) | 解释成本来源 | 是或成本分解图 |
 | Vent penalty (EUR) | 解释总成本来源 | 是或成本分解图 |
+| Terminal cleanup operating cost (EUR) | 消除有限时域末端库存偏差 | 是或成本分解图 |
 | Episode wall time / decision latency | 在线计算开销 | 简化展示 |
 
 ### 5.2 必要诊断指标
@@ -373,7 +381,7 @@ E1 的三种学习方法使用同一最大训练预算：
    - capture high-output。
 5. 末端核算：
    - 检查 720 h 结束时的在途和未封存库存；
-   - 验证 terminal cleanup 或 terminal value 不会改变方法间公平性。
+   - 验证共同 compact trip cleanup 对所有控制器读取相同类型的 720 h replay 末状态，并满足既有质量守恒与成本分解误差标准。
 
 ### 产出
 
@@ -453,7 +461,8 @@ Rolling MILP 不是本文主方法，因此不要求做完整时间预算扫描�
 - **Figure 3a：Paired total-cost differences**
   - 每种方法相对 Greedy 的点估计和 95% CI。
 - **Figure 3b：Cost decomposition**
-  - operating cost 与 vent penalty 的堆叠图。
+  - 720 h operating cost、vent penalty 与 common terminal-cleanup operating cost 的堆叠图；
+  - 详细分项保存 vessel fuel、conditioning、reconditioning、loading 和 unloading。
 - **Figure 4：Representative operational trajectory**
   - 直接作为 E1 主比较的解释性结果，紧跟主结果表和 Figure 3；
   - 展示 Greedy 与 Iterative Q 的 emitter/terminal inventory、cumulative vent、扰动区间、船舶模式和 Iterative Q intervention 时刻。
@@ -721,6 +730,7 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 - 使用 perfect foresight；
 - 使用与 simulator 一致的经济参数；
 - 只优化船舶调度，并在模型中执行与 simulator 相同的最大可行井注入规则；
+- 使用与其他方法相同的 compact trip cleanup terminal value；
 - 使用与正式测试集相同的场景 seeds；若全部 seeds 的计算成本不可接受，必须在求解前锁定一个代表性 seed 子集；
 - 预先固定 time limit，例如 30 min、1 h 或一个可承受的多小时预算；
 - 不持续求解到 optimal；
@@ -817,10 +827,10 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 
 - [ ] 主方法和 baseline 名称已固定；
 - [ ] Fixed-Assignment 与 Greedy 的行为不重复；
-- [ ] 总成本公式和 penalty 已固定；
-- [ ] Terminal cleanup/terminal value 已固定；
-- [ ] 共享的最大可行井注入函数已实现，所有控制器的上层动作空间均已移除井注入率；
-- [ ] Rolling MILP 和 Full-horizon MILP 已使用相同自动注入规则，不包含额外井控制自由度；
+- [x] 总成本公式、经济参数和 penalty 已在机器可读协议中固定；
+- [x] 共同 compact trip cleanup terminal value 已固定；
+- [x] 共享的最大可行井注入函数已实现，正式协议下所有控制器的上层动作空间均已移除井注入率；
+- [x] Rolling MILP 和 Full-horizon MILP 已使用相同自动注入规则，不包含额外井控制自由度；
 - [ ] Forecast 来源、误差和可见范围已固定；
 - [ ] 三种学习方法的 24/72 h summary 字段、horizon 和归一化已统一锁定；
 - [ ] Rolling MILP 的经济目标、horizon、replan interval、time limit、Greedy-only warm start 和无 fallback 失败规则已固定；
@@ -830,7 +840,7 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 - [ ] Centralized PPO 已移除 stored-credit/额外塑形项，保留共同经济成本，并固定 action mask、\(\gamma=1\) 和 deterministic evaluation；
 - [ ] Event-Residual PPO 已采用同一经济目标从头训练；原 tail-robust v4 仅作为可选补充结果；
 - [ ] 4,800-root Iterative Q 的 \(B_{4800}\) 已由统一计数器测得，PPO 和 Event-Residual PPO 的每个训练 run 均设置相同上限；
-- [ ] 训练、验证和测试 seeds 已写入 manifest；
+- [x] 训练、验证、legacy-development 和正式测试 seed 范围已写入 manifest；
 - [ ] 训练模型不能读取测试 seeds；
 - [ ] 若 4,800 roots 曾根据当前正式 test 结果确定，则这些 seeds 已降级为 development，另建未触碰的正式 test set；
 - [ ] Simulator step accounting 已实现；

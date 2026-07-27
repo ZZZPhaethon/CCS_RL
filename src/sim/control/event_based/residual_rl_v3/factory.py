@@ -37,6 +37,7 @@ def make_risk_gated_native_env(
     outside_risk_intervention_penalty: float = 0.0,
     override_windows_h: tuple[tuple[float, float], ...] = (),
     scenario_generator=None,
+    well_control_mode: str = "agent_selected",
 ) -> RiskGatedResidualDispatchEnv:
     """Build one native v3 environment.
 
@@ -55,6 +56,7 @@ def make_risk_gated_native_env(
             episode_hours=episode_hours,
             include_goal_obs=False,
             reward_mode="vent_first",
+            well_control_mode=well_control_mode,
         ),
     )
     return RiskGatedResidualDispatchEnv(
@@ -90,6 +92,7 @@ def make_risk_gated_gym_env(
     outside_risk_intervention_penalty: float = 0.0,
     episode_seed_min: int = 100_000,
     episode_seed_max: int = 999_999,
+    well_control_mode: str = "agent_selected",
 ) -> MaskedResidualGymEnv:
     """Build one Gym-compatible v3 environment.
 
@@ -109,6 +112,7 @@ def make_risk_gated_gym_env(
         outside_risk_intervention_penalty=(
             outside_risk_intervention_penalty
         ),
+        well_control_mode=well_control_mode,
     )
     return MaskedResidualGymEnv(
         native,
@@ -132,6 +136,7 @@ def make_curriculum_risk_gated_gym_env(
     outside_risk_intervention_penalty: float = 0.02,
     episode_seed_min: int = 100_000,
     episode_seed_max: int = 999_999,
+    well_control_mode: str = "agent_selected",
 ) -> CurriculumMaskedResidualGymEnv:
     """Build one curriculum-aware v3 Gym environment.
 
@@ -151,6 +156,7 @@ def make_curriculum_risk_gated_gym_env(
         outside_risk_intervention_penalty=(
             outside_risk_intervention_penalty
         ),
+        well_control_mode=well_control_mode,
     )
     return CurriculumMaskedResidualGymEnv(
         native,

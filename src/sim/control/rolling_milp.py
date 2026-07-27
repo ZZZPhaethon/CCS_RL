@@ -31,7 +31,7 @@ from ..environment import (
 )
 from ..routes import route_distance_km, sea_route
 from .milp import KNOTS_TO_KMH
-from .replay import replay_native_actions
+from .replay import action_for_well_control_mode, replay_native_actions
 
 @dataclass(frozen=True)
 class RollingMilpPlan:
@@ -295,7 +295,14 @@ def _shifted_milp_warm_start(
         return None
     try:
         materialized = _materialize_cplex_actions(env, shifted)
-        replay = replay_native_actions(env, materialized, horizon_h=horizon_h)
+        replay = replay_native_actions(
+            env,
+            [
+                action_for_well_control_mode(env, action)
+                for action in materialized
+            ],
+            horizon_h=horizon_h,
+        )
     except (RuntimeError, ValueError, IndexError, KeyError):
         return None
     return materialized if replay.is_executable else None
@@ -316,7 +323,10 @@ def _native_warm_start_score(
     try:
         replay = replay_native_actions(
             replay_env,
-            actions,
+            [
+                action_for_well_control_mode(replay_env, action)
+                for action in actions
+            ],
             horizon_h=horizon_h,
             copy_env=False,
         )
@@ -736,10 +746,14 @@ class RollingMilpController:
             raise RuntimeError(f"rolling_milp native trace expired at hour {elapsed}")
         action = self._native_actions_by_hour[elapsed]
         self._validate_native_action(env, action)
-        return {
+        control_action = {
             "vessels": [int(choice) for choice in action["vessels"]],
-            "wells": [int(choice) for choice in action["wells"]],
         }
+        if not env.automatic_well_control:
+            control_action["wells"] = [
+                int(choice) for choice in action["wells"]
+            ]
+        return control_action
 
     def _replan(self, env: CCSEnv, now: float) -> None:
         state = env.simulator.state
@@ -823,9 +837,13 @@ class RollingMilpController:
         native_actions = list(getattr(plan, "native_actions_by_hour", []))
         if native_actions:
             execution_h = min(self.replan_every, remaining_h, len(native_actions))
+            replay_actions = [
+                action_for_well_control_mode(env, action)
+                for action in native_actions[:execution_h]
+            ]
             execution_replay = replay_native_actions(
                 env,
-                native_actions[:execution_h],
+                replay_actions,
                 horizon_h=execution_h,
             )
             replay_is_valid = execution_replay.is_executable
@@ -924,14 +942,26 @@ class RollingMilpController:
     def _validate_native_action(env: CCSEnv, action: dict[str, list[int]]) -> None:
         vessel_actions = action.get("vessels", [])
         well_actions = action.get("wells", [])
-        if len(vessel_actions) != len(env.vessel_ids) or len(well_actions) != len(env.well_ids):
+        if len(vessel_actions) != len(env.vessel_ids):
+            raise RuntimeError("rolling_milp native trace has the wrong action dimension")
+        if (
+            not env.automatic_well_control
+            and len(well_actions) != len(env.well_ids)
+        ):
             raise RuntimeError("rolling_milp native trace has the wrong action dimension")
         for vessel_id, choice, mask in zip(env.vessel_ids, vessel_actions, env.vessel_action_mask()):
             if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
                 raise RuntimeError(f"rolling_milp action is infeasible for {vessel_id}: {choice}")
-        for well_id, choice, mask in zip(env.well_ids, well_actions, env.well_rate_action_mask()):
-            if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
-                raise RuntimeError(f"rolling_milp action is infeasible for {well_id}: {choice}")
+        if not env.automatic_well_control:
+            for well_id, choice, mask in zip(
+                env.well_ids,
+                well_actions,
+                env.well_rate_action_mask(),
+            ):
+                if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
+                    raise RuntimeError(
+                        f"rolling_milp action is infeasible for {well_id}: {choice}"
+                    )
 
 def _sail_hours_between(
     env: CCSEnv,

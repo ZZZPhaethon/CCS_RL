@@ -91,6 +91,166 @@ class CplexMilpInterfaceTests(unittest.TestCase):
     def test_module_exposes_full_scenario_solver(self):
         self.assertTrue(hasattr(cplex_milp, "solve_full_scenario_with_cplex"))
 
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_automatic_well_constraint_fixes_static_well_to_highest_option(self):
+        env = _no_capture_env(
+            cap_hours=1,
+            well_control_mode="automatic_max",
+        )
+        env.reset(seed=1)
+        scenario = env.scenario
+        options = cplex_milp._well_rate_options_by_hour(
+            env,
+            scenario,
+            horizon_h=1,
+        )
+        problem = cplex_milp.pulp.LpProblem(
+            "test_automatic_static_well",
+            cplex_milp.pulp.LpMinimize,
+        )
+        well_choice = {
+            ("well", 0, rate_index): cplex_milp.pulp.LpVariable(
+                f"static_choice_{rate_index}",
+                cat="Binary",
+            )
+            for rate_index in options[("well", 0)]
+        }
+        well_inj = {
+            ("well", 0): cplex_milp.pulp.LpVariable(
+                "static_well_inj",
+                lowBound=0.0,
+            )
+        }
+        problem += cplex_milp.pulp.lpSum(well_choice.values()) == 1
+        cplex_milp._add_automatic_well_choice_constraints(
+            problem,
+            env,
+            well_choice,
+            well_inj,
+            options,
+            horizon_h=1,
+        )
+        problem += cplex_milp.pulp.lpSum(
+            rate_index * variable
+            for (_well_id, _t, rate_index), variable in well_choice.items()
+        )
+
+        status = problem.solve(cplex_milp.pulp.PULP_CBC_CMD(msg=False))
+        selected = next(
+            rate_index
+            for (_well_id, _t, rate_index), variable in well_choice.items()
+            if round(variable.value()) == 1
+        )
+
+        self.assertEqual(
+            cplex_milp.pulp.LpStatus[status],
+            "Optimal",
+        )
+        self.assertEqual(selected, env.automatic_well_rate_indices()[0])
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_automatic_dynamic_well_constraint_matches_environment_rate(self):
+        env = _no_capture_env(
+            cap_hours=1,
+            well_control_mode="automatic_max",
+        )
+        env.reset(seed=1)
+        reservoir = env.network.entities["reservoir"]
+        object.__setattr__(
+            reservoir,
+            "line_source_parameters",
+            LineSourceParameters(
+                initial_pressure_bar=100.0,
+                permeability_md=100.0,
+                thickness_m=50.0,
+                porosity_fraction=0.2,
+                total_compressibility_1_pa=1e-9,
+                viscosity_pa_s=5e-5,
+                co2_density_kg_m3=700.0,
+                well_radius_m=0.1,
+                skin=0.0,
+            ),
+        )
+        lower_index = 2
+        upper_index = 3
+        lower_pressure = projected_bottomhole_pressure_bar(
+            env.network,
+            env.simulator.state,
+            "well",
+            cplex_milp.mtpa_to_tph(
+                WELL_RATE_LEVELS_MTPA[lower_index]
+            ),
+            evaluation_time_h=1.0,
+            interval_start_h=0.0,
+        )
+        upper_pressure = projected_bottomhole_pressure_bar(
+            env.network,
+            env.simulator.state,
+            "well",
+            cplex_milp.mtpa_to_tph(
+                WELL_RATE_LEVELS_MTPA[upper_index]
+            ),
+            evaluation_time_h=1.0,
+            interval_start_h=0.0,
+        )
+        object.__setattr__(
+            reservoir,
+            "well_bottomhole_pressure_limit_bar",
+            (lower_pressure + upper_pressure) / 2.0,
+        )
+        options = cplex_milp._well_rate_options_by_hour(
+            env,
+            env.scenario,
+            horizon_h=1,
+        )
+        problem = cplex_milp.pulp.LpProblem(
+            "test_automatic_dynamic_well",
+            cplex_milp.pulp.LpMinimize,
+        )
+        well_choice = {
+            ("well", 0, rate_index): cplex_milp.pulp.LpVariable(
+                f"dynamic_choice_{rate_index}",
+                cat="Binary",
+            )
+            for rate_index in options[("well", 0)]
+        }
+        well_inj = {
+            ("well", 0): cplex_milp.pulp.LpVariable(
+                "dynamic_well_inj",
+                lowBound=0.0,
+            )
+        }
+        problem += cplex_milp.pulp.lpSum(well_choice.values()) == 1
+        cplex_milp._add_automatic_well_choice_constraints(
+            problem,
+            env,
+            well_choice,
+            well_inj,
+            options,
+            horizon_h=1,
+        )
+        problem += cplex_milp.pulp.lpSum(
+            rate_index * variable
+            for (_well_id, _t, rate_index), variable in well_choice.items()
+        )
+
+        status = problem.solve(cplex_milp.pulp.PULP_CBC_CMD(msg=False))
+        selected = next(
+            rate_index
+            for (_well_id, _t, rate_index), variable in well_choice.items()
+            if round(variable.value()) == 1
+        )
+
+        self.assertEqual(
+            cplex_milp.pulp.LpStatus[status],
+            "Optimal",
+        )
+        self.assertEqual(
+            selected,
+            env.automatic_well_rate_indices()[0],
+        )
+        self.assertEqual(selected, lower_index)
+
     def test_cross_source_leg_distance_is_independent_of_vessel_home_route(self):
         env = _cold_env(cap_hours=24)
         env.reset(seed=1)

@@ -13,11 +13,11 @@ _EPS = 1e-9
 
 
 def idle_policy(env: CCSEnv) -> dict[str, list]:
-    """Do nothing with vessels while holding wells at their minimum stable mode."""
-    return {
-        "vessels": [VESSEL_WAIT] * len(env.vessel_ids),
-        "wells": [MIN_WELL_RATE_INDEX] * len(env.well_ids),
-    }
+    """Do nothing with vessels; legacy environments hold wells at minimum."""
+    action = {"vessels": [VESSEL_WAIT] * len(env.vessel_ids)}
+    if not env.automatic_well_control:
+        action["wells"] = [MIN_WELL_RATE_INDEX] * len(env.well_ids)
+    return action
 
 
 def greedy_shuttle_policy(env: CCSEnv) -> dict[str, list]:
@@ -47,10 +47,7 @@ def greedy_shuttle_policy(env: CCSEnv) -> dict[str, list]:
             action.append(VESSEL_GO_TERMINAL)
         else:
             action.append(VESSEL_WAIT)
-    return {
-        "vessels": action,
-        "wells": [env.highest_feasible_well_rate_index(well_id) for well_id in env.well_ids],
-    }
+    return _with_legacy_automatic_wells(env, action)
 
 
 def _best_emitter_action(env: CCSEnv, mask: list[bool]) -> int | None:
@@ -124,9 +121,16 @@ def make_cluster_shuttle_policy(env: CCSEnv, assignment: dict[str, str] | None =
             if best is not None:
                 acts.append(best[1]); continue
             acts.append(VESSEL_GO_TERMINAL if (mask[VESSEL_GO_TERMINAL] and cargo > _EPS) else VESSEL_WAIT)
-        return {
-            "vessels": acts,
-            "wells": [env.highest_feasible_well_rate_index(well_id) for well_id in env.well_ids],
-        }
+        return _with_legacy_automatic_wells(env, acts)
 
     return policy
+
+
+def _with_legacy_automatic_wells(
+    env: CCSEnv,
+    vessel_actions: list[int],
+) -> dict[str, list]:
+    action = {"vessels": list(vessel_actions)}
+    if not env.automatic_well_control:
+        action["wells"] = env.automatic_well_rate_indices()
+    return action

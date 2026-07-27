@@ -60,6 +60,11 @@ def make_tail_robust_native_env(
         ),
         override_windows_h=override_windows_h,
         scenario_generator=generator,
+        well_control_mode=(
+            "automatic_max"
+            if scenario_protocol == "unified_window_v1"
+            else "agent_selected"
+        ),
     )
 
 

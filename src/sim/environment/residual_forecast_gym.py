@@ -10,7 +10,7 @@ from gymnasium import Env, spaces
 from ..control.baselines import greedy_shuttle_policy
 from .env import VESSEL_GO_EMITTER_BASE, VESSEL_GO_TERMINAL, VESSEL_WAIT
 from .forecast_gym import ForecastGymEnv, forecast_policy_observation
-from .gym_adapter import flat_action_mask
+from .gym_adapter import flat_action_from_native, flat_action_mask
 
 
 def _base_vessel_onehot(env, vessel_actions) -> np.ndarray:
@@ -202,10 +202,7 @@ class GreedyResidualForecastGymEnv(Env):
                     and self.env.emitter_ids[emitter_index] != berth
                 ):
                     emitter_to_emitter_legs += 1
-        flat_action = np.asarray(
-            [*native_action["vessels"], *native_action["wells"]],
-            dtype=np.int64,
-        )
+        flat_action = flat_action_from_native(self.env, native_action)
         observation, reward, terminated, truncated, info = self.forecast_env.step(
             flat_action
         )
@@ -255,10 +252,12 @@ class GreedyResidualForecastGymEnv(Env):
             self._base_action["vessels"],
         ):
             vessels.append(int(base) if int(choice) == int(follow) else int(choice))
-        return {
-            "vessels": vessels,
-            "wells": [int(value) for value in self._base_action["wells"]],
-        }
+        action = {"vessels": vessels}
+        if "wells" in self._base_action:
+            action["wells"] = [
+                int(value) for value in self._base_action["wells"]
+            ]
+        return action
 
     def follow_action(self) -> np.ndarray:
         return self.follow_indices.copy()
@@ -295,7 +294,7 @@ def residual_native_action(env, residual_action, base_action):
         int(base) if int(choice) == int(follow) else int(choice)
         for choice, follow, base in zip(residual, follows, base_action["vessels"])
     ]
-    return {
-        "vessels": vessels,
-        "wells": [int(value) for value in base_action["wells"]],
-    }
+    action = {"vessels": vessels}
+    if "wells" in base_action:
+        action["wells"] = [int(value) for value in base_action["wells"]]
+    return action

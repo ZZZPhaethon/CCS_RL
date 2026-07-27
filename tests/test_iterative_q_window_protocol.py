@@ -71,6 +71,9 @@ def test_unified_window_protocol_uses_one_fixed_configuration():
     first.reset(seed=123)
     config = first.scenario_generator.normal.config
 
+    assert first.automatic_well_control
+    assert first.well_rate_action_dims == []
+    assert "wells" not in common.greedy_shuttle_policy(first)
     assert config.capture_noise_std == pytest.approx(0.30)
     assert config.capture_high_output_rate_per_week == pytest.approx(0.5)
     assert config.capture_high_output_mean_hours == pytest.approx(48.0)

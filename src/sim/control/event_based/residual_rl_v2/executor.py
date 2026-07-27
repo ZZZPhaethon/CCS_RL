@@ -33,14 +33,10 @@ def default_rule_action(env: CCSEnv) -> dict[str, list[int]]:
     assignment = balanced_capture_assignment(env)
     env.set_goal_assignment(assignment)
     action = make_cluster_shuttle_policy(env, assignment)(env)
-    action["wells"] = [
-        env.highest_feasible_well_rate_index(well_id)
-        for well_id in env.well_ids
-    ]
-    return {
-        "vessels": list(action["vessels"]),
-        "wells": list(action["wells"]),
-    }
+    result = {"vessels": list(action["vessels"])}
+    if "wells" in action:
+        result["wells"] = list(action["wells"])
+    return result
 
 
 def eligible_override_vessels(
@@ -183,10 +179,9 @@ class MaskedResidualRuleExecutor:
             )
             self.add_one_consumed = True
 
-        action = {
-            "vessels": list(baseline["vessels"]),
-            "wells": list(baseline["wells"]),
-        }
+        action = {"vessels": list(baseline["vessels"])}
+        if "wells" in baseline:
+            action["wells"] = list(baseline["wells"])
         target_action = env.vessel_go_emitter_action(target)
         for vessel_id in candidates:
             position = env.vessel_ids.index(vessel_id)
@@ -211,14 +206,10 @@ def adaptive_greedy_action(env: CCSEnv) -> dict[str, list[int]]:
     返回带安全注入率的全局 adaptive greedy 动作。
     """
     action = greedy_shuttle_policy(env)
-    action["wells"] = [
-        env.highest_feasible_well_rate_index(well_id)
-        for well_id in env.well_ids
-    ]
-    return {
-        "vessels": list(action["vessels"]),
-        "wells": list(action["wells"]),
-    }
+    result = {"vessels": list(action["vessels"])}
+    if "wells" in action:
+        result["wells"] = list(action["wells"])
+    return result
 
 
 def _travel_hours(
@@ -249,4 +240,3 @@ def _travel_hours(
         route,
     )
     return max(0.0, distance_km / (effective_speed * 1.852))
-

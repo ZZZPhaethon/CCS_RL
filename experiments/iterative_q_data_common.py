@@ -110,6 +110,7 @@ def make_native_env(args):
                 operating_cost_weight=1.0,
                 enforce_full_load_dispatch=False,
                 require_empty_terminal_departure=True,
+                well_control_mode="automatic_max",
             ),
         )
     else:  # pragma: no cover - guarded by CLI choices

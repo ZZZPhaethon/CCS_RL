@@ -136,6 +136,8 @@ class EventBasedAlgorithmCompatibilityTests(unittest.TestCase):
             override_windows_h=((0.0, 47.0),),
         )
         env.reset(seed=123)
+        self.assertTrue(env.env.automatic_well_control)
+        self.assertEqual(env.env.well_rate_action_dims, [])
         intervention = next(
             index
             for index, allowed in enumerate(env.action_masks())
