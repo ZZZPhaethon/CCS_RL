@@ -1,0 +1,28 @@
+........................................................................ [ 40%]
+........................................................................ [ 80%]
+...................................                                      [100%]
+============================== warnings summary ===============================
+tests/test_cplex_milp.py: 132 warnings
+  D:\anaconda3\Lib\site-packages\pulp\pulp.py:318: DeprecationWarning: Constructing LpVariable(name, ...) directly is deprecated; in PuLP 4.0 use prob.add_variable(name, lowBound, upBound, cat=...). Variables are then attached to the model when created.
+    _v4_deprecation(msg, stacklevel=2)
+
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_terminal_cleanup_value_reports_separate_future_cost
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_action_warm_start_completes_terminal_cleanup_variables
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_action_warm_start_completes_terminal_cleanup_variables
+  D:\anaconda3\Lib\site-packages\pulp\pulp.py:1662: DeprecationWarning: Using LpProblem.constraints as a dict mapping is deprecated; in PuLP 4.0 constraints are returned by prob.constraints() as a list. Use get_constraint_by_name(name) or iterate prob.constraints() and compare constraint names.
+    self._warn_mapping()
+
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_terminal_cleanup_value_reports_separate_future_cost
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_action_warm_start_completes_terminal_cleanup_variables
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_action_warm_start_completes_terminal_cleanup_variables
+  D:\anaconda3\Lib\site-packages\pulp\pulp.py:1642: DeprecationWarning: Using LpProblem.constraints as a dict mapping is deprecated; in PuLP 4.0 constraints are returned by prob.constraints() as a list. Use get_constraint_by_name(name) or iterate prob.constraints() and compare constraint names.
+    self._warn_mapping()
+
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_terminal_cleanup_value_reports_separate_future_cost
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_action_warm_start_completes_terminal_cleanup_variables
+tests/test_cplex_milp.py::CplexMilpInterfaceTests::test_action_warm_start_completes_terminal_cleanup_variables
+  D:\anaconda3\Lib\site-packages\pulp\apis\coin_api.py:70: DeprecationWarning: PULP_CBC_CMD is deprecated and will be removed in PuLP 4.0. Install CBC with `pip install pulp[cbc]` and use COIN_CMD instead.
+    v4_deprecation(PULP_CBC_CMD_DEPRECATION_MSG, stacklevel=stacklevel)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+179 passed, 141 warnings in 1.47s

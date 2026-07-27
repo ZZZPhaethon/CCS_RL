@@ -1,0 +1,7 @@
+{
+  "case_id": "formal_medium_720h",
+  "cost_eur": 240783.70344640547,
+  "function": "sim.control.cplex_milp._terminal_cleanup_cost_for_state",
+  "repeat_absolute_error_eur": 0.0,
+  "repeat_cost_eur": 240783.70344640547
+}
