@@ -18,7 +18,7 @@ from sim.environment.vessel_mode import (
 )
 
 
-FORECAST_WINDOWS_H = (24, 72)
+FORECAST_WINDOWS_H = (168,)
 FUTURE_SUMMARY_REPRESENTATION_ID = "window_summary_mean_min_v1"
 
 
@@ -91,9 +91,9 @@ def high_level_observation(
     env: CCSEnv,
     windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
 ) -> np.ndarray:
-    """Return native state features plus fixed-size 24 h/72 h forecasts.
+    """Return native state features plus a fixed-size 168 h forecast summary.
 
-    返回原生状态特征与固定长度的 24 小时/72 小时预测。
+    返回原生状态特征与固定长度的 168 小时预测摘要。
 
     The native observation includes inventories, vessel cargo/location,
     terminal condition, injection availability, and reservoir pressure margin.

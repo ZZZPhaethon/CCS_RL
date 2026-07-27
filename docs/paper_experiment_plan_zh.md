@@ -17,6 +17,7 @@
 - Full-horizon MILP 保留为正式实验，但只作为限时、完美信息的离线参考；最终根据可行解、best bound 和 MIP gap 决定放在正文还是 Supplementary；
 - 三种学习控制器采用相同的最大环境交互预算：以 4,800-root Iterative Action-Q 实际消耗的底层 1 h simulator step calls 定义 \(B_{4800}\)；
 - Centralized Maskable PPO 和 Event-Residual PPO 均使用与总成本一致的 objective-aligned reward，不使用额外的 stored-CO₂ credit；
+- 每个 seed 生成 888 h 外生场景，其中前 720 h 是唯一执行与计分区间，后 168 h 只允许作为只读预测/规划上下文；
 - 所有方法只控制船舶调度；井由共享的最大可行注入底层控制器操作，任何方法均不能直接选择注入率；
 - Rolling MILP 使用经过 simulator replay 验证的 Greedy trajectory 作为唯一 warm start，不使用 Native MPC 候选 warm start、shifted previous-plan warm start 或执行 fallback；
 - 所有正式结论均来自预先锁定的测试 seeds，不能使用测试集选择模型、阈值或超参数。
@@ -52,9 +53,9 @@
 |---|---|---|---|---|
 | 固定船–emitter 分工 | Fixed-Assignment Heuristic | 静态业务规则基线 | 否 | 不使用 |
 | 动态贪心调度 | Greedy | 强实时启发式基线 | 否 | 不使用 |
-| 从零训练 PPO | Centralized Maskable PPO | 目标对齐的标准 model-free RL 基线 | 是 | 同源 24/72 h summary |
-| Event-based v4 架构 | Event-Residual PPO | 目标对齐的结构化 RL 基线 | 是 | 同源 24/72 h summary |
-| 当前主方法 | Iterative Action-Q | 论文主方法 | 是 | 同源 24/72 h summary |
+| 从零训练 PPO | Centralized Maskable PPO | 目标对齐的标准 model-free RL 基线 | 是 | 同源 168 h summary |
+| Event-based v4 架构 | Event-Residual PPO | 目标对齐的结构化 RL 基线 | 是 | 同源 168 h summary |
+| 当前主方法 | Iterative Action-Q | 论文主方法 | 是 | 同源 168 h summary |
 | 滚动优化 | Rolling MILP | 在线优化基线 | 否 | 使用统一 forecast |
 
 ### 3.2 消融方法
@@ -64,7 +65,7 @@
 | One-shot Action-Q，原始预算 | 测试不进行 policy roll-in 时的直接效果 |
 | One-shot Action-Q，匹配仿真预算 | 排除 Iterative Q 仅仅使用了更多模拟数据的解释 |
 | Iterative Action-Q，State-only | 测试迭代训练在无未来输入时是否仍有效 |
-| Iterative Action-Q，24/72 h summary | 测试低维未来摘要的增益 |
+| Iterative Action-Q，168 h summary | 测试低维未来摘要的增益 |
 | Iterative Action-Q，full 168 h sequence | 利用已有结果说明完整未来序列不一定更优；可放附录 |
 | BC–PPO | 可选历史/训练策略消融，不作为主表基线 |
 
@@ -92,7 +93,7 @@ Full-horizon MILP 作为 **time-limited perfect-foresight MILP reference** 运�
 - 若 storage-shortfall penalty 非零，其逐步增量也必须进入 reward；
 - 使用 legal-action masks；
 - 使用非折扣总成本目标，正式候选设置为 `gamma = 1`；
-- E1 固定使用与另外两种学习方法相同的 24/72 h structured future summary；State-only 仅作为 E3 消融；
+- E1 固定使用与另外两种学习方法相同的 168 h structured future summary，且不包含 `valid_fraction`；State-only 仅作为 E3 消融；
 - 不使用 BC warm start，否则应另称 BC–PPO。
 
 因此，除正的 reward scale 外，PPO 的累计训练回报应与负的 episode total cost 一致。
@@ -142,7 +143,7 @@ Warm start 只用于初始化 MILP 求解，不等于求解失败后的控制 fa
 所有方法必须使用完全相同的：
 
 - 三船网络；
-- 720 h episode；
+- 888 h sampled scenario = 720 h 执行/评估期 + 168 h 只读未来上下文；
 - 1 h 物理仿真步长；
 - 初始状态生成规则；
 - 船舶、terminal、well 和 reservoir 参数；
@@ -152,6 +153,8 @@ Warm start 只用于初始化 MILP 求解，不等于求解失败后的控制 fa
 - 相同 seed 下的扰动轨迹。
 
 任何方法不得拥有单独放宽的容量、装卸、航行、注入或压力约束。
+
+所有 controller rollout 必须在 720 h 截止。720–888 h 的外生轨迹只能被预测编码器或规划器读取，不得调用 simulator 执行动作，也不得进入 episode cost、vent、stored 或其他表现指标。Full-horizon MILP 可以规划 888 h，但只 replay 和计分其前 720 h 动作；720 h 末端 cleanup value 从该 replay 状态重新计算。
 
 ### 4.2 统一底层井控制
 
@@ -197,7 +200,8 @@ E0 必须验证：
 
 | 参数 | 当前基础值 |
 |---|---:|
-| Episode length | 720 h |
+| Sampled scenario length | 888 h |
+| Execution and scoring horizon | 720 h |
 | Capture Gaussian noise std | 0.30 |
 | Capture outage rate | 0.5/week |
 | Capture outage mean duration | 12 h |
@@ -222,11 +226,12 @@ E0 必须验证：
 
 1. 所有方法都观察相同当前物理状态。
 2. 所有 forecast-capable 方法访问同一份 168 h forecast 对象，其来源、准确度、更新时间和扰动 realization 一致。
-3. Centralized PPO、Event-Residual PPO 和 Iterative Q 在 E1 中统一使用由该对象计算的同一组 24/72 h structured summaries。
+3. Centralized PPO、Event-Residual PPO 和 Iterative Q 在 E1 中统一使用由该对象计算的同一个 168 h structured summary；不加入 `valid_fraction`，也不在 720 h 处截断摘要。
 4. Rolling MILP 使用同一 forecast 对象的逐小时完整序列；这是表示粒度差异，不是 forecast 来源差异。
 5. Summary 字段、horizon 和归一化方式只能在 validation 阶段统一锁定，不能针对三种学习算法分别选择，也不能按测试 seed 动态改变。
 6. Fixed-Assignment 和 Greedy 按定义不使用 forecast。
 7. 主结果表必须列出每种方法的“forecast available”和“forecast used”。
+8. 任何时刻的最大预测终点均不得超过同一样本的 888 h 边界；720 h 后的计划动作不得执行或计分。
 
 如果当前 forecast 直接来自场景真值，论文必须明确称为 **perfect-forecast protocol**。此时结论只能说明理想信息条件下的算法行为，不能直接声称现实部署性能。
 
@@ -398,6 +403,14 @@ E1 的三种学习方法使用同一最大训练预算：
 - 自动化测试结果摘要；
 - 固定的 simulator version/config hash。
 
+### 完成状态
+
+- [x] E0 已于 2026-07-27 完成，结果保存在 `experiments_results/E0/`；
+- 20/20 项验证检查通过，选定的 179/179 项自动化测试通过；
+- 720 h Medium 场景的最大全系统质量守恒残差为 \(6.16\times10^{-8}\) t，低于 \(10^{-6}\) t 容限；
+- 未发现库存/压力/注入率/船舶状态机硬约束违反，末端 compact cleanup 重复核算误差为 0 EUR；
+- E0 不用于选择 Iterative Q 超参数或未来信息形式，相关配置保持未锁定状态。
+
 ### 注意事项
 
 - 验证结果应在训练前完成；
@@ -424,7 +437,7 @@ E1 的三种学习方法使用同一最大训练预算：
 
 ### 实验步骤
 
-1. 在验证集上统一锁定三种学习方法的 24/72 h summary，并锁定 Iterative Q 的 P4 配置和门控；
+1. 在验证集上统一锁定三种学习方法不含 `valid_fraction` 的 168 h summary，并锁定 Iterative Q 的 P4 配置和门控；
 2. 运行 4,800-root Iterative Q 并由统一计数器测得 \(B_{4800}\)；
 3. 使用相同的 \(B_{4800}\) 上限分别训练经过目标对齐的 Centralized PPO 和 Event-Residual PPO，并仅根据 validation 表现选择预算内 checkpoint；
 4. 锁定 Rolling MILP：
@@ -576,12 +589,12 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 ### 最小正式比较
 
 1. Iterative Q，State-only；
-2. Iterative Q，24/72 h summary。
+2. Iterative Q，168 h summary。
 
 ### 辅助比较
 
 3. Iterative Q，full 168 h sequence；
-4. 若论文声称现实部署能力，再加入 noisy/predicted 24/72 h summary。
+4. 若论文声称现实部署能力，再加入 noisy/predicted 168 h summary。
 
 完整序列的 MLP、TCN 和 GRU 不需要全部作为正式多 seed 实验。可使用已有筛选结果，在附录中说明为何选择或放弃完整序列。
 
@@ -612,7 +625,7 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 
 - “完整未来反而更差”不等于未来没有信息价值；
 - 合理解释包括有限 roots、高维冗余、样本效率和 Q-gate 校准，但除非有直接证据，不应将其中任何一个写成已证明机制；
-- 如果 24/72 h summary 使用真实未来，应称为 idealized/perfect-forecast ablation；
+- 如果 168 h summary 使用真实未来，应称为 idealized/perfect-forecast ablation；
 - 主结论可以是“结构化摘要在当前数据规模下更有效”，不能泛化成“摘要永远优于序列模型”。
 
 ---
@@ -834,6 +847,7 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 
 ## 9. 正式实验开始前的锁定清单
 
+- [x] E0 物理仿真层验证已完成，20/20 项检查通过；完整结果位于 `experiments_results/E0/`；
 - [ ] 主方法和 baseline 名称已固定；
 - [x] Fixed-Assignment 与 Greedy 的行为不重复：三船正式场景的 5 个 validation seeds 中，两者在可行动状态的决策分歧率为 42.76%，Fixed-Assignment 始终保持一船一 emitter，而 Greedy 会跨 emitter 调度；
 - [x] 总成本公式、经济参数和 penalty 已在机器可读协议中固定；
@@ -842,14 +856,14 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 - [x] Rolling MILP 和 Full-horizon MILP 已使用相同自动注入规则，不包含额外井控制自由度；
 - [ ] Forecast 来源、误差和可见范围已固定；
 - [x] Centralized PPO、Event-Residual PPO 与 Iterative Q 已接入同一个 future-summary encoder；窗口可由统一参数切换，算法各自的动作和控制结构不变；
-- [ ] 三种学习方法的 24/72 h summary 字段、horizon 和归一化已统一锁定；
+- [x] 三种学习方法已统一为不含 `valid_fraction` 的 168 h summary；每个样本生成 888 h 场景，720 h 后仅作只读预测/规划上下文；
 - [ ] Rolling MILP 的经济目标、horizon、replan interval、time limit、Greedy-only warm start 和无 fallback 失败规则已固定；
 - [ ] Full-horizon MILP time limit、测试 seed 集和 replay 验证规则已固定；
 - [ ] Low/Medium/High stress 参数已在验证集检查并锁定；
 - [ ] Q 门控、window 和最大 intervention 数已固定；
 - [x] Centralized PPO 已移除 stored-credit/额外塑形项，动作空间缩减为 64 个纯船舶调度意图，保留共同经济成本，并固定 action mask、\(\gamma=1\) 和 deterministic evaluation；
 - [x] Centralized PPO 已接入底层 simulator-hour hard cap：每次 1 h 推进前检查预算，训练产物记录实际 calls、simulated hours、预算使用率及耗尽状态；
-- [x] Event-Residual PPO 的独立 E1 训练入口已实现：保留原 v4 入口和 checkpoint，使用 objective-aligned residual reward、\(\gamma=1\)、自动最大井注入和 24/72 h summary，并对实际/Greedy 反事实 simulator calls 实施成对 hard cap；真实 MaskablePPO smoke test 已验证预算停止和 validation-best 输出；
+- [x] Event-Residual PPO 的独立 E1 训练入口已实现：保留原 v4 入口和 checkpoint，使用 objective-aligned residual reward、\(\gamma=1\)、自动最大井注入和统一 168 h summary，并对实际/Greedy 反事实 simulator calls 实施成对 hard cap；真实 MaskablePPO smoke test 已验证预算停止和 validation-best 输出；
 - [ ] Event-Residual PPO 已采用同一经济目标从头训练；原 tail-robust v4 仅作为可选补充结果；
 - [ ] 4,800-root Iterative Q 的 \(B_{4800}\) 已由统一计数器测得，PPO 和 Event-Residual PPO 的每个训练 run 均设置相同上限；
 - [x] 训练、验证、legacy-development 和正式测试 seed 范围已写入 manifest；

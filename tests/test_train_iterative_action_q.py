@@ -57,11 +57,11 @@ def _dataset(path, split, seeds, *, include_future=False, include_forecast=False
     }
     if include_future:
         metadata["future_feature_names"] = [
-            f"future_{index}" for index in range(14)
+            f"future_{index}" for index in range(7)
         ]
         arrays["future_summaries"] = np.asarray(
             [
-                [[row[0] / 100.0, row[1] / 720.0, *([0.5] * 12)]]
+                [[row[0] / 100.0, row[1] / 720.0, *([0.5] * 5)]]
                 for row in rows
             ],
             dtype=np.float32,
@@ -208,7 +208,7 @@ def test_future_training_uses_v4_summary_input(tmp_path):
             "--out-dir",
             str(out_dir),
             "--observation-input",
-            "v4_future_24_72",
+            "shared_future_summary",
             "--epochs",
             "1",
             "--patience",
@@ -235,9 +235,9 @@ def test_future_training_uses_v4_summary_input(tmp_path):
     )
     assert (
         checkpoint["configuration"]["q_head"]
-        == "iterative_action_q_future_v4_24_72"
+        == "iterative_action_q_future_summary"
     )
-    assert checkpoint["normalization"]["future_mean"].shape == (14,)
+    assert checkpoint["normalization"]["future_mean"].shape == (7,)
 
 
 def test_full_forecast_training_uses_selected_encoder(tmp_path):
@@ -333,7 +333,7 @@ def test_nonoverlapping_forecast_summary_training(tmp_path):
         [24, 72],
         [72, 168],
     ]
-    assert checkpoint["normalization"]["future_mean"].shape == (24,)
+    assert checkpoint["normalization"]["future_mean"].shape == (21,)
 
 
 def test_residual_summary_training_starts_from_state_checkpoint(tmp_path):

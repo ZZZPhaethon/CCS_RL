@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import csv
 import json
 import time
@@ -15,7 +14,6 @@ from sim.control.baselines import (
 )
 from sim.control.cplex_milp import (
     _terminal_cleanup_cost_for_state,
-    replay_full_scenario_cplex_plan,
     solve_full_scenario_with_cplex,
 )
 from sim.control.event_based.residual_rl_v4.scenario import (
@@ -24,6 +22,10 @@ from sim.control.event_based.residual_rl_v4.scenario import (
 from sim.control.rolling_milp import (
     RollingMilpController,
     greedy_warm_start_actions,
+)
+from sim.control.replay import (
+    action_for_well_control_mode,
+    replay_native_actions,
 )
 from sim.environment import CCSEnvConfig, build_phase1_env
 from sim.metrics import run_recorded_episode
@@ -227,19 +229,25 @@ def _run_rolling_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]
     return row, controller.replan_diagnostics
 
 
-def _full_milp_success_row(args, env, result, replay, wall_clock_seconds, usage):
+def _full_milp_success_row(
+    args,
+    env,
+    result,
+    replay,
+    wall_clock_seconds,
+    usage,
+):
     final_stage = result.stage_diagnostics[-1] if result.stage_diagnostics else None
-    stored_t = float(replay.stored_t)
-    operating_cost = float(replay.operating_cost) + float(
-        result.terminal_cleanup_cost
-    )
-    total_cost = float(replay.total_cost) + float(
-        result.terminal_cleanup_cost
-    )
+    actual = replay.actual
+    ledger = env.ledger
+    stored_t = float(actual.stored_t)
+    terminal_cleanup_cost = _cleanup_cost(env)
+    operating_cost = float(actual.operating_cost) + terminal_cleanup_cost
+    total_cost = float(actual.total_cost) + terminal_cleanup_cost
     parameters = env.cost_model.parameters
-    vessel_fuel = max(0.0, float(result.vessel_fuel))
-    loading = max(0.0, float(result.loading))
-    unloading = max(0.0, float(result.unloading))
+    vessel_fuel = max(0.0, float(ledger.vessel_fuel))
+    loading = max(0.0, float(ledger.loading))
+    unloading = max(0.0, float(ledger.unloading))
     sailing_hours = vessel_fuel / parameters.vessel_fuel_eur_per_h_sailing
     loading_hours = loading / parameters.hoteling_fuel_eur_per_h
     unloading_hours = unloading / parameters.hoteling_fuel_eur_per_h
@@ -277,12 +285,14 @@ def _full_milp_success_row(args, env, result, replay, wall_clock_seconds, usage)
         "warm_start_mode": "greedy",
         "fallback_used": False,
         "replay_is_executable": bool(replay.is_executable),
-        "replay_is_exact": bool(replay.is_exact),
+        "replay_is_exact": None,
         "replay_mismatches": ";".join(replay.mismatches),
-        "episode_operating_cost": float(replay.operating_cost),
-        "episode_total_cost": float(replay.total_cost),
+        "planning_horizon_hours": int(result.horizon_h),
+        "evaluation_horizon_hours": int(args.full_milp_horizon_hours),
+        "episode_operating_cost": float(actual.operating_cost),
+        "episode_total_cost": float(actual.total_cost),
         "terminal_cleanup_operating_cost": float(
-            result.terminal_cleanup_cost
+            terminal_cleanup_cost
         ),
         "operating_cost": operating_cost,
         "total_cost": total_cost,
@@ -293,18 +303,18 @@ def _full_milp_success_row(args, env, result, replay, wall_clock_seconds, usage)
             total_cost / stored_t if stored_t > 1e-9 else None
         ),
         "vessel_fuel": vessel_fuel,
-        "conditioning": max(0.0, float(result.conditioning)),
-        "reconditioning": max(0.0, float(result.reconditioning)),
+        "conditioning": max(0.0, float(ledger.conditioning)),
+        "reconditioning": max(0.0, float(ledger.reconditioning)),
         "loading": loading,
         "unloading": unloading,
-        "vent_penalty": float(
-            replay.total_cost - replay.operating_cost
+        "vent_penalty": float(ledger.vent_penalty),
+        "storage_shortfall_penalty": float(
+            ledger.storage_shortfall_penalty
         ),
-        "storage_shortfall_penalty": 0.0,
         "stored_t": stored_t,
-        "vented_t": float(replay.vented_t),
-        "captured_t": float(result.captured_from_operations_t),
-        "in_transit_t": float(result.in_transit_t),
+        "vented_t": float(actual.vented_t),
+        "captured_t": float(actual.captured_t),
+        "in_transit_t": float(actual.in_transit_t),
         "vessel_sailing_hours": sailing_hours,
         "vessel_loading_hours": loading_hours,
         "vessel_unloading_hours": unloading_hours,
@@ -315,32 +325,32 @@ def _full_milp_success_row(args, env, result, replay, wall_clock_seconds, usage)
             - loading_hours
             - unloading_hours,
         ),
-        "loaded_t": max(0.0, float(
-            sum(sum(values) for values in result.load_t_by_hour.values())
-        )),
-        "unloaded_t": max(0.0, float(
-            sum(sum(values) for values in result.unload_t_by_hour.values())
-        )),
+        "loaded_t": max(0.0, float(ledger.loaded_t)),
+        "unloaded_t": max(0.0, float(ledger.unloaded_t)),
     }
 
 
 def _run_full_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
-    env = make_env(
-        args.full_milp_horizon_hours,
-        args.forecast_context_hours,
+    evaluation_horizon_h = int(args.full_milp_horizon_hours)
+    planning_horizon_h = (
+        evaluation_horizon_h + int(args.forecast_context_hours)
     )
-    env.reset(seed=args.seed)
-    usage_before = env.simulator_step_usage()
+    planning_env = make_env(
+        planning_horizon_h,
+        0,
+    )
+    planning_env.reset(seed=args.seed)
+    usage_before = planning_env.simulator_step_usage()
     started_at = time.perf_counter()
     try:
         warm_start = greedy_warm_start_actions(
-            env,
-            args.full_milp_horizon_hours,
+            planning_env,
+            planning_horizon_h,
         )
         result = solve_full_scenario_with_cplex(
-            env,
-            horizon_h=args.full_milp_horizon_hours,
-            economics=env.cost_model.parameters,
+            planning_env,
+            horizon_h=planning_horizon_h,
+            economics=planning_env.cost_model.parameters,
             warm_start_native_actions_by_hour=warm_start,
             time_limit_s=args.full_milp_time_limit_seconds,
             mip_gap_rel=args.mip_gap_relative,
@@ -359,9 +369,26 @@ def _run_full_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
                 result.validation_error
                 or f"full MILP solver status {result.status}"
             )
-        replay_env = copy.deepcopy(env)
-        replay = replay_full_scenario_cplex_plan(replay_env, result)
-        usage = env.simulator_step_usage() - usage_before
+        replay_env = make_env(
+            evaluation_horizon_h,
+            args.forecast_context_hours,
+        )
+        replay_env.reset(seed=args.seed)
+        evaluation_actions = [
+            action_for_well_control_mode(replay_env, action)
+            for action in result.native_actions_by_hour[
+                :evaluation_horizon_h
+            ]
+        ]
+        replay = replay_native_actions(
+            replay_env,
+            evaluation_actions,
+            horizon_h=evaluation_horizon_h,
+            copy_env=False,
+        )
+        usage = (
+            planning_env.simulator_step_usage() - usage_before
+        )
         row = _full_milp_success_row(
             args,
             replay_env,
@@ -393,7 +420,7 @@ def _run_full_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
                 args.seed,
                 error,
                 time.perf_counter() - started_at,
-                env.simulator_step_usage() - usage_before,
+                planning_env.simulator_step_usage() - usage_before,
                 evaluation_role="offline_reference",
             ),
             [],

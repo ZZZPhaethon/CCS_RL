@@ -50,7 +50,7 @@ def test_iterative_q_window_policy_state_excludes_v4_future_aggregates():
     names = common.state_feature_names(wrapper)
 
     assert observation["state"].shape == (len(names),)
-    assert not any("mean_24h" in name or "mean_72h" in name for name in names)
+    assert not any("mean_168h" in name for name in names)
 
 
 def test_iterative_q_future_summary_exactly_matches_v4():
@@ -60,9 +60,10 @@ def test_iterative_q_future_summary_exactly_matches_v4():
     summary = common.v4_future_summary(wrapper)
     names = common.v4_future_feature_names(wrapper)
 
-    assert summary.shape == (14,)
-    assert len(names) == 14
-    assert summary == pytest.approx(high_level_observation(wrapper.env)[-14:])
+    assert summary.shape == (7,)
+    assert len(names) == 7
+    assert summary == pytest.approx(high_level_observation(wrapper.env)[-7:])
+    assert not any("valid_fraction" in name for name in names)
 
 
 def test_iterative_q_uses_shared_configurable_future_summary():

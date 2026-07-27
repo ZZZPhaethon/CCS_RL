@@ -1,6 +1,6 @@
 {
   "protocol_id": "paper_unified_window_v1_3vessel_2026-07-27",
-  "protocol_version": 1,
+  "protocol_version": 2,
   "locked_on": "2026-07-27",
   "status": "design_locked_implementation_pending",
   "scope": {
@@ -10,6 +10,7 @@
     "scenario_file_sha256": "d2624cc1c619575d99deb49c517ebdb3702f88d8ac918de277170a062dd63c5b",
     "scenario_protocol": "unified_window_v1",
     "episode_hours": 720,
+    "scenario_hours": 888,
     "time_step_hours": 1.0,
     "forecast_context_hours": 168
   },
@@ -101,6 +102,9 @@
   "forecast_protocol": {
     "source": "the same sampled Scenario object for every forecast-capable method",
     "accuracy": "perfect_forecast",
+    "execution_and_scoring_boundary_hours": 720,
+    "maximum_forecast_index_hours": 888,
+    "post_boundary_rule": "hours 720 through 888 are read-only forecast/planning context; no controller action is executed or scored after hour 720",
     "learning_methods": {
       "methods": [
         "Centralized Maskable PPO",
@@ -109,8 +113,7 @@
       ],
       "representation": "shared_structured_summary",
       "windows_hours": [
-        24,
-        72
+        168
       ],
       "features_per_window": [
         "emitter_availability_mean for each emitter",
@@ -119,11 +122,18 @@
         "fleet_speed_factor_mean",
         "fleet_speed_factor_min"
       ],
+      "valid_fraction_feature": false,
       "normalization": "existing scenario-native dimensionless values",
       "state_only_use": "E3 ablation only"
     },
     "rolling_milp": {
       "representation": "full_hourly_168h_sequence",
+      "source_must_match_learning_methods": true,
+      "planning_horizon_is_clipped_by": "sampled 888 h scenario boundary, not the 720 h execution boundary"
+    },
+    "full_horizon_milp": {
+      "planning_horizon_hours": 888,
+      "executed_and_scored_prefix_hours": 720,
       "source_must_match_learning_methods": true
     },
     "fixed_assignment_and_greedy_use_forecast": false
@@ -215,7 +225,8 @@
     "remove well-rate choices from every upper-level controller interface",
     "apply the shared automatic well rule inside the environment",
     "make Rolling MILP and Full-horizon MILP reproduce the same automatic well rule",
-    "make all three learning methods consume the same 24/72 h summary implementation",
+    "make all three learning methods consume the same 168 h summary implementation without a valid-fraction feature",
+    "generate 888 h sampled scenarios while enforcing a read-only forecast boundary after the 720 h execution and scoring horizon",
     "add complete episode cost-component and activity diagnostics",
     "add the bottom-level one-hour simulator-step counter",
     "apply the common compact trip cleanup value to every learning terminal return, evaluation record and MILP terminal objective"

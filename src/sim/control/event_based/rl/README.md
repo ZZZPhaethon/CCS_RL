@@ -20,7 +20,7 @@ objective-aligned MaskablePPO reward
 | File | Role / 作用 |
 | --- | --- |
 | `action_codec.py` | Maps one `Discrete(64)` action to independent vessel-service preferences; wells use automatic-max control. / 将一个 `Discrete(64)` 动作映射为各船独立服务偏好；井使用自动最大可行注入。 |
-| `observation_encoder.py` | State, vessel mode/destination, and 24 h/72 h forecast summaries. / 状态、船舶模式/目的地与 24/72 小时预测摘要。 |
+| `observation_encoder.py` | State, vessel mode/destination, and the shared 168 h forecast summary. / 状态、船舶模式/目的地与统一的 168 小时预测摘要。 |
 | `reward.py` | Stable realised reward; unit cost stays an evaluation KPI. / 稳定的实际结果奖励；单位成本保留为评估 KPI。 |
 | `high_level_env.py` | Advances to an operational event or the maximum 24 h interval. / 推进到运行事件或最长 24 小时间隔。 |
 | `gym_env.py` | Gymnasium `Discrete` adapter with the MaskablePPO action-mask interface. / 带 MaskablePPO 动作掩码接口的 Gymnasium `Discrete` 适配器。 |

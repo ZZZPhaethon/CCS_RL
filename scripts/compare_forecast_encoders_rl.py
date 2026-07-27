@@ -289,8 +289,8 @@ def parse_args(argv=None):
 def make_experiment_env(args, demonstration: bool = False):
     logical_hours = int(args.episode_hours)
     horizon = int(args.forecast_horizon_h)
-    episode_hours = logical_hours + horizon + 1 if demonstration else logical_hours
-    context_hours = 0 if demonstration else horizon + 1
+    episode_hours = logical_hours + horizon if demonstration else logical_hours
+    context_hours = 0 if demonstration else horizon
     return make_native_env(
         episode_hours=episode_hours,
         scenario_context_hours=context_hours,
@@ -356,7 +356,7 @@ class ExperimentEnvFactory:
             "partial_load_dispatch": True,
             "require_empty_terminal_departure": True,
             "warm_start": True,
-            "scenario_context_hours": int(self.args.forecast_horizon_h) + 1,
+            "scenario_context_hours": int(self.args.forecast_horizon_h),
             "emitter_buffer_capacity_t": {
                 emitter_id: float(env.network.entities[emitter_id].buffer_capacity_t)
                 for emitter_id in env.emitter_ids
@@ -536,7 +536,9 @@ def generate_demos(args) -> dict[str, object]:
         "collection": {
             "episode_hours": int(args.episode_hours),
             "forecast_horizon_h": int(args.forecast_horizon_h),
-            "demonstration_native_episode_hours": int(args.episode_hours + args.forecast_horizon_h + 1),
+            "demonstration_native_episode_hours": int(
+                args.episode_hours + args.forecast_horizon_h
+            ),
             "scenario_context_hours": 0,
             "teacher": (
                 "RollingNativeMpcController"

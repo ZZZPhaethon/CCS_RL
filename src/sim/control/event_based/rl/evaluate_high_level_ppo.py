@@ -13,6 +13,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterable
 
+from .observation_encoder import FORECAST_WINDOWS_H
 from .reward import HARD_VIOLATION_CODES, HighLevelRewardConfig
 from .train_high_level_ppo import make_high_level_native_env
 
@@ -49,7 +50,7 @@ def evaluate_run(
             int(value)
             for value in config.get(
                 "future_summary_windows_h",
-                (24, 72),
+                FORECAST_WINDOWS_H,
             )
         ),
         decision_interval_h=float(config["decision_interval_h"]),

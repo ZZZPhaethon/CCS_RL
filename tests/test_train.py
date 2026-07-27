@@ -139,7 +139,7 @@ class TrainPPOTests(unittest.TestCase):
             train.make_native_env(720, 0.95)
 
         self.assertEqual(captured["config"].storage_target_rate, 0.95)
-        self.assertEqual(captured["scenario_config"].episode_hours, 889)
+        self.assertEqual(captured["scenario_config"].episode_hours, 888)
 
 
 if __name__ == "__main__":

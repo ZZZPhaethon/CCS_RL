@@ -40,6 +40,7 @@ def test_locked_protocol_matches_shared_source_constants() -> None:
 
     assert protocol["status"] == "design_locked_implementation_pending"
     assert protocol["scope"]["episode_hours"] == 720
+    assert protocol["scope"]["scenario_hours"] == 888
     assert protocol["scope"]["time_step_hours"] == 1.0
     assert protocol["scope"]["forecast_context_hours"] == 168
     assert (
@@ -52,6 +53,15 @@ def test_locked_protocol_matches_shared_source_constants() -> None:
     assert tuple(
         protocol["forecast_protocol"]["learning_methods"]["windows_hours"]
     ) == FORECAST_WINDOWS_H
+    assert not protocol["forecast_protocol"]["learning_methods"][
+        "valid_fraction_feature"
+    ]
+    assert (
+        protocol["forecast_protocol"][
+            "execution_and_scoring_boundary_hours"
+        ]
+        == 720
+    )
     well_control = protocol["control_scope"]["well_control"]
     assert (
         well_control["mode"]

@@ -21,6 +21,9 @@ from sim.control.event_based.residual_rl_v3.risk_gate import (
     AdaptiveRiskGateConfig,
 )
 from sim.control.event_based.rl.reward import HighLevelRewardConfig
+from sim.control.event_based.rl.observation_encoder import (
+    FORECAST_WINDOWS_H,
+)
 
 from .factory import make_tail_robust_native_env
 
@@ -62,7 +65,7 @@ def evaluate_run(
             int(value)
             for value in config.get(
                 "future_summary_windows_h",
-                (24, 72),
+                FORECAST_WINDOWS_H,
             )
         ),
         decision_interval_h=float(config["decision_interval_h"]),

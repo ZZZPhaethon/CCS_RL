@@ -72,7 +72,7 @@ class EventBasedAlgorithmCompatibilityTests(unittest.TestCase):
         )
 
         observation, _info = env.reset(seed=123)
-        self.assertEqual(observation.shape, (79,))
+        self.assertEqual(observation.shape, (72,))
         self.assertEqual(env.action_space.n, 64)
         self.assertEqual(env.action_masks().shape, (64,))
         self.assertTrue(env.action_masks().all())
@@ -103,7 +103,7 @@ class EventBasedAlgorithmCompatibilityTests(unittest.TestCase):
     def test_high_level_factory_defaults_to_local_formal_scenario_protocol(self):
         env = make_high_level_native_env(episode_hours=48)
 
-        self.assertEqual(env.env.scenario_generator.config.episode_hours, 217)
+        self.assertEqual(env.env.scenario_generator.config.episode_hours, 216)
         self.assertEqual(env.env.scenario_generator.config.weather_process, "block")
         self.assertTrue(env.env.scenario_generator.config.warm_start)
 

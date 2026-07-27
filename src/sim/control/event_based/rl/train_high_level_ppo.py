@@ -357,7 +357,7 @@ def make_high_level_native_env(
     *,
     scenario: str = "northern_lights_phase1_3vessels",
     episode_hours: int = 720,
-    forecast_context_hours: int = 169,
+    forecast_context_hours: int = 168,
     future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
     decision_interval_h: float = 24.0,
     event_triggered: bool = True,

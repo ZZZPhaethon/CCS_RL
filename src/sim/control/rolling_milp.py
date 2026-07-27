@@ -827,7 +827,15 @@ class RollingMilpController:
         term_init = sum(state.entity_inventory_t.get(t, 0.0) for t in env.terminal_ids)
         source_buffer = sum(state.entity_inventory_t.get(e, 0.0) for e in env.emitter_ids)
         start = time.perf_counter()
-        remaining_h = max(1, min(self.planning_horizon_h, env.n_steps - env.t))
+        scenario_steps = (
+            env.scenario.n_steps
+            if env.scenario is not None
+            else env.n_steps
+        )
+        remaining_h = max(
+            1,
+            min(self.planning_horizon_h, scenario_steps - env.t),
+        )
         previous_plan_actions = None
         previous_plan_elapsed_h = 0
         if (

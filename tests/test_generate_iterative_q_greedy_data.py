@@ -92,7 +92,7 @@ def test_small_dense_dataset_has_paired_actions_and_aligned_returns(tmp_path):
             metadata["future_summary_representation_id"]
             == FUTURE_SUMMARY_REPRESENTATION_ID
         )
-        assert metadata["future_summary_windows_h"] == [24, 72]
+        assert metadata["future_summary_windows_h"] == [168]
         assert (
             metadata["training_simulator_usage"]["simulator_step_calls"]
             == summary["simulator_step_calls"]

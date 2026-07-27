@@ -35,6 +35,10 @@ FORECAST_SUMMARY_WINDOWS = {
 FORECAST_SUMMARY_BANDS = {
     "forecast_summary_bands_24_72_168": ((0, 24), (24, 72), (72, 168)),
 }
+SHARED_FUTURE_INPUTS = {
+    "shared_future_summary",
+    "v4_future_24_72",
+}
 
 
 def forecast_summary_feature_names(metadata, windows_h):
@@ -57,7 +61,6 @@ def forecast_summary_feature_names(metadata, windows_h):
                 f"well.injectivity_min_{window_h}h",
                 f"fleet.speed_mean_{window_h}h",
                 f"fleet.speed_min_{window_h}h",
-                f"valid_fraction_{window_h}h",
             )
         )
     return names
@@ -84,7 +87,6 @@ def forecast_band_summary_feature_names(metadata, bands_h):
                 f"well.injectivity_min_{label}",
                 f"fleet.speed_mean_{label}",
                 f"fleet.speed_min_{label}",
-                f"valid_fraction_{label}",
             )
         )
     return names
@@ -100,6 +102,7 @@ def parse_args(argv=None):
         "--observation-input",
         choices=(
             "state_only",
+            "shared_future_summary",
             "v4_future_24_72",
             "forecast_168",
             *FORECAST_SUMMARY_WINDOWS,
@@ -271,7 +274,7 @@ def dataset_normalization(
         "state_std": np.maximum(states.std(axis=0), 1e-5),
         "return_scale": max(float(returns.std()), 1.0),
     }
-    if observation_input == "v4_future_24_72":
+    if observation_input in SHARED_FUTURE_INPUTS:
         unique_root_futures = []
         for data, _metadata in rows:
             if "future_summaries" not in data:
@@ -383,7 +386,7 @@ class GroupedDenseActionDataset(Dataset):
             reference_state = data["states"][indices[0], 0]
             if not np.allclose(data["states"][indices, 0], reference_state):
                 raise ValueError("same-root state observations are not identical")
-            if observation_input == "v4_future_24_72":
+            if observation_input in SHARED_FUTURE_INPUTS:
                 if "future_summaries" not in data:
                     raise ValueError(
                         "future-aware training requires future_summaries"
@@ -664,7 +667,7 @@ def run(args):
     for key in ("state_feature_names", "joint_actions"):
         if any(metadata[key] != train_metadata[key] for _data, metadata in all_rows):
             raise ValueError(f"dataset schema mismatch for {key}")
-    if args.observation_input == "v4_future_24_72":
+    if args.observation_input in SHARED_FUTURE_INPUTS:
         if "future_feature_names" not in train_metadata:
             raise ValueError("future-aware training requires future feature names")
         if any(
@@ -724,7 +727,7 @@ def run(args):
         ):
             raise ValueError("initial checkpoint forecast encoder mismatch")
         normalization_keys = ["state_mean", "state_std", "return_scale"]
-        if args.observation_input == "v4_future_24_72":
+        if args.observation_input in SHARED_FUTURE_INPUTS:
             normalization_keys.extend(("future_mean", "future_std"))
         elif args.observation_input == "forecast_168":
             normalization_keys.extend(("forecast_mean", "forecast_std"))
@@ -769,7 +772,7 @@ def run(args):
         "action_embedding_size": args.action_embedding_size,
         "action_feature_size": args.action_feature_size,
     }
-    if args.observation_input == "v4_future_24_72":
+    if args.observation_input in SHARED_FUTURE_INPUTS:
         if "future_feature_names" not in train_metadata:
             raise ValueError("future-aware training requires future feature names")
         model = IterativeFutureActionQuantileQ(
@@ -997,6 +1000,7 @@ def run(args):
     configuration = vars(args).copy()
     configuration["q_head"] = {
         "state_only": "iterative_action_q",
+        "shared_future_summary": "iterative_action_q_future_summary",
         "v4_future_24_72": "iterative_action_q_future_v4_24_72",
         "forecast_168": "iterative_action_q_future_168",
         "forecast_summary_24_72": "iterative_action_q_future_summary",
