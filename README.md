@@ -10,6 +10,7 @@
     <img src="https://img.shields.io/badge/E0-179%2F179%20passed-2E8B57?style=flat-square" alt="E0 validation passed">
     <img src="https://img.shields.io/badge/Artifacts-E0--E5-6F42C1?style=flat-square" alt="E0-E5 artifacts">
     <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white&style=flat-square" alt="Google Drive dataset"></a>
+    <a href="https://colab.research.google.com/github/ZZZPhaethon/CCS_RL/blob/main/examples/colab_vessel_trajectory_demo.ipynb"><img src="https://img.shields.io/badge/Open%20in-Colab-F9AB00?logo=googlecolab&logoColor=white&style=flat-square" alt="Open vessel-trajectory demo in Colab"></a>
   </p>
 
   <p>
