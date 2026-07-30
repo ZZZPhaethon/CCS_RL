@@ -1,0 +1,113 @@
+{
+  "figure": "Figure 4",
+  "test_seed": 9000056,
+  "iterative_q_model_seed": 0,
+  "trace_role": "trace-only replay; excluded from E1 statistics",
+  "checkpoint": "experiments_results\\E1\\models\\iterative_q\\g60_p4_model_seed_0\\iterative_action_q.pt",
+  "archived_results": "experiments_results\\E1\\formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01\\model_seed_0\\evaluation.csv",
+  "hourly_frames": 721,
+  "emitter_display_names": {
+    "brevik": "Brevik",
+    "celsio": "Celsio",
+    "yara_sluiskil": "Yara Sluiskil"
+  },
+  "vessel_display_names": {
+    "northern_pathfinder": "Vessel 1",
+    "northern_phoenix": "Vessel 2",
+    "northern_pioneer": "Vessel 3"
+  },
+  "terminal_display_names": {
+    "oygarden_terminal": "\u00d8ygarden terminal"
+  },
+  "inventory_capacities_t": {
+    "brevik": 7500.0,
+    "celsio": 7500.0,
+    "yara_sluiskil": 15000.0,
+    "northern_pathfinder": 7500.0,
+    "northern_phoenix": 7500.0,
+    "northern_pioneer": 7500.0,
+    "oygarden_terminal": 9150.0
+  },
+  "event_definition": {
+    "weather_slowdown": "vessel speed factor < 1",
+    "capture_outage": "capture availability == 0",
+    "capture_high_output": "sampled high-output multiplier > 1; ordinary hourly capture noise is excluded",
+    "well_maintenance": "well available == false",
+    "capture_noise_not_labelled_as_outage": true
+  },
+  "event_hours": {
+    "weather_slowdown": 205,
+    "capture_outage_by_emitter": {
+      "Brevik": 33,
+      "Celsio": 26,
+      "Yara Sluiskil": 34
+    },
+    "capture_high_output_by_emitter": {
+      "Brevik": 167,
+      "Celsio": 40,
+      "Yara Sluiskil": 150
+    },
+    "well_maintenance_by_well": {
+      "aurora_well_a7_ah": 18
+    }
+  },
+  "capture_high_output_windows_by_emitter": {
+    "Brevik": [
+      {
+        "start_hour": 110.0,
+        "end_hour": 216.0,
+        "multiplier": 1.3033733810829322
+      },
+      {
+        "start_hour": 491.0,
+        "end_hour": 543.0,
+        "multiplier": 1.6152986675023162
+      },
+      {
+        "start_hour": 551.0,
+        "end_hour": 560.0,
+        "multiplier": 1.4659253844879863
+      }
+    ],
+    "Celsio": [
+      {
+        "start_hour": 167.0,
+        "end_hour": 179.0,
+        "multiplier": 1.6153355453045135
+      },
+      {
+        "start_hour": 692.0,
+        "end_hour": 720.0,
+        "multiplier": 1.5014566740114976
+      }
+    ],
+    "Yara Sluiskil": [
+      {
+        "start_hour": 141.0,
+        "end_hour": 152.0,
+        "multiplier": 1.529065797533511
+      },
+      {
+        "start_hour": 291.0,
+        "end_hour": 399.0,
+        "multiplier": 1.4445740408358534
+      },
+      {
+        "start_hour": 685.0,
+        "end_hour": 716.0,
+        "multiplier": 1.5517518199035623
+      }
+    ]
+  },
+  "replay_validation": {
+    "total_cost_eur": 1899314.9664683864,
+    "vented_t": 0.0,
+    "stored_t": 105907.74065289191,
+    "event_count": 343,
+    "status": "exact_match_to_archived_metrics"
+  },
+  "output_formats": [
+    "pdf",
+    "png"
+  ]
+}

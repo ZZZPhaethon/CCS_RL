@@ -1,0 +1,22 @@
+{
+  "figure": "Figure 5",
+  "claim": "Evaluate degradation of the frozen E1 model and Greedy from Low through High composite disturbance stress.",
+  "test_seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "test_seed_count": 30,
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "interval_definition": "95% percentile hierarchical bootstrap confidence interval; test scenarios and model instances are resampled independently.",
+  "bootstrap_draws": 20000,
+  "bootstrap_seed": 20260730,
+  "formats": [
+    "pdf",
+    "png"
+  ],
+  "png_dpi": 300
+}

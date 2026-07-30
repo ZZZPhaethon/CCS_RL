@@ -1,0 +1,4 @@
+stage,stage_dir,shards,seeds,realized_roots,candidate_rows,training_simulator_calls,training_simulator_hours
+G0,/scratch_root/hx721/CCS_RLLLM_iterq_cleanup_matched_20260728/output/iterative_q_cleanup_matched_12window_4800_20260728/g0,20,200,2399,14938,6328003,6328003
+G1,output/iterative_q_exact_3600_future2472_s1_20260728_cpu/g1_2472_v2,16,40,479,3365,1360625,1360625
+G2,output/iterative_q_exact_3600_future2472_s1_20260728_cpu/g2_2472_v2,24,60,720,4573,1875502,1875502

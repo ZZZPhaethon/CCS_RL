@@ -1,0 +1,2 @@
+seed,decisions,simulated_hours,episode_total_cost_eur,terminal_cleanup_operating_cost_eur,total_cost_eur,operating_cost_eur,vented_t,stored_t,captured_t,storage_rate,loss_rate,cost_per_stored_t_eur,unit_total_cost_eur_per_t
+8100001,720,720.0,5357030.251867868,418983.24656192114,5776013.498429789,1710384.6152311175,50820.36103998329,45363.92358338245,125542.11540130965,0.36134426633143396,0.4048072702736466,127.3261447020345,127.3261447020345

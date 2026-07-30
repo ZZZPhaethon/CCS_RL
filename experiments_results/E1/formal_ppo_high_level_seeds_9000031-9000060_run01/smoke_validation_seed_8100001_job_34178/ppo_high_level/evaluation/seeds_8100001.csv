@@ -1,0 +1,2 @@
+seed,decisions,mean_decision_interval_h,episode_reward,captured_t,stored_t,vented_t,storage_rate,episode_operating_cost_eur,terminal_cleanup_operating_cost_eur,operating_cost_eur,episode_total_cost_eur,total_cost_eur,unit_total_cost_eur_per_t,hard_violations,wall_clock_seconds
+8100001,180,4.0,-1.9271215319495194,125542.11540130965,107563.92358338191,249.58951882208555,0.8567955322366649,1676563.2559971085,230591.1144466449,1907154.3704437534,1696530.4175028754,1927121.5319495203,17.916058356272632,0,0.6381807569414377

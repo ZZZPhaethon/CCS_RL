@@ -1,0 +1,5 @@
+scope,level,model_seed,future2472_minus_single168_mean_cost_eur,between_model_seed_sd_eur,hierarchical_95pct_ci_low_eur,hierarchical_95pct_ci_high_eur
+exact_closed_loop,model_seed,0,10683.081270239247,,,
+exact_closed_loop,model_seed,1,16485.693464399654,,,
+exact_closed_loop,model_seed,2,-34111.34009154038,,,
+exact_closed_loop,three_seed_aggregate,"0,1,2",-2314.188452300494,27689.55969938068,-52872.19410662323,44651.64494286283

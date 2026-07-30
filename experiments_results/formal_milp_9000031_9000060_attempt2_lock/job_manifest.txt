@@ -1,0 +1,6 @@
+rolling_array_job_id=33519
+full_array_job_id=33520
+rolling_array=0-29%10
+full_array=0-29%8
+rolling_result_root=/scratch_root/hx721/CCS_RLLLM_milp_validation_20260728/experiments_results/E1/rolling_milp_formal_9000031_9000060_cplex222_300s_attempt2
+full_result_root=/scratch_root/hx721/CCS_RLLLM_milp_validation_20260728/experiments_results/E5/full_milp_formal_9000031_9000060_cplex222_7200s_attempt2

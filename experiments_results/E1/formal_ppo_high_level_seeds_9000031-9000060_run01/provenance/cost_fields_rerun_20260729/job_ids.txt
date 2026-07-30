@@ -1,0 +1,3 @@
+shared_smoke_job=34442
+formal_array_job=34443
+formal_array_tasks=34443_0,34443_1,34443_2

@@ -1,0 +1,21 @@
+{
+  "figure": "Figure 3c",
+  "method_count": 6,
+  "sort_order": "ascending mean episode-level unit total cost",
+  "normalization": "Each component is divided by all captured_t entering the system within each episode before averaging across episode records. Missing Iterative Action-Q captured_t values use the paired exogenous-scenario value from the same test seed.",
+  "component_definition": {
+    "mean_vessel_fuel_eur_per_captured_t": "Vessel fuel",
+    "mean_conditioning_eur_per_captured_t": "Conditioning",
+    "mean_reconditioning_eur_per_captured_t": "Reconditioning",
+    "mean_loading_eur_per_captured_t": "Loading",
+    "mean_unloading_eur_per_captured_t": "Unloading",
+    "mean_vent_penalty_eur_per_captured_t": "Vent penalty",
+    "mean_terminal_cleanup_eur_per_captured_t": "Terminal cleanup"
+  },
+  "rolling_milp_time_limit_seconds_per_replan": 600,
+  "input_csv": "experiments_results\\E1\\formal_comparison\\e1_formal_per_episode.csv",
+  "output_formats": [
+    "pdf",
+    "png"
+  ]
+}

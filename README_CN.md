@@ -87,13 +87,14 @@ P3 roll-in 状态 G3    -> 用全部数据训练 P4
 
 关键公平性规则：所有 forecast-capable 方法使用同一份 forecast **来源**（当前为 perfect-forecast
 协议）；三种学习方法共享同一环境交互预算 `B_4800`；所有方法的报告成本统一加入 common compact trip
-cleanup 末端价值；正式测试 seeds `9,000,001–9,000,030` 在方法、checkpoint、门控和报告口径全部锁定
-之前不得触碰。
+cleanup 末端价值；后续正式配对比较固定使用未访问测试集 `9,000,031–9,000,060`，该集合不得再参与任何
+选择；`9,000,001–9,000,030` 保留为
+弃用的历史测试结果。
 
 ## 初步结果
 
 开发 seeds 上的比较（`8,000,001–8,000,030`，30 个配对 seeds，每种学习方法**仅一个训练随机种子**）。
-这些**不是**正式结果 —— 锁定的正式测试 seeds 尚未运行。完整记录见
+这些结果仍为 development-only。完整记录见
 [`docs/preliminary results/unified_window_control_comparison_2026-07-26_zh.md`](docs/preliminary%20results/unified_window_control_comparison_2026-07-26_zh.md)。
 
 | 方法 | 总成本 (EUR) | 相对 Greedy | Vent (t) | Stored (t) | 单位成本 (EUR/t) | 胜 Greedy |

@@ -1,0 +1,9 @@
+phase,configuration,policy_aggregation_rounds,root_allocation,nominal_roots,realized_roots,training_simulator_calls,gate,model_seed,mean_total_cost_eur,mean_delta_vs_greedy_eur,wins,ties,losses,mean_vented_t,mean_stored_t,mean_override_events
+baseline_reference,A_inherited_P2,1,2400|480,2880,2879,7598673,4heads_margin40_cap12,0,1887957.31,-186051.05,17,0,3,1371.55,109027.07,11.90
+fixed_bank_proxy,B,2,2160|360|360,2880,2879,7499694,4heads_margin40_cap12,0,1876050.03,-197958.33,17,0,3,1020.54,110071.21,11.85
+fixed_bank_proxy,C,2,1920|480|480,2880,2879,7549057,4heads_margin40_cap12,0,1896666.69,-177341.68,14,0,6,1240.60,108007.00,11.65
+fixed_bank_proxy,D,2,1680|480|720,2880,2879,7595764,4heads_margin40_cap12,0,1875173.27,-198835.10,15,0,5,1009.76,109343.31,11.00
+fixed_bank_proxy,E,3,1440|480|480|480,2880,2880,7689323,4heads_margin40_cap12,0,1844677.21,-229331.15,16,0,4,699.69,109575.15,11.15
+exact_closed_loop,B,2,2160|360|360,2880,2879,7495692,4heads_margin40_cap12,0,1880076.53,-193931.83,15,0,5,1167.58,109720.85,11.65
+exact_closed_loop,E,3,1440|480|480|480,2880,2880,7628972,4heads_margin40_cap12,0,1942344.57,-131663.80,11,0,9,1938.95,107760.55,10.95
+selected,B_margin50,2,2160|360|360,2880,2879,7495692,4heads_margin50_cap12,0,1877389.51,-196618.85,16,0,4,1122.87,109000.55,11.15

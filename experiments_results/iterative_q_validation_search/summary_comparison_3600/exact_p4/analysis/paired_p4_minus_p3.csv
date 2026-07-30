@@ -1,0 +1,5 @@
+level,model_seed,p4_minus_p3_mean_cost_eur,p4_better_scenarios,p4_ties,p4_worse_scenarios,between_model_seed_sd_eur,hierarchical_95pct_ci_low_eur,hierarchical_95pct_ci_high_eur
+model_seed,0,28671.893775486,10,0,10,,,
+model_seed,1,7195.519337848283,10,0,10,,,
+model_seed,2,-31147.82711183643,12,0,8,,,
+three_seed_aggregate,"0,1,2",1573.1953338326186,32,0,28,30303.59132452601,-62870.428591633776,67325.26781549737

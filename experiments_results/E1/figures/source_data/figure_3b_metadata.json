@@ -1,0 +1,20 @@
+{
+  "figure": "Figure 3b",
+  "method_count": 6,
+  "sort_order": "ascending mean total cost",
+  "component_definition": {
+    "mean_episode_vessel_fuel_eur": "Vessel fuel",
+    "mean_episode_conditioning_eur": "Conditioning",
+    "mean_episode_reconditioning_eur": "Reconditioning",
+    "mean_episode_loading_eur": "Loading",
+    "mean_episode_unloading_eur": "Unloading",
+    "mean_episode_vent_penalty_eur": "Vent penalty",
+    "mean_terminal_cleanup_operating_cost_eur": "Terminal cleanup"
+  },
+  "rolling_milp_time_limit_seconds_per_replan": 600,
+  "input_csv": "experiments_results\\E1\\formal_comparison\\e1_formal_per_algorithm.csv",
+  "output_formats": [
+    "pdf",
+    "png"
+  ]
+}

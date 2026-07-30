@@ -1,0 +1,18 @@
+{
+  "figure": "Figure 3a",
+  "baseline": "Fixed-Assignment Heuristic",
+  "test_seeds": [
+    9000031,
+    9000060
+  ],
+  "test_scenario_count": 30,
+  "point_definition": "Per-test-scenario paired total-cost difference; learned-method points average model seeds 0, 1, and 2.",
+  "interval_definition": "95% percentile hierarchical bootstrap confidence interval for the mean; test scenarios and learned model instances are resampled independently.",
+  "bootstrap_draws": 20000,
+  "rolling_milp_time_limit_seconds_per_replan": 600,
+  "input_csv": "experiments_results\\E1\\formal_comparison\\e1_formal_per_episode.csv",
+  "output_formats": [
+    "pdf",
+    "png"
+  ]
+}

@@ -1,0 +1,17 @@
+config=exact_realloc_b
+g0_train_count=180
+g0_validation_count=40
+g0_root_fractions=0.15:0.2166666667:0.2833333333:0.35:0.4166666667:0.4833333333:0.55:0.6166666667:0.6833333333:0.75:0.8166666667:0.8833333333
+g0_roots_per_seed=12
+iteration_train_counts=30,30
+iteration_validation_counts=8,12
+iteration_train_starts=1500,1600
+iteration_validation_starts=3200,3230
+weighted_train_roots=2880
+final_stage=p3
+scenario_protocol=unified_window_v1
+hard_scenario_probability=0.5
+forecast_context_hours=168
+observation_input=shared_future_summary
+policy_windows_h=108-155:156-203:204-251:252-299:300-347:348-395:396-443:444-491:492-539:540-587:588-635:636-680
+max_overrides=12

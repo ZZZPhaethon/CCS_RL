@@ -523,7 +523,7 @@ y(s,a) = \alpha\left[J_{\mathrm{default}}(s)-J_a(s)\right],
 - 目标和约束与 simulator 对齐；
 - 只优化船舶调度，并在 planning transition 中复现 simulator 的最大可行井注入规则；
 - 每次重规划使用从当前状态生成的完整、合法且 replay-valid Greedy 计划作为唯一 MIP start；
-- 不使用 Native MPC 候选，也不使用上一次 MILP 计划平移的 warm start；
+- 不使用额外候选，也不使用上一次 MILP 计划平移的 warm start；
 - 只执行第一个 24 h；
 - 固定 time limit；
 - incumbent replay；
@@ -905,7 +905,7 @@ E5 实验必须运行，但不预设能够求到 optimal。
 - solver/version；
 - time limit；
 - Greedy-only MIP start 的生成、合法性和 replay 验证；
-- 不使用 Native MPC/shifted-plan warm start；
+- 不使用额外候选或 shifted-plan warm start；
 - incumbent replay 和无有效 incumbent 时的 solver-failure/episode-termination 规则。
 
 ## S3. Iterative Action-Q implementation details

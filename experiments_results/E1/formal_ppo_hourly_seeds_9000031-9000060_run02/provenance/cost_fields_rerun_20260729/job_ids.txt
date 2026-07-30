@@ -1,0 +1,3 @@
+smoke_job=34440
+formal_array_job=34441
+formal_array_tasks=34441_0,34441_1,34441_2
