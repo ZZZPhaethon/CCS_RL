@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -54,9 +55,19 @@ def parse_args(argv=None):
     parser.add_argument("--rolling-replan-hours", type=int, default=24)
     parser.add_argument("--rolling-planning-horizon-hours", type=int, default=48)
     parser.add_argument("--rolling-time-limit-seconds", type=float, default=5.0)
+    parser.add_argument(
+        "--rolling-warm-start-mode",
+        choices=("greedy", "none"),
+        default="greedy",
+    )
     parser.add_argument("--full-milp-horizon-hours", type=int, default=48)
     parser.add_argument("--full-milp-time-limit-seconds", type=float, default=30.0)
     parser.add_argument("--mip-gap-relative", type=float)
+    parser.add_argument("--solver-threads", type=int, default=4)
+    parser.add_argument(
+        "--purpose",
+        default="implementation_smoke_test_not_formal_results",
+    )
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args(argv)
     positive = (
@@ -72,6 +83,8 @@ def parse_args(argv=None):
         parser.error("all horizons, intervals and time limits must be positive")
     if args.mip_gap_relative is not None and args.mip_gap_relative < 0.0:
         parser.error("mip gap must be non-negative")
+    if args.solver_threads <= 0:
+        parser.error("solver threads must be positive")
     return args
 
 
@@ -108,6 +121,31 @@ def _cleanup_cost(env) -> float:
     )
 
 
+def _compact_mip_start_audit(audit) -> dict[str, object]:
+    return {
+        "total_variables": audit.total_variables,
+        "initialized_variables": audit.initialized_variables,
+        "missing_variable_count": audit.missing_variable_count,
+        "bound_violation_count": audit.bound_violation_count,
+        "integrality_violation_count": audit.integrality_violation_count,
+        "total_constraints": audit.total_constraints,
+        "evaluated_constraints": audit.evaluated_constraints,
+        "partial_constraint_count": audit.partial_constraint_count,
+        "violated_constraint_count": audit.violated_constraint_count,
+        "max_constraint_violation": audit.max_constraint_violation,
+        "top_violations": [
+            {
+                "constraint": violation.constraint,
+                "sense": violation.sense,
+                "residual": violation.residual,
+                "violation": violation.violation,
+                "variable_names": list(violation.variable_names[:20]),
+            }
+            for violation in audit.top_violations
+        ],
+    }
+
+
 def _failure_row(
     controller: str,
     seed: int,
@@ -134,7 +172,11 @@ def _failure_row(
     }
 
 
-def _run_simple_controller(args, controller: str) -> dict[str, object]:
+def _run_simple_controller(
+    args,
+    controller: str,
+    executed_actions_out: list[dict[str, list[int]]] | None = None,
+) -> dict[str, object]:
     env = make_env(
         args.online_episode_hours,
         args.forecast_context_hours,
@@ -144,13 +186,16 @@ def _run_simple_controller(args, controller: str) -> dict[str, object]:
         if controller == "fixed_assignment"
         else greedy_shuttle_policy
     )
+    recording_policy = _ActionRecorder(policy)
     record = run_recorded_episode(
         env,
-        policy,
+        recording_policy,
         controller=controller,
         seed=args.seed,
         terminal_cleanup_cost=_cleanup_cost,
     )
+    if executed_actions_out is not None:
+        executed_actions_out.extend(recording_policy.actions)
     return {
         **record.as_dict(),
         "evaluation_role": "online_controller",
@@ -158,10 +203,32 @@ def _run_simple_controller(args, controller: str) -> dict[str, object]:
         "run_status": "completed",
         "error_type": "",
         "error_message": "",
+        "executed_action_count": len(recording_policy.actions),
     }
 
 
-def _run_rolling_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
+class _ActionRecorder:
+    def __init__(self, policy) -> None:
+        self.policy = policy
+        self.actions: list[dict[str, list[int]]] = []
+
+    def __call__(self, env):
+        action = self.policy(env)
+        self.actions.append(_json_action(action))
+        return action
+
+
+def _json_action(action) -> dict[str, list[int]]:
+    return {
+        str(group): [int(choice) for choice in choices]
+        for group, choices in action.items()
+    }
+
+
+def _run_rolling_milp(
+    args,
+    executed_actions_out: list[dict[str, list[int]]] | None = None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     env = make_env(
         args.online_episode_hours,
         args.forecast_context_hours,
@@ -172,17 +239,21 @@ def _run_rolling_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]
         planning_horizon_h=args.rolling_planning_horizon_hours,
         time_limit_s=args.rolling_time_limit_seconds,
         mip_gap_rel=args.mip_gap_relative,
+        solver_threads=args.solver_threads,
+        progress=lambda message: print(message, flush=True),
         objective_mode="economic",
         terminal_cleanup_value=True,
+        terminal_cleanup_mip_start_mode="complete",
         shifted_milp_warm_start=False,
-        warm_start_mode="greedy",
+        warm_start_mode=getattr(args, "rolling_warm_start_mode", "greedy"),
     )
+    recording_controller = _ActionRecorder(controller)
     usage_before = env.simulator_step_usage()
     started_at = time.perf_counter()
     try:
         record = run_recorded_episode(
             env,
-            controller,
+            recording_controller,
             controller="rolling_milp",
             seed=args.seed,
             terminal_cleanup_cost=_cleanup_cost,
@@ -221,11 +292,23 @@ def _run_rolling_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]
                 "time" in str(diagnostic["termination_reason"]).lower()
                 for diagnostic in controller.replan_diagnostics
             ),
+            "solver_solve_wall_seconds": sum(
+                float(diagnostic["solve_wall_s"])
+                for diagnostic in controller.replan_diagnostics
+            ),
+            "solver_time_limit_seconds_per_replan": float(
+                args.rolling_time_limit_seconds
+            ),
+            "solver_threads": int(args.solver_threads),
+            "solver_executable": shutil.which("cplex") or "",
             "warm_start_mode": controller.warm_start_mode,
             "shifted_warm_start": controller.shifted_milp_warm_start,
             "fallback_used": False,
+            "executed_action_count": len(recording_controller.actions),
         }
     )
+    if executed_actions_out is not None:
+        executed_actions_out.extend(recording_controller.actions)
     return row, controller.replan_diagnostics
 
 
@@ -270,6 +353,12 @@ def _full_milp_success_row(
         "solver_status": result.status,
         "solver_is_valid": bool(result.is_valid),
         "solver_validation_error": result.validation_error,
+        "solver_incumbent_objective": (
+            final_stage.objective_value if final_stage is not None else None
+        ),
+        "solver_augmented_objective": float(
+            result.augmented_objective_value
+        ),
         "solver_best_bound": (
             final_stage.best_bound if final_stage is not None else None
         ),
@@ -282,6 +371,14 @@ def _full_milp_success_row(
         "solver_warm_start_accepted": (
             final_stage.warm_start_accepted if final_stage is not None else None
         ),
+        "solver_solve_wall_seconds": (
+            final_stage.wall_time_s if final_stage is not None else None
+        ),
+        "solver_time_limit_seconds": float(
+            args.full_milp_time_limit_seconds
+        ),
+        "solver_threads": int(args.solver_threads),
+        "solver_executable": shutil.which("cplex") or "",
         "warm_start_mode": "greedy",
         "fallback_used": False,
         "replay_is_executable": bool(replay.is_executable),
@@ -294,8 +391,14 @@ def _full_milp_success_row(
         "terminal_cleanup_operating_cost": float(
             terminal_cleanup_cost
         ),
+        "solver_terminal_cleanup_operating_cost": float(
+            result.terminal_cleanup_cost
+        ),
         "operating_cost": operating_cost,
         "total_cost": total_cost,
+        "replay_minus_solver_objective": (
+            total_cost - float(result.augmented_objective_value)
+        ),
         "cost_per_stored_t": (
             operating_cost / stored_t if stored_t > 1e-9 else None
         ),
@@ -330,22 +433,34 @@ def _full_milp_success_row(
     }
 
 
-def _run_full_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
+def _run_full_milp(
+    args,
+    executed_actions_out: list[dict[str, list[int]]] | None = None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     evaluation_horizon_h = int(args.full_milp_horizon_hours)
-    planning_horizon_h = (
-        evaluation_horizon_h + int(args.forecast_context_hours)
-    )
+    planning_horizon_h = evaluation_horizon_h
     planning_env = make_env(
-        planning_horizon_h,
-        0,
+        evaluation_horizon_h,
+        args.forecast_context_hours,
     )
     planning_env.reset(seed=args.seed)
     usage_before = planning_env.simulator_step_usage()
     started_at = time.perf_counter()
+    evaluation_actions: list[dict[str, list[int]]] = []
     try:
+        print(
+            f"full_milp seed={args.seed}: building "
+            f"{planning_horizon_h} h Greedy warm start",
+            flush=True,
+        )
         warm_start = greedy_warm_start_actions(
             planning_env,
             planning_horizon_h,
+        )
+        print(
+            f"full_milp seed={args.seed}: starting CPLEX with "
+            f"{args.full_milp_time_limit_seconds:.0f} s limit",
+            flush=True,
         )
         result = solve_full_scenario_with_cplex(
             planning_env,
@@ -354,9 +469,15 @@ def _run_full_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
             warm_start_native_actions_by_hour=warm_start,
             time_limit_s=args.full_milp_time_limit_seconds,
             mip_gap_rel=args.mip_gap_relative,
+            threads=args.solver_threads,
+            cplex_options=[
+                "set parallel 1",
+                "set simplex tolerances feasibility 1e-7",
+            ],
             economic_objective=True,
             environment_aligned_service=True,
             terminal_cleanup_value=True,
+            terminal_cleanup_mip_start_mode="complete",
             cleanup_unary_trip_slots=True,
             vessel_visit_load_cuts=True,
             source_visit_vent_cuts=True,
@@ -364,11 +485,87 @@ def _run_full_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
             service_reachability_cuts=True,
             route_cargo_flow_linking=True,
         )
+        diagnostics = [
+            {
+                "stage": stage.stage,
+                "time_limit_s": stage.time_limit_s,
+                "wall_time_s": stage.wall_time_s,
+                "status": stage.status,
+                "objective_value": stage.objective_value,
+                "best_bound": stage.best_bound,
+                "relative_gap": stage.relative_gap,
+                "termination_reason": stage.termination_reason,
+                "warm_start_requested": stage.warm_start_requested,
+                "warm_start_accepted": stage.warm_start_accepted,
+            }
+            for stage in result.stage_diagnostics
+        ]
+        mip_start_audit = getattr(result, "mip_start_audit", None)
+        if mip_start_audit is not None:
+            diagnostics.append(
+                {
+                    "stage": "mip_start_audit",
+                    **_compact_mip_start_audit(mip_start_audit),
+                }
+            )
         if not result.is_valid:
-            raise RuntimeError(
+            error = RuntimeError(
                 result.validation_error
                 or f"full MILP solver status {result.status}"
             )
+            row = _failure_row(
+                "full_milp",
+                args.seed,
+                error,
+                time.perf_counter() - started_at,
+                planning_env.simulator_step_usage() - usage_before,
+                evaluation_role="offline_reference",
+            )
+            final_stage = (
+                result.stage_diagnostics[-1]
+                if result.stage_diagnostics
+                else None
+            )
+            row.update(
+                {
+                    "solver_status": result.status,
+                    "solver_is_valid": False,
+                    "solver_validation_error": result.validation_error,
+                    "solver_best_bound": (
+                        final_stage.best_bound
+                        if final_stage is not None
+                        else None
+                    ),
+                    "solver_relative_gap": (
+                        final_stage.relative_gap
+                        if final_stage is not None
+                        else None
+                    ),
+                    "solver_termination_reason": (
+                        final_stage.termination_reason
+                        if final_stage is not None
+                        else ""
+                    ),
+                    "solver_warm_start_accepted": (
+                        final_stage.warm_start_accepted
+                        if final_stage is not None
+                        else None
+                    ),
+                    "solver_time_limit_seconds": float(
+                        args.full_milp_time_limit_seconds
+                    ),
+                    "solver_threads": int(args.solver_threads),
+                    "solver_executable": shutil.which("cplex") or "",
+                    "planning_horizon_hours": planning_horizon_h,
+                    "evaluation_horizon_hours": evaluation_horizon_h,
+                    "warm_start_mode": "greedy",
+                    "fallback_used": False,
+                }
+            )
+            row["executed_action_count"] = 0
+            if executed_actions_out is not None:
+                executed_actions_out.extend(evaluation_actions)
+            return row, diagnostics
         replay_env = make_env(
             evaluation_horizon_h,
             args.forecast_context_hours,
@@ -386,6 +583,11 @@ def _run_full_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
             horizon_h=evaluation_horizon_h,
             copy_env=False,
         )
+        print(
+            f"full_milp seed={args.seed}: solver={result.status}; "
+            f"replay_executable={replay.is_executable}",
+            flush=True,
+        )
         usage = (
             planning_env.simulator_step_usage() - usage_before
         )
@@ -397,32 +599,37 @@ def _run_full_milp(args) -> tuple[dict[str, object], list[dict[str, object]]]:
             time.perf_counter() - started_at,
             usage,
         )
-        diagnostics = [
-            {
-                "stage": stage.stage,
-                "time_limit_s": stage.time_limit_s,
-                "wall_time_s": stage.wall_time_s,
-                "status": stage.status,
-                "objective_value": stage.objective_value,
-                "best_bound": stage.best_bound,
-                "relative_gap": stage.relative_gap,
-                "termination_reason": stage.termination_reason,
-                "warm_start_requested": stage.warm_start_requested,
-                "warm_start_accepted": stage.warm_start_accepted,
-            }
-            for stage in result.stage_diagnostics
-        ]
+        row["executed_action_count"] = len(evaluation_actions)
+        if executed_actions_out is not None:
+            executed_actions_out.extend(evaluation_actions)
         return row, diagnostics
     except Exception as error:
+        failure = _failure_row(
+            "full_milp",
+            args.seed,
+            error,
+            time.perf_counter() - started_at,
+            planning_env.simulator_step_usage() - usage_before,
+            evaluation_role="offline_reference",
+        )
+        failure.update(
+            {
+                "solver_time_limit_seconds": float(
+                    args.full_milp_time_limit_seconds
+                ),
+                "solver_threads": int(args.solver_threads),
+                "solver_executable": shutil.which("cplex") or "",
+                "planning_horizon_hours": planning_horizon_h,
+                "evaluation_horizon_hours": evaluation_horizon_h,
+                "warm_start_mode": "greedy",
+                "fallback_used": False,
+                "executed_action_count": len(evaluation_actions),
+            }
+        )
+        if executed_actions_out is not None:
+            executed_actions_out.extend(evaluation_actions)
         return (
-            _failure_row(
-                "full_milp",
-                args.seed,
-                error,
-                time.perf_counter() - started_at,
-                planning_env.simulator_step_usage() - usage_before,
-                evaluation_role="offline_reference",
-            ),
+            failure,
             [],
         )
 
@@ -445,11 +652,13 @@ def run(args):
     args.out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
     diagnostics: dict[str, object] = {}
+    executed_actions: dict[str, list[dict[str, list[int]]]] = {}
     for controller in args.controllers:
         if controller in {"fixed_assignment", "greedy"}:
             started_at = time.perf_counter()
+            actions: list[dict[str, list[int]]] = []
             try:
-                rows.append(_run_simple_controller(args, controller))
+                rows.append(_run_simple_controller(args, controller, actions))
             except Exception as error:
                 rows.append(
                     _failure_row(
@@ -464,19 +673,37 @@ def run(args):
                         evaluation_role="online_controller",
                     )
                 )
+            executed_actions[controller] = actions
         elif controller == "rolling_milp":
-            row, replans = _run_rolling_milp(args)
+            actions: list[dict[str, list[int]]] = []
+            row, replans = _run_rolling_milp(args, actions)
             rows.append(row)
             diagnostics["rolling_milp_replans"] = replans
+            executed_actions["rolling_milp"] = actions
         elif controller == "full_milp":
-            row, stages = _run_full_milp(args)
+            actions = []
+            row, stages = _run_full_milp(args, actions)
             rows.append(row)
             diagnostics["full_milp_stages"] = stages
+            executed_actions["full_milp"] = actions
 
     _write_csv(args.out_dir / "per_controller.csv", rows)
+    action_payload = {
+        "protocol": "unified_window_v1",
+        "purpose": args.purpose,
+        "seed": int(args.seed),
+        "actions_by_controller": {
+            controller: [_json_action(action) for action in actions]
+            for controller, actions in executed_actions.items()
+        },
+    }
+    (args.out_dir / "executed_actions.json").write_text(
+        json.dumps(action_payload, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
     payload = {
         "protocol": "unified_window_v1",
-        "purpose": "implementation_smoke_test_not_formal_results",
+        "purpose": args.purpose,
         "configuration": {
             key: str(value) if isinstance(value, Path) else value
             for key, value in vars(args).items()
