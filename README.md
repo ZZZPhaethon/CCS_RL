@@ -18,7 +18,7 @@ Physics-Constrained Simulation and Learned Dispatch Control for Ship-Based CCS C
   <img src="assets/Overview.png" alt="CCUS teaser" width="95%">
 </p>
 
-CCS_RLLLM is a research codebase for **hourly operational dispatch of ship-based CO₂
+CCS_RL is a research codebase for **hourly operational dispatch of ship-based CO₂
 transport and storage**. It combines a physics-constrained simulator of the full CCS chain
 with a family of controllers — heuristics, rolling MILP, PPO variants, and the current main
 method **Iterative Action-Q** — evaluated against each other under one frozen disturbance and
