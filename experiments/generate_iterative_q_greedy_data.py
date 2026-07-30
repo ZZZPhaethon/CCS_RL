@@ -143,7 +143,16 @@ def generate_candidate(
         tail_residual += tail_reward
 
     candidate_metrics = common.metrics(wrapper.env)
-    total_residual_return = float(rollin_residual + residual_reward + tail_residual)
+    cleanup_residual_return = float(args.reward_scale) * (
+        float(baseline_metrics["terminal_cleanup_operating_cost_eur"])
+        - float(candidate_metrics["terminal_cleanup_operating_cost_eur"])
+    )
+    total_residual_return = float(
+        rollin_residual
+        + residual_reward
+        + tail_residual
+        + cleanup_residual_return
+    )
     expected_residual_return = float(args.reward_scale) * (
         float(baseline_metrics["total_cost_eur"])
         - float(candidate_metrics["total_cost_eur"])
@@ -153,7 +162,9 @@ def generate_candidate(
             "residual reward is not aligned with full economic cost: "
             f"return={total_residual_return}, expected={expected_residual_return}"
         )
-    arrays["return_to_go"][0] = float(residual_reward + tail_residual)
+    arrays["return_to_go"][0] = float(
+        residual_reward + tail_residual + cleanup_residual_return
+    )
     return {
         **arrays,
         "scenario_seed": int(seed),
@@ -240,7 +251,10 @@ def generate_dataset(args):
         "follow_indices": schema_wrapper.residual_env.follow_indices.tolist(),
         "follow_action_index": int(schema_wrapper.follow_action()),
         "reward_scale": float(args.reward_scale),
-        "objective": "pure economic operating cost plus vent penalty",
+        "objective": (
+            "720 h economic episode cost plus common compact terminal cleanup "
+            "operating cost"
+        ),
         "residual_reward": "scaled Greedy cost minus candidate cost",
         "uses_mpc": False,
         "scenario_protocol": str(args.scenario_protocol),

@@ -19,6 +19,7 @@ PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_greedy_dagger}"
 : "${OUTPUT_STAGE:?OUTPUT_STAGE must be set}"
 : "${RESIDUAL_MARGIN:?RESIDUAL_MARGIN must be set}"
 : "${ECONOMIC_MARGIN_EUR:?ECONOMIC_MARGIN_EUR must be set}"
+: "${REQUIRED_HEADS:=4}"
 : "${MAX_OVERRIDES:?MAX_OVERRIDES must be set}"
 : "${POLICY_WINDOWS_H:?POLICY_WINDOWS_H must be set}"
 PROTOCOL_PREFIX="${PROTOCOL_PREFIX:-iterative_q}"
@@ -37,5 +38,6 @@ python -u experiments/create_iterative_q_lock.py \
   --protocol-id "${PROTOCOL_PREFIX}_${OUTPUT_STAGE}" \
   --residual-margin "$RESIDUAL_MARGIN" \
   --economic-margin-eur "$ECONOMIC_MARGIN_EUR" \
+  --required-heads "$REQUIRED_HEADS" \
   --max-overrides "$MAX_OVERRIDES" \
   --windows-h "$POLICY_WINDOWS_CSV"

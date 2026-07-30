@@ -89,6 +89,30 @@ def merge_shards(args) -> dict[str, object]:
     metadata["candidates_per_seed"] = None
     metadata["merged_shards"] = [str(path) for path in args.shards]
     metadata["candidate_count"] = int(len(merged["scenario_seed"]))
+    usage_rows = [
+        row.get("training_simulator_usage") for row in metadata_rows
+    ]
+    if any(row is not None for row in usage_rows):
+        if any(row is None for row in usage_rows):
+            raise ValueError(
+                "training_simulator_usage is missing from some shards"
+            )
+        metadata["training_simulator_usage"] = {
+            field: sum(float(row[field]) for row in usage_rows)
+            for field in (
+                "simulator_step_calls",
+                "simulator_simulated_hours",
+                "simulator_hour_steps",
+            )
+        }
+        metadata["training_simulator_usage"]["simulator_step_calls"] = int(
+            metadata["training_simulator_usage"]["simulator_step_calls"]
+        )
+    if "root_time_h" in merged:
+        root_keys = np.stack(
+            (merged["scenario_seed"], merged["root_time_h"]), axis=1
+        )
+        metadata["root_count"] = int(len(np.unique(root_keys, axis=0)))
     merged["metadata_json"] = np.asarray(json.dumps(metadata, separators=(",", ":")))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +129,12 @@ def merge_shards(args) -> dict[str, object]:
         "mean_delta_cost_eur": float(delta.mean()),
         "best_delta_cost_eur": float(delta.min()),
     }
+    if "root_count" in metadata:
+        summary["roots"] = metadata["root_count"]
+    if "training_simulator_usage" in metadata:
+        summary["training_simulator_usage"] = metadata[
+            "training_simulator_usage"
+        ]
     print(json.dumps(summary, indent=2), flush=True)
     return summary
 

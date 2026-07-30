@@ -25,7 +25,10 @@ EVAL_NAME="${EVAL_NAME:-iterative_action_q}"
 SCENARIO_PROTOCOL="${SCENARIO_PROTOCOL:-q_original}"
 HARD_SCENARIO_PROBABILITY="${HARD_SCENARIO_PROBABILITY:-0.5}"
 FORECAST_CONTEXT_HOURS="${FORECAST_CONTEXT_HOURS:-168}"
+FUTURE_SUMMARY_WINDOWS_H="${FUTURE_SUMMARY_WINDOWS_H:-}"
 V4_RUN_DIR="${V4_RUN_DIR:-output/unified_physics/residual_v4_seed0_100k_20260725_noref}"
+EVAL_SEEDS="${EVAL_SEEDS:-}"
+VALIDATION_ONLY="${VALIDATION_ONLY:-0}"
 
 cd "$PROJECT_DIR"
 mkdir -p logs
@@ -33,7 +36,26 @@ export PYTHONPATH=src:.:scripts
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
-mapfile -t TEST_SEEDS < <(seq 7000 7029)
+if [[ -n "$EVAL_SEEDS" ]]; then
+  if [[ "$EVAL_SEEDS" == *:* ]]; then
+    IFS=':' read -r -a TEST_SEEDS <<< "$EVAL_SEEDS"
+  else
+    read -r -a TEST_SEEDS <<< "$EVAL_SEEDS"
+  fi
+else
+  mapfile -t TEST_SEEDS < <(seq 7000 7029)
+fi
+VALIDATION_ARGS=()
+if [[ "$VALIDATION_ONLY" == "1" ]]; then
+  VALIDATION_ARGS+=(--validation-only)
+fi
+FUTURE_SUMMARY_ARGS=()
+if [[ -n "$FUTURE_SUMMARY_WINDOWS_H" ]]; then
+  IFS=':' read -r -a FUTURE_SUMMARY_WINDOWS <<< "$FUTURE_SUMMARY_WINDOWS_H"
+  FUTURE_SUMMARY_ARGS+=(
+    --future-summary-windows-h "${FUTURE_SUMMARY_WINDOWS[@]}"
+  )
+fi
 
 if [[ "$SCENARIO_PROTOCOL" == "v4_mixed_window" ]]; then
   python -u experiments/evaluate_iterative_action_q.py \
@@ -43,6 +65,8 @@ if [[ "$SCENARIO_PROTOCOL" == "v4_mixed_window" ]]; then
     --episode-hours 720 \
     --reward-scale 0.00001 \
     --gates "$EVAL_NAME":4:0.40:"$MAX_OVERRIDES":"$POLICY_WINDOWS_CSV" \
+    "${FUTURE_SUMMARY_ARGS[@]}" \
+    "${VALIDATION_ARGS[@]}" \
     --device cuda
 
   python -u experiments/cross_evaluate_iterative_q_v4.py \
@@ -62,5 +86,7 @@ else
     --hard-scenario-probability "$HARD_SCENARIO_PROBABILITY" \
     --forecast-context-hours "$FORECAST_CONTEXT_HOURS" \
     --gates "$EVAL_NAME":4:0.40:"$MAX_OVERRIDES":"$POLICY_WINDOWS_CSV" \
+    "${FUTURE_SUMMARY_ARGS[@]}" \
+    "${VALIDATION_ARGS[@]}" \
     --device cuda
 fi

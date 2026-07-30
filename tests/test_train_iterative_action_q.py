@@ -1,13 +1,16 @@
 import json
 
 import numpy as np
+import pytest
 import torch
 
 from scripts.train_iterative_action_q import (
     GroupedDenseActionDataset,
     dataset_normalization,
     parse_args,
+    root_sampling_weights,
     run,
+    selective_previous_policy_anchor_loss,
     selected_action_quantiles,
 )
 
@@ -95,11 +98,127 @@ def test_grouped_dense_dataset_appends_follow_and_deduplicates():
         "return_to_go": np.asarray([[-1.0], [2.0], [-1.0]]),
     }
     dataset = GroupedDenseActionDataset(data, follow_action_index=7)
-    _state, future, actions, targets, valid, root_hour = dataset[0]
+    _state, future, actions, targets, valid, root_hour, anchor_action = dataset[0]
     assert future.shape == (0,)
     assert list(actions[valid]) == [3, 4, 7]
     assert list(targets[valid]) == [-1.0, 2.0, 0.0]
     assert root_hour == 10
+    assert anchor_action == -1
+
+
+def test_previous_policy_anchor_marks_only_exactly_protected_roots():
+    expected = torch.tensor(
+        [
+            [[0.0, 0.0], [1.0, 1.0]],
+            [[0.0, 0.0], [100.0, 100.0]],
+        ],
+        requires_grad=True,
+    )
+    actions = torch.tensor([[0, 1], [0, 1]])
+    targets = torch.tensor([[0.0, 0.3], [0.0, 0.5]])
+    valid = torch.ones_like(actions, dtype=torch.bool)
+    anchors = torch.tensor([0, 0])
+
+    loss, metrics = selective_previous_policy_anchor_loss(
+        expected,
+        actions,
+        targets,
+        valid,
+        anchors,
+        release_margin=0.4,
+        temperature=0.5,
+    )
+    loss.backward()
+
+    assert metrics == {
+        "protected_roots": 1,
+        "released_roots": 1,
+        "agreement_roots": 0,
+        "effective_weight": 1.0,
+        "weighted_agreement": 0.0,
+    }
+    assert expected.grad[0].abs().sum() > 0
+    assert expected.grad[1].abs().sum() == 0
+
+
+def test_previous_policy_anchor_linear_weights_match_euro_schedule():
+    exact_improvements = torch.tensor([0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
+    expected = torch.zeros((6, 2, 2), requires_grad=True)
+    actions = torch.tensor([[0, 1]]).expand(6, -1)
+    targets = torch.stack(
+        (torch.zeros_like(exact_improvements), exact_improvements), dim=1
+    )
+    valid = torch.ones_like(actions, dtype=torch.bool)
+    anchors = torch.zeros(6, dtype=torch.int64)
+
+    loss, metrics = selective_previous_policy_anchor_loss(
+        expected,
+        actions,
+        targets,
+        valid,
+        anchors,
+        release_margin=0.5,
+        temperature=0.5,
+        weighting="linear",
+    )
+    loss.backward()
+
+    assert metrics["protected_roots"] == 5
+    assert metrics["released_roots"] == 1
+    assert np.isclose(metrics["effective_weight"], 3.0)
+    assert np.isclose(metrics["weighted_agreement"], 3.0)
+    assert expected.grad[-1].abs().sum() == 0
+
+
+def test_previous_policy_anchor_plateau_linear_weights_match_euro_schedule():
+    exact_improvements = torch.tensor([0.0, 0.1, 0.2, 0.3, 0.4, 0.5])
+    expected = torch.zeros((6, 2, 2), requires_grad=True)
+    actions = torch.tensor([[0, 1]]).expand(6, -1)
+    targets = torch.stack(
+        (torch.zeros_like(exact_improvements), exact_improvements), dim=1
+    )
+    valid = torch.ones_like(actions, dtype=torch.bool)
+    anchors = torch.zeros(6, dtype=torch.int64)
+
+    loss, metrics = selective_previous_policy_anchor_loss(
+        expected,
+        actions,
+        targets,
+        valid,
+        anchors,
+        release_margin=0.5,
+        temperature=0.5,
+        weighting="plateau_linear",
+        plateau_margin=0.2,
+    )
+    loss.backward()
+
+    assert metrics["protected_roots"] == 5
+    assert metrics["released_roots"] == 1
+    assert np.isclose(metrics["effective_weight"], 4.0)
+    assert np.isclose(metrics["weighted_agreement"], 4.0)
+    assert expected.grad[-1].abs().sum() == 0
+
+
+def test_p0_anchor_requires_explicit_non_neural_teacher_opt_in(tmp_path):
+    base = [
+        "--train-data",
+        str(tmp_path / "train.npz"),
+        "--validation-data",
+        str(tmp_path / "validation.npz"),
+        "--out-dir",
+        str(tmp_path / "out"),
+        "--previous-policy-anchor-coefficient",
+        "1.0",
+    ]
+    with pytest.raises(SystemExit):
+        parse_args(base)
+
+    args = parse_args(
+        [*base, "--allow-anchor-without-initial-checkpoint"]
+    )
+    assert args.initial_checkpoint is None
+    assert args.allow_anchor_without_initial_checkpoint is True
 
 
 def test_grouped_dense_dataset_stratified_root_sampling_is_reproducible():
@@ -132,6 +251,76 @@ def test_grouped_dense_dataset_stratified_root_sampling_is_reproducible():
     assert first.root_keys == repeated.root_keys
     assert first.root_keys != different.root_keys
     assert sorted(set(first.root_hours)) == [24, 72, 120]
+
+
+def _root_dataset(states, returns, *, seed_offset=0, reward_scale=1e-5):
+    count = len(states)
+    data = {
+        "scenario_seed": np.arange(seed_offset, seed_offset + count),
+        "root_time_h": np.full(count, 120),
+        "states": np.asarray(states, dtype=np.float32)[:, None, :],
+        "actions": np.zeros((count, 1), dtype=np.int16),
+        "return_to_go": np.asarray(returns, dtype=np.float32)[:, None],
+    }
+    return GroupedDenseActionDataset(data, reward_scale=reward_scale)
+
+
+def test_root_sampling_temperature_uses_sqrt_stage_mass():
+    first = _root_dataset(
+        [[1.0], [2.0], [3.0], [4.0]],
+        [0.0, 0.0, 0.0, 0.0],
+    )
+    second = _root_dataset([[5.0]], [0.0], seed_offset=10)
+
+    weights, audit = root_sampling_weights(
+        [first, second],
+        {"state_mean": np.zeros(1), "state_std": np.ones(1)},
+        stage_sampling_temperature=0.5,
+    )
+
+    assert np.isclose(weights[:4].sum(), 2.0 / 3.0)
+    assert np.isclose(weights[4:].sum(), 1.0 / 3.0)
+    assert np.isclose(
+        audit["stages"][0]["sampling_probability"], 2.0 / 3.0
+    )
+
+
+def test_near_duplicate_weights_cluster_matching_cross_stage_roots():
+    first = _root_dataset([[1.0, 2.0]], [0.0])
+    second = _root_dataset([[1.0, 2.0]], [0.0], seed_offset=10)
+
+    weights, audit = root_sampling_weights(
+        [first, second],
+        {"state_mean": np.zeros(2), "state_std": np.ones(2)},
+        near_duplicate_weighting="inverse_cluster",
+    )
+
+    assert np.allclose(weights, [0.5, 0.5])
+    assert audit["near_duplicate"]["clusters"] == 1
+    assert audit["near_duplicate"]["largest_cluster"] == 2
+    assert audit["near_duplicate"]["cross_stage_clusters"] == 1
+    assert audit["near_duplicate"]["roots_in_cross_stage_clusters"] == 2
+
+
+def test_advantage_stratification_reweights_roots_within_stage():
+    dataset = _root_dataset(
+        [[1.0], [2.0], [3.0]],
+        [0.0, 0.2, 0.6],
+    )
+
+    weights, audit = root_sampling_weights(
+        [dataset],
+        {"state_mean": np.zeros(1), "state_std": np.ones(1)},
+        root_advantage_weighting="stratified",
+        root_advantage_threshold_eur=40000,
+        root_no_improvement_weight=0.5,
+        root_moderate_improvement_weight=1.0,
+        root_strong_improvement_weight=2.0,
+    )
+
+    assert np.allclose(weights, np.asarray([0.5, 1.0, 2.0]) / 3.5)
+    assert audit["stages"][0]["no_improvement_roots"] == 1
+    assert audit["stages"][0]["strong_improvement_roots"] == 1
 
 
 def test_dataset_normalization_is_self_contained(tmp_path):

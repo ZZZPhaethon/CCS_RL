@@ -39,3 +39,35 @@ def test_lock_parser_rejects_override_budget_above_window_count():
                 "108-251,252-395,396-539,540-680",
             ]
         )
+
+
+def _required_lock_args():
+    return [
+        "--checkpoint",
+        "model.pt",
+        "--out-path",
+        "lock.json",
+        "--protocol-id",
+        "test",
+        "--residual-margin",
+        "0.4",
+        "--economic-margin-eur",
+        "0",
+    ]
+
+
+def test_lock_parser_accepts_three_required_heads():
+    args = parse_args([*_required_lock_args(), "--required-heads", "3"])
+
+    assert args.required_heads == 3
+
+
+def test_lock_parser_defaults_to_four_required_heads():
+    args = parse_args(_required_lock_args())
+
+    assert args.required_heads == 4
+
+
+def test_lock_parser_rejects_nonpositive_required_heads():
+    with pytest.raises(SystemExit):
+        parse_args([*_required_lock_args(), "--required-heads", "0"])

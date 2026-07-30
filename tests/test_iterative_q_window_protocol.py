@@ -123,3 +123,42 @@ def test_unified_window_protocol_uses_one_fixed_configuration():
         == second.scenario.vessel_speed_factor
     )
     assert first.scenario.well_available == second.scenario.well_available
+
+
+@pytest.mark.parametrize(
+    (
+        "stress_level",
+        "weather_hours",
+        "weather_range",
+        "high_output_hours",
+        "high_output_range",
+        "maintenance_hours",
+    ),
+    (
+        ("low", 24.0, (0.70, 0.90), 24.0, (1.10, 1.40), 6.0),
+        ("medium", 48.0, (0.50, 0.80), 48.0, (1.25, 1.75), 12.0),
+        ("high", 96.0, (0.40, 0.70), 96.0, (1.50, 2.00), 24.0),
+    ),
+)
+def test_unified_window_e4_stress_profiles_only_change_locked_factors(
+    stress_level,
+    weather_hours,
+    weather_range,
+    high_output_hours,
+    high_output_range,
+    maintenance_hours,
+):
+    args = _args(0.5)
+    args.scenario_protocol = "unified_window_v1"
+    args.stress_level = stress_level
+    config = common.make_native_env(args).scenario_generator.normal.config
+
+    assert config.weather_window_mean_hours == weather_hours
+    assert config.weather_window_speed_factor_range == weather_range
+    assert config.capture_high_output_mean_hours == high_output_hours
+    assert config.capture_high_output_multiplier_range == high_output_range
+    assert config.well_maintenance_mean_hours == maintenance_hours
+    assert config.capture_outage_rate_per_week == pytest.approx(0.5)
+    assert config.capture_outage_mean_hours == pytest.approx(12.0)
+    assert config.emitter_initial_fill_range == (0.0, 0.50)
+    assert config.terminal_initial_fill_range == (0.0, 0.50)
