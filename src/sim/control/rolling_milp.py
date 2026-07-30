@@ -62,6 +62,8 @@ class RollingMilpPlan:
     solve_wall_s: float = 0.0
     best_bound: float | None = None
     relative_gap: float | None = None
+    first_incumbent_time_s: float | None = None
+    first_incumbent_objective: float | None = None
     warm_start_accepted: bool | None = None
     warm_start_source: str = "native_mpc"
     warm_start_score: tuple[float, ...] | None = None
@@ -70,6 +72,7 @@ class RollingMilpPlan:
     cplex_root_algorithm: str = "automatic"
     termination_reason: str = ""
     requested_mip_gap_rel: float | None = None
+    mip_start_audit: dict[str, object] | None = None
 
 
 def _plan_native_cplex_actions(
@@ -78,6 +81,7 @@ def _plan_native_cplex_actions(
     economics: EconomicParameters,
     time_limit_s: float = 60.0,
     mip_gap_rel: float | None = None,
+    solver_threads: int | None = None,
     objective_mode: str = "lexicographic",
     execution_h: int = 24,
     terminal_cleanup_value: bool = False,
@@ -109,10 +113,18 @@ def _plan_native_cplex_actions(
     """Plan a rolling window with the environment-aligned native CPLEX MILP."""
     from .cplex_milp import replay_full_scenario_cplex_plan
 
+    planning_env = _planning_env_copy(env, planning_horizon_h)
     warm_start_mode = str(warm_start_mode).lower()
-    if warm_start_mode == "greedy":
+    if warm_start_mode == "none":
+        warm_start_actions = None
+        safe_progress_limit_t = None
+        safe_vent_limit_t = None
+        safe_end_unstored_limit_t = None
+        safe_execution_vent_limit_t = None
+        safe_execution_unstored_limit_t = None
+    elif warm_start_mode == "greedy":
         warm_start_actions = greedy_warm_start_actions(
-            env,
+            planning_env,
             planning_horizon_h,
         )
         safe_progress_limit_t = None
@@ -129,32 +141,36 @@ def _plan_native_cplex_actions(
             safe_execution_vent_limit_t,
             safe_execution_unstored_limit_t,
         ) = _native_mpc_plan_seed(
-            env,
+            planning_env,
             planning_horizon_h,
             objective_mode=objective_mode,
             execution_h=execution_h,
         )
     else:
         raise ValueError(
-            "warm_start_mode must be 'greedy' or 'native_mpc'"
+            "warm_start_mode must be 'none', 'greedy', or 'native_mpc'"
         )
     warm_start_source = warm_start_mode
-    mpc_score = _native_warm_start_score(
-        env,
-        warm_start_actions,
-        planning_horizon_h,
-        objective_mode,
-        economics=economics,
-        terminal_cleanup_value=terminal_cleanup_value,
-        weather_aware_cleanup_sailing_lower_bound=(
-            weather_aware_cleanup_sailing_lower_bound
-        ),
-        cleanup_source_headroom_risk=cleanup_source_headroom_risk,
+    mpc_score = (
+        None
+        if warm_start_actions is None
+        else _native_warm_start_score(
+            planning_env,
+            warm_start_actions,
+            planning_horizon_h,
+            objective_mode,
+            economics=economics,
+            terminal_cleanup_value=terminal_cleanup_value,
+            weather_aware_cleanup_sailing_lower_bound=(
+                weather_aware_cleanup_sailing_lower_bound
+            ),
+            cleanup_source_headroom_risk=cleanup_source_headroom_risk,
+        )
     )
     shifted_score = None
     if shifted_milp_warm_start and previous_plan_actions:
         shifted_actions = _shifted_milp_warm_start(
-            env,
+            planning_env,
             previous_plan_actions,
             elapsed_h=previous_plan_elapsed_h,
             mpc_actions=warm_start_actions,
@@ -187,17 +203,18 @@ def _plan_native_cplex_actions(
         if selected_score is not None:
             safe_end_unstored_limit_t = float(selected_score[1])
     cplex_root_algorithm, extra_cplex_options = _initial_root_cplex_options(
-        env,
+        planning_env,
         planning_horizon_h,
         enabled=initial_barrier_root,
     )
     result = _solve_native_cplex_result(
-        env,
+        planning_env,
         planning_horizon_h,
         economics,
         warm_start_actions,
         time_limit_s,
         mip_gap_rel=mip_gap_rel,
+        threads=solver_threads,
         objective_mode=objective_mode,
         safe_progress_limit_t=safe_progress_limit_t,
         safe_vent_limit_t=safe_vent_limit_t,
@@ -232,9 +249,15 @@ def _plan_native_cplex_actions(
         prune_unreachable_route_arcs=prune_unreachable_route_arcs,
         extra_cplex_options=extra_cplex_options,
     )
-    native_actions = _materialize_cplex_actions(env, result.native_actions_by_hour)
+    native_actions = _materialize_cplex_actions(
+        planning_env,
+        result.native_actions_by_hour,
+    )
     replay_result = replace(result, native_actions_by_hour=native_actions)
-    replay = replay_full_scenario_cplex_plan(copy.deepcopy(env), replay_result)
+    replay = replay_full_scenario_cplex_plan(
+        planning_env,
+        replay_result,
+    )
     replay_error = "" if replay.is_exact else ";".join(
         dict.fromkeys((*replay.violations, *replay.mismatches))
     )
@@ -271,6 +294,14 @@ def _plan_native_cplex_actions(
         solve_wall_s=final_stage.wall_time_s if final_stage is not None else 0.0,
         best_bound=final_stage.best_bound if final_stage is not None else None,
         relative_gap=final_stage.relative_gap if final_stage is not None else None,
+        first_incumbent_time_s=(
+            final_stage.first_incumbent_time_s if final_stage is not None else None
+        ),
+        first_incumbent_objective=(
+            final_stage.first_incumbent_objective
+            if final_stage is not None
+            else None
+        ),
         warm_start_accepted=(
             final_stage.warm_start_accepted if final_stage is not None else None
         ),
@@ -285,7 +316,37 @@ def _plan_native_cplex_actions(
             final_stage.termination_reason if final_stage is not None else ""
         ),
         requested_mip_gap_rel=mip_gap_rel,
+        mip_start_audit=(
+            _compact_mip_start_audit(result.mip_start_audit)
+            if result.mip_start_audit is not None
+            else None
+        ),
     )
+
+
+def _compact_mip_start_audit(audit) -> dict[str, object]:
+    return {
+        "total_variables": audit.total_variables,
+        "initialized_variables": audit.initialized_variables,
+        "missing_variable_count": audit.missing_variable_count,
+        "bound_violation_count": audit.bound_violation_count,
+        "integrality_violation_count": audit.integrality_violation_count,
+        "total_constraints": audit.total_constraints,
+        "evaluated_constraints": audit.evaluated_constraints,
+        "partial_constraint_count": audit.partial_constraint_count,
+        "violated_constraint_count": audit.violated_constraint_count,
+        "max_constraint_violation": audit.max_constraint_violation,
+        "top_violations": [
+            {
+                "constraint": violation.constraint,
+                "sense": violation.sense,
+                "residual": violation.residual,
+                "violation": violation.violation,
+                "variable_names": list(violation.variable_names[:20]),
+            }
+            for violation in audit.top_violations
+        ],
+    }
 
 
 def _initial_root_cplex_options(
@@ -316,11 +377,12 @@ def _shifted_milp_warm_start(
     if len(shifted) != horizon_h:
         return None
     try:
-        materialized = _materialize_cplex_actions(env, shifted)
+        planning_env = _planning_env_copy(env, horizon_h)
+        materialized = _materialize_cplex_actions(planning_env, shifted)
         replay = replay_native_actions(
-            env,
+            planning_env,
             [
-                action_for_well_control_mode(env, action)
+                action_for_well_control_mode(planning_env, action)
                 for action in materialized
             ],
             horizon_h=horizon_h,
@@ -341,7 +403,7 @@ def _native_warm_start_score(
     weather_aware_cleanup_sailing_lower_bound: bool = False,
     cleanup_source_headroom_risk: bool = False,
 ) -> tuple[float, ...] | None:
-    replay_env = copy.deepcopy(env)
+    replay_env = _planning_env_copy(env, horizon_h)
     try:
         replay = replay_native_actions(
             replay_env,
@@ -389,6 +451,7 @@ def _solve_native_cplex_result(
     time_limit_s: float,
     *,
     mip_gap_rel: float | None = None,
+    threads: int | None = None,
     objective_mode: str = "lexicographic",
     safe_progress_limit_t: float | None = None,
     safe_vent_limit_t: float | None = None,
@@ -446,7 +509,10 @@ def _solve_native_cplex_result(
         "economic_lex_guard",
         "economic_execution_guard",
     }
-    cplex_options = ["set simplex tolerances feasibility 1e-7"]
+    cplex_options = [
+        "set parallel 1",
+        "set simplex tolerances feasibility 1e-7",
+    ]
     if objective_mode == "lexicographic":
         cplex_options.extend(
             [
@@ -462,6 +528,7 @@ def _solve_native_cplex_result(
         "warm_start_native_actions_by_hour": warm_start_actions,
         "time_limit_s": time_limit_s,
         "mip_gap_rel": mip_gap_rel,
+        "threads": threads,
         "cplex_options": cplex_options,
         "lexicographic_vent_first": objective_mode == "lexicographic",
         "economic_objective": economic_objective,
@@ -643,7 +710,7 @@ def greedy_warm_start_actions(
 
     if horizon_h <= 0:
         raise ValueError("horizon_h must be positive")
-    replay_env = copy.deepcopy(env)
+    replay_env = _planning_env_copy(env, horizon_h)
     actions: list[dict[str, list[int]]] = []
     for _step in range(int(horizon_h)):
         action = action_for_well_control_mode(
@@ -659,7 +726,7 @@ def greedy_warm_start_actions(
             "Greedy warm start ended before the requested planning horizon"
         )
     validation = replay_native_actions(
-        env,
+        _planning_env_copy(env, horizon_h),
         actions,
         horizon_h=int(horizon_h),
     )
@@ -671,6 +738,31 @@ def greedy_warm_start_actions(
             f"Greedy warm start is not replay-valid: {reason}"
         )
     return actions
+
+
+def _planning_env_copy(env: CCSEnv, horizon_h: int) -> CCSEnv:
+    """Copy an environment and allow planning into its read-only context."""
+
+    planning_env = copy.deepcopy(env)
+    requested_end = int(planning_env.t) + int(horizon_h)
+    scenario_steps = (
+        planning_env.scenario.n_steps
+        if planning_env.scenario is not None
+        else planning_env.n_steps
+    )
+    if requested_end > scenario_steps:
+        raise ValueError(
+            "planning horizon extends beyond the sampled scenario boundary"
+        )
+    if requested_end > planning_env.n_steps:
+        planning_env.n_steps = requested_end
+        planning_env.config.episode_hours = int(
+            round(
+                requested_end
+                * planning_env.network.time_step_hours
+            )
+        )
+    return planning_env
 
 
 class RollingMilpController:
@@ -685,6 +777,7 @@ class RollingMilpController:
         planning_horizon_h: int = 168,
         time_limit_s: float = 30.0,
         mip_gap_rel: float | None = None,
+        solver_threads: int | None = None,
         objective_mode: str = "lexicographic",
         terminal_cleanup_value: bool = True,
         terminal_cleanup_mip_start_mode: str = "partial",
@@ -720,6 +813,11 @@ class RollingMilpController:
         )
         if self.mip_gap_rel is not None and self.mip_gap_rel < 0.0:
             raise ValueError("mip_gap_rel must be non-negative")
+        self.solver_threads = (
+            None if solver_threads is None else int(solver_threads)
+        )
+        if self.solver_threads is not None and self.solver_threads <= 0:
+            raise ValueError("solver_threads must be positive")
         self.objective_mode = str(objective_mode).lower()
         self.terminal_cleanup_value = bool(terminal_cleanup_value)
         self.terminal_cleanup_mip_start_mode = str(
@@ -732,9 +830,9 @@ class RollingMilpController:
         self.load_min_formulation = str(load_min_formulation).lower()
         self.shifted_milp_warm_start = bool(shifted_milp_warm_start)
         self.warm_start_mode = str(warm_start_mode).lower()
-        if self.warm_start_mode not in {"greedy", "native_mpc"}:
+        if self.warm_start_mode not in {"none", "greedy", "native_mpc"}:
             raise ValueError(
-                "warm_start_mode must be 'greedy' or 'native_mpc'"
+                "warm_start_mode must be 'none', 'greedy', or 'native_mpc'"
             )
         self.vessel_visit_load_cuts = bool(vessel_visit_load_cuts)
         self.vessel_visit_load_cut_stride_h = int(vessel_visit_load_cut_stride_h)
@@ -861,6 +959,7 @@ class RollingMilpController:
             self.economics,
             time_limit_s=self.time_limit_s,
             mip_gap_rel=self.mip_gap_rel,
+            solver_threads=self.solver_threads,
             objective_mode=self.objective_mode,
             execution_h=self.replan_every,
             terminal_cleanup_value=self.terminal_cleanup_value,
@@ -957,13 +1056,21 @@ class RollingMilpController:
                 "replan_wall_s": float(time.perf_counter() - start),
                 "best_bound": getattr(plan, "best_bound", None),
                 "relative_gap": getattr(plan, "relative_gap", None),
+                "first_incumbent_time_s": getattr(
+                    plan, "first_incumbent_time_s", None
+                ),
+                "first_incumbent_objective": getattr(
+                    plan, "first_incumbent_objective", None
+                ),
                 "termination_reason": str(
                     getattr(plan, "termination_reason", "")
                 ),
                 "requested_mip_gap_rel": getattr(
                     plan, "requested_mip_gap_rel", None
                 ),
+                "solver_threads": self.solver_threads,
                 "warm_start_accepted": getattr(plan, "warm_start_accepted", None),
+                "mip_start_audit": getattr(plan, "mip_start_audit", None),
                 "warm_start_source": self.last_warm_start_source,
                 "cplex_root_algorithm": getattr(
                     plan, "cplex_root_algorithm", "automatic"
