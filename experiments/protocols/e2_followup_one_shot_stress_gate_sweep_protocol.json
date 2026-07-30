@@ -1,0 +1,63 @@
+{
+  "protocol_id": "e2_followup_one_shot_stress_gate_sweep_2026-07-30",
+  "base_protocol": "experiments/protocols/unified_window_v1_paper_protocol.json",
+  "seed_manifest": "experiments/protocols/unified_window_v1_seed_manifest.json",
+  "frozen_models": {
+    "iterative_p4": {
+      "model_name": "G60-P4",
+      "model_seeds": [0, 1, 2]
+    },
+    "one_shot_matched": {
+      "training_root": "experiments_results/E2/training_one_shot_matched_run01",
+      "model_seeds": [0, 1, 2],
+      "training_data": "Greedy roll-in only",
+      "weights_frozen_before_followup": true
+    }
+  },
+  "one_shot_e4": {
+    "formal_test_range_inclusive": [9000031, 9000060],
+    "formal_test_count": 30,
+    "stress_levels": ["low", "medium", "high"],
+    "gate": {
+      "required_heads": 4,
+      "margin": 0.4,
+      "max_overrides": 12,
+      "window_scheme": "w12"
+    },
+    "selection_use": "none; descriptive frozen-model stress evaluation"
+  },
+  "gate_sweep": {
+    "validation_range_inclusive": [8100001, 8100020],
+    "validation_count": 20,
+    "formal_test_prohibited": true,
+    "configuration_source": "experiments/gate_sweep_configs.py",
+    "design": {
+      "confidence_grid": {
+        "required_heads": [2, 3, 4, 5],
+        "margins": [0.0, 0.1, 0.2, 0.4],
+        "window_scheme": "w12",
+        "max_overrides": 12
+      },
+      "capacity_grid": {
+        "required_heads": 3,
+        "margin": 0.1,
+        "window_schemes": ["global", "w12", "w24", "w48"],
+        "max_overrides": [6, 12, 24, 48],
+        "redundant_combinations_omitted": true
+      },
+      "expanded_capacity_checks": {
+        "confidence_settings": [
+          {"required_heads": 2, "margin": 0.0},
+          {"required_heads": 4, "margin": 0.4}
+        ],
+        "window_schemes": ["global", "w24", "w48"]
+      }
+    }
+  },
+  "outputs": {
+    "one_shot_e4_root": "experiments_results/E4/formal_one_shot_stress_seeds_9000031-9000060_run01",
+    "gate_sweep_root": "experiments_results/E2/validation_gate_sweep_seeds_8100001-8100020_run01",
+    "formats": ["csv", "json", "pdf", "png"],
+    "png_dpi": 300
+  }
+}

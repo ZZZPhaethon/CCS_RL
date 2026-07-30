@@ -1,17 +1,33 @@
 {
   "protocol_id": "paper_unified_window_v1_3vessel_2026-07-27",
-  "manifest_version": 1,
-  "locked_on": "2026-07-27",
+  "manifest_version": 5,
+  "locked_on": "2026-07-29",
+  "supersedes_manifest_version": 4,
   "model_training_seeds": [
     0,
     1,
     2
   ],
+  "ppo_training_episode_seeds": {
+    "Hourly Centralized Maskable PPO": {
+      "range_inclusive": [
+        100000,
+        999999
+      ]
+    },
+    "High-level Centralized Maskable PPO": {
+      "range_inclusive": [
+        100000,
+        999999
+      ]
+    },
+    "sampling_rule": "Each model seed drives an independent reproducible RNG stream within this training-only range."
+  },
   "iterative_q_data": {
     "G0": {
       "train_range_inclusive": [
         1500,
-        1699
+        1679
       ],
       "validation_range_inclusive": [
         3200,
@@ -23,35 +39,35 @@
     "G1": {
       "train_range_inclusive": [
         1500,
-        1539
+        1523
       ],
       "validation_range_inclusive": [
         3200,
-        3207
+        3204
       ],
       "roots_per_train_seed": 12,
       "dataset_seed": 20260724
     },
     "G2": {
       "train_range_inclusive": [
-        1600,
-        1659
+        1800,
+        1835
       ],
       "validation_range_inclusive": [
         3230,
-        3241
+        3236
       ],
       "roots_per_train_seed": 12,
       "dataset_seed": 20260725
     },
     "G3": {
       "train_range_inclusive": [
-        2000,
-        2099
+        2100,
+        2159
       ],
       "validation_range_inclusive": [
         3300,
-        3319
+        3311
       ],
       "roots_per_train_seed": 12,
       "dataset_seed": 20260726
@@ -72,13 +88,31 @@
   },
   "formal_test": {
     "range_inclusive": [
+      9000031,
+      9000060
+    ],
+    "count": 30,
+    "designation": "e1_formal_test_set",
+    "paired_across_controllers": true,
+    "paired_across_stress_levels": true,
+    "locked_on": "2026-07-29",
+    "access_status": "formal_test_completed",
+    "access_rule": "E1 uses the completed results for these 30 seeds; no replacement or expansion is planned"
+  },
+  "deprecated_formal_test": {
+    "range_inclusive": [
       9000001,
       9000030
     ],
     "count": 30,
-    "paired_across_controllers": true,
-    "paired_across_stress_levels": true,
-    "access_rule": "do not evaluate until all method, checkpoint, gate, budget and reporting choices are locked"
+    "deprecated_on": "2026-07-29",
+    "result_status": "deprecated_for_future_primary_comparison_but_retained_for_provenance",
+    "reason": "superseded by manifest version 4 for future controller comparisons",
+    "prohibited_actions": [
+      "delete archived results",
+      "relabel as unseen",
+      "use for model or hyperparameter selection"
+    ]
   },
   "legacy_development_only": {
     "range_inclusive": [
@@ -92,6 +126,7 @@
     "formal test seeds must not be used for training, root generation, hyperparameter selection, checkpoint selection or debugging",
     "controller validation seeds must not appear in the formal test range",
     "Low, Medium and High stress evaluations reuse the same formal test seed numbers to preserve pairing",
-    "a protocol revision is required before replacing any locked range"
+    "E1 uses the completed formal test results for seeds 9000031 through 9000060",
+    "deprecated formal-test results remain archived and identifiable in provenance records"
   ]
 }
