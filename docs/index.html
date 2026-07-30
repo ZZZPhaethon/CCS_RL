@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06131d">
+  <meta name="description" content="CCS_RL couples a physics-constrained ship-based CCS simulator with heuristic, optimisation and learned dispatch controllers under one frozen evaluation protocol.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="keywords" content="CCS, carbon capture and storage, CO2 shipping, reinforcement learning, dispatch optimisation, maritime decarbonisation, Rolling MILP">
+  <link rel="canonical" href="https://zzzphaethon.github.io/CCS_RL/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="CCS_RL">
+  <meta property="og:title" content="CCS_RL — Physics-Constrained Dispatch for Ship-Based CCS">
+  <meta property="og:description" content="One simulator. One frozen protocol. Heuristics, MILP and learned controllers compared under the same physics.">
+  <meta property="og:url" content="https://zzzphaethon.github.io/CCS_RL/">
+  <meta property="og:image" content="https://zzzphaethon.github.io/CCS_RL/project-assets/og.png">
+  <meta property="og:image:alt" content="CCS_RL ship-based carbon capture, transport and offshore storage network">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="CCS_RL — Physics-Constrained Dispatch for Ship-Based CCS">
+  <meta name="twitter:description" content="Auditable simulation and learned dispatch control for maritime carbon transport and storage.">
+  <meta name="twitter:image" content="https://zzzphaethon.github.io/CCS_RL/project-assets/og.png">
+  <title>CCS_RL — Physics-Constrained Dispatch for Ship-Based CCS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="project-assets/site.css">
+  <script src="project-assets/site.js" defer></script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareSourceCode",
+      "name": "CCS_RL",
+      "url": "https://zzzphaethon.github.io/CCS_RL/",
+      "codeRepository": "https://github.com/ZZZPhaethon/CCS_RL",
+      "description": "Physics-constrained simulation and learned dispatch control for ship-based carbon capture and storage chains.",
+      "programmingLanguage": "Python",
+      "license": "https://opensource.org/licenses/MIT",
+      "keywords": [
+        "carbon capture and storage",
+        "CO2 shipping",
+        "reinforcement learning",
+        "dispatch optimisation",
+        "maritime decarbonisation"
+      ]
+    }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-header>
+    <nav class="nav shell" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="CCS_RL home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>CCS<span>_RL</span></span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="navLinks">
+        <span></span><span></span>
+        <span class="sr-only">Toggle navigation</span>
+      </button>
+      <div class="nav-links" id="navLinks">
+        <a href="#system">System</a>
+        <a href="#method">Method</a>
+        <a href="#results">Results</a>
+        <a href="#demo">Demo</a>
+        <a href="#reproduce">Reproduce</a>
+      </div>
+      <a class="nav-code" href="https://github.com/ZZZPhaethon/CCS_RL" target="_blank" rel="noreferrer">
+        View code <span aria-hidden="true">↗</span>
+      </a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="hero-orbit hero-orbit-a" aria-hidden="true"></div>
+      <div class="hero-orbit hero-orbit-b" aria-hidden="true"></div>
+      <div class="shell hero-layout">
+        <div class="hero-copy reveal">
+          <p class="eyebrow"><span></span> Research software · 2026</p>
+          <h1>Intelligent dispatch<br>for <em>ship-based CCS.</em></h1>
+          <p class="hero-lead">
+            A physics-constrained simulator for comparing heuristics, rolling optimisation
+            and learned controllers across the same maritime CO₂ chain.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="physical_layer_dashboardV2.html">
+              Explore live operations <span aria-hidden="true">↗</span>
+            </a>
+            <a class="button button-secondary" href="#method">See the method</a>
+          </div>
+          <p class="hero-principle">One simulator. One frozen protocol. Shared physical truth.</p>
+        </div>
+
+        <div class="hero-media reveal" data-reveal-delay="1" aria-label="CCS_RL maritime carbon transport system">
+          <div class="hero-image" role="img" aria-label="Three CO2 carriers, coastal capture hubs and offshore storage connected by luminous transport routes"></div>
+          <div class="hero-media-shade"></div>
+          <div class="hero-status">
+            <span class="live-dot"></span>
+            <span>720 h operational horizon</span>
+          </div>
+          <div class="hero-chip hero-chip-cost">
+            <span>Mean cost</span>
+            <strong>€1.882M</strong>
+          </div>
+          <div class="hero-chip hero-chip-vent">
+            <span>Venting vs Greedy</span>
+            <strong>−84.7%</strong>
+          </div>
+          <div class="hero-route" aria-hidden="true"><span></span></div>
+        </div>
+      </div>
+
+      <div class="shell headline-stats" aria-label="Headline results">
+        <article class="headline-stat reveal">
+          <span class="stat-index">01</span>
+          <div><strong>€372.5k</strong><span>mean saving below Greedy</span></div>
+        </article>
+        <article class="headline-stat reveal" data-reveal-delay="1">
+          <span class="stat-index">02</span>
+          <div><strong>84.7%</strong><span>less vented CO₂</span></div>
+        </article>
+        <article class="headline-stat reveal" data-reveal-delay="2">
+          <span class="stat-index">03</span>
+          <div><strong>110.2 kt</strong><span>mean CO₂ stored</span></div>
+        </article>
+        <article class="headline-stat reveal" data-reveal-delay="3">
+          <span class="stat-index">04</span>
+          <div><strong>0</strong><span>hard physical violations</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section system-section" id="system">
+      <div class="shell">
+        <div class="section-heading reveal">
+          <p class="section-kicker">The physical chain</p>
+          <h2>Every decision settles in the same physics.</h2>
+          <p>
+            Controllers can propose routes and actions. They cannot change mass balance,
+            storage limits, pressure equations or legal-action rules.
+          </p>
+        </div>
+
+        <div class="chain" aria-label="Carbon capture and storage transport chain">
+          <article class="chain-node reveal">
+            <span class="chain-number">01</span>
+            <div class="chain-symbol source" aria-hidden="true"></div>
+            <h3>Capture</h3>
+            <p>Variable sources fill finite emitter buffers.</p>
+          </article>
+          <span class="chain-link" aria-hidden="true"></span>
+          <article class="chain-node reveal" data-reveal-delay="1">
+            <span class="chain-number">02</span>
+            <div class="chain-symbol ship" aria-hidden="true"></div>
+            <h3>Transport</h3>
+            <p>Three vessels load, sail, queue and unload.</p>
+          </article>
+          <span class="chain-link" aria-hidden="true"></span>
+          <article class="chain-node reveal" data-reveal-delay="2">
+            <span class="chain-number">03</span>
+            <div class="chain-symbol terminal" aria-hidden="true"></div>
+            <h3>Terminal</h3>
+            <p>Onshore inventory connects fleet and pipeline.</p>
+          </article>
+          <span class="chain-link" aria-hidden="true"></span>
+          <article class="chain-node reveal" data-reveal-delay="3">
+            <span class="chain-number">04</span>
+            <div class="chain-symbol storage" aria-hidden="true"></div>
+            <h3>Storage</h3>
+            <p>Injection availability and pressure bound storage.</p>
+          </article>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card reveal">
+            <span class="feature-tag">Physics</span>
+            <h3>Auditable execution</h3>
+            <p>Hourly settlement exposes inventory, flow, cost, venting and pressure diagnostics.</p>
+          </article>
+          <article class="feature-card reveal" data-reveal-delay="1">
+            <span class="feature-tag">Control</span>
+            <h3>Comparable policies</h3>
+            <p>Fixed assignment, Greedy, PPO variants, Action-Q and MILP share one action interface.</p>
+          </article>
+          <article class="feature-card reveal" data-reveal-delay="2">
+            <span class="feature-tag">Evidence</span>
+            <h3>Artifact-backed results</h3>
+            <p>Protocols, seeds, source data, figures and aggregate tables are included for E0–E5.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section method-section" id="method">
+      <div class="shell">
+        <div class="section-heading split-heading reveal">
+          <div>
+            <p class="section-kicker">Iterative Action-Q</p>
+            <h2>Learn the few interventions that matter.</h2>
+          </div>
+          <p>
+            Greedy remains the safe default. Candidate joint actions are evaluated with
+            counterfactual rollouts to the end of the 720-hour episode, then a confidence
+            and economic-margin gate decides whether to override.
+          </p>
+        </div>
+
+        <div class="method-flow reveal" aria-label="Iterative Action-Q workflow">
+          <div class="method-step">
+            <span>G0</span>
+            <strong>Collect Greedy states</strong>
+            <small>Safe operational roots</small>
+          </div>
+          <span class="method-arrow" aria-hidden="true">→</span>
+          <div class="method-step">
+            <span>P1–P4</span>
+            <strong>Counterfactual rollouts</strong>
+            <small>Matched to episode end</small>
+          </div>
+          <span class="method-arrow" aria-hidden="true">→</span>
+          <div class="method-step">
+            <span>Q</span>
+            <strong>Multi-head value model</strong>
+            <small>Feasible joint actions only</small>
+          </div>
+          <span class="method-arrow" aria-hidden="true">→</span>
+          <div class="method-step method-step-active">
+            <span>Gate</span>
+            <strong>Override or FOLLOW</strong>
+            <small>Agreement + economic gain</small>
+          </div>
+        </div>
+
+        <figure class="method-figure reveal">
+          <img src="project-assets/methodology.png" alt="CCS_RL multi-source inputs, shared simulator, controller families and Iterative Action-Q training workflow" loading="lazy">
+          <figcaption>
+            Shared physical execution, controller families and the counterfactual
+            Iterative Action-Q training loop.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section results-section" id="results">
+      <div class="shell">
+        <div class="section-heading split-heading reveal">
+          <div>
+            <p class="section-kicker">Experimental evidence</p>
+            <h2>Improvement measured from multiple angles.</h2>
+          </div>
+          <p>
+            E0 validates the simulator. E1 compares seven controllers. E2–E4 test
+            iteration, future information and disturbance robustness.
+          </p>
+        </div>
+
+        <div class="result-feature reveal">
+          <div class="result-feature-copy">
+            <span class="result-label">E1 · Seven-controller comparison</span>
+            <h3>Lower cost without trading away physical validity.</h3>
+            <p>
+              Across 30 paired scenarios, Iterative Action-Q reaches €1.882M mean
+              total cost and stores 7.1% more CO₂ than Greedy.
+            </p>
+            <ul class="result-bullets">
+              <li><span>16.5%</span> lower mean total cost</li>
+              <li><span>23.5%</span> lower unit total cost</li>
+              <li><span>83 / 90</span> wins across model-seed/scenario pairs</li>
+            </ul>
+            <a class="text-link" href="https://github.com/ZZZPhaethon/CCS_RL/tree/main/experiments_results/E1" target="_blank" rel="noreferrer">
+              Inspect E1 artifacts <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+          <div class="result-feature-plot">
+            <img src="project-assets/e1-performance.png" alt="Paired controller cost comparison with confidence intervals" loading="lazy">
+          </div>
+        </div>
+
+        <div class="result-gallery">
+          <article class="result-card result-card-wide reveal">
+            <div class="result-card-head">
+              <div><span>E1</span><h3>Algorithm profile</h3></div>
+              <p>Normalized multi-metric comparison</p>
+            </div>
+            <img src="project-assets/e1-radar.png" alt="Radar comparison of CCS dispatch algorithms" loading="lazy">
+          </article>
+          <article class="result-card reveal" data-reveal-delay="1">
+            <div class="result-card-head">
+              <div><span>E1</span><h3>Cost improvement</h3></div>
+              <p>Greedy → Action-Q</p>
+            </div>
+            <img src="project-assets/e1-waterfall.png" alt="Waterfall chart of cost changes from Greedy to Iterative Action-Q" loading="lazy">
+          </article>
+          <article class="result-card reveal">
+            <div class="result-card-head">
+              <div><span>E2</span><h3>Iteration ablation</h3></div>
+              <p>P1 through P4</p>
+            </div>
+            <img src="project-assets/e2-iteration.png" alt="Iteration ablation results" loading="lazy">
+          </article>
+          <article class="result-card reveal" data-reveal-delay="1">
+            <div class="result-card-head">
+              <div><span>E3</span><h3>Future information</h3></div>
+              <p>Compact beats excessive detail</p>
+            </div>
+            <img src="project-assets/e3-future-info.png" alt="Future information representation ablation" loading="lazy">
+          </article>
+          <article class="result-card result-card-wide reveal">
+            <div class="result-card-head">
+              <div><span>E4</span><h3>Disturbance robustness</h3></div>
+              <p>Low, medium and high stress</p>
+            </div>
+            <img src="project-assets/e4-robustness.png" alt="Controller performance across disturbance stress levels" loading="lazy">
+          </article>
+        </div>
+
+        <p class="provenance-note reveal">
+          Evaluation results are reproducible and fully reported. The E1 model-adoption
+          caveat is preserved in the
+          <a href="https://github.com/ZZZPhaethon/CCS_RL/tree/main/experiments_results/E1" target="_blank" rel="noreferrer">provenance record</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="section demo-section" id="demo">
+      <div class="shell">
+        <div class="demo-shell reveal" data-demo>
+          <div class="demo-copy">
+            <p class="section-kicker">Live operations replay</p>
+            <h2>Follow every vessel, buffer and tonne of CO₂.</h2>
+            <p>
+              Scrub through a representative 720-hour trajectory. Select any physical
+              component to link its map state, live status and history chart.
+            </p>
+            <div class="demo-actions">
+              <button class="button button-primary" type="button" data-load-demo>
+                Load interactive replay
+              </button>
+              <a class="button button-secondary" href="physical_layer_dashboardV2.html">
+                Open full screen <span aria-hidden="true">↗</span>
+              </a>
+            </div>
+          </div>
+          <div class="demo-preview" data-demo-preview>
+            <img src="project-assets/hero-operations.png" alt="CCS_RL ship-based carbon capture, transport and offshore storage operations preview" loading="lazy">
+            <div class="demo-preview-overlay">
+              <span class="demo-play" aria-hidden="true">▶</span>
+              <span>Interactive map · vessel trajectories · component histories</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section reproduce-section" id="reproduce">
+      <div class="shell">
+        <div class="section-heading split-heading reveal">
+          <div>
+            <p class="section-kicker">Open and reproducible</p>
+            <h2>From physical validation to controller comparison.</h2>
+          </div>
+          <p>
+            Reproduce the simulator locally, launch the Colab trajectory example or
+            inspect the frozen evaluation protocols and source tables.
+          </p>
+        </div>
+
+        <div class="reproduce-grid">
+          <article class="reproduce-card reveal">
+            <span class="reproduce-index">01</span>
+            <h3>Run the simulator</h3>
+            <pre><code>git clone https://github.com/ZZZPhaethon/CCS_RL.git
+cd CCS_RL
+uv sync
+uv run python examples/run_physical_layer_demo.py</code></pre>
+          </article>
+          <article class="reproduce-card reveal" data-reveal-delay="1">
+            <span class="reproduce-index">02</span>
+            <h3>Explore the artifacts</h3>
+            <div class="artifact-links">
+              <a href="https://github.com/ZZZPhaethon/CCS_RL/tree/main/experiments_results/E0" target="_blank" rel="noreferrer"><span>E0</span> Physical validity</a>
+              <a href="https://github.com/ZZZPhaethon/CCS_RL/tree/main/experiments_results/E1" target="_blank" rel="noreferrer"><span>E1</span> Controller comparison</a>
+              <a href="https://github.com/ZZZPhaethon/CCS_RL/tree/main/experiments_results/E2" target="_blank" rel="noreferrer"><span>E2</span> Iteration ablation</a>
+              <a href="https://github.com/ZZZPhaethon/CCS_RL/tree/main/experiments_results/E3" target="_blank" rel="noreferrer"><span>E3</span> Future information</a>
+              <a href="https://github.com/ZZZPhaethon/CCS_RL/tree/main/experiments_results/E4" target="_blank" rel="noreferrer"><span>E4</span> Disturbance stress</a>
+            </div>
+          </article>
+          <article class="reproduce-card reproduce-card-cta reveal" data-reveal-delay="2">
+            <span class="reproduce-index">03</span>
+            <h3>Start in the browser</h3>
+            <p>Open the vessel-trajectory demo without configuring a local environment.</p>
+            <a class="button button-primary" href="https://colab.research.google.com/github/ZZZPhaethon/CCS_RL/blob/main/examples/colab_vessel_trajectory_demo.ipynb" target="_blank" rel="noreferrer">
+              Open in Colab <span aria-hidden="true">↗</span>
+            </a>
+          </article>
+        </div>
+
+        <div class="citation reveal">
+          <div class="citation-copy">
+            <p class="section-kicker">Citation</p>
+            <h3>CCS_RL research software</h3>
+            <p>If this repository supports your research, please cite the software.</p>
+          </div>
+          <div class="citation-code">
+            <pre><code id="citationText">@software{ccs_rl_2026,
+  title  = {CCS_RL: Physics-Constrained Simulation and Learned
+            Dispatch Control for Ship-Based Carbon Capture
+            and Storage Chains},
+  author = {CCS_RL contributors},
+  year   = {2026},
+  url    = {https://github.com/ZZZPhaethon/CCS_RL}
+}</code></pre>
+            <button class="copy-button" type="button" data-copy-citation>Copy BibTeX</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-grid">
+      <div>
+        <a class="brand footer-brand" href="#top">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span>CCS<span>_RL</span></span>
+        </a>
+        <p>Physics-constrained simulation and learned dispatch control for ship-based CCS.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/ZZZPhaethon/CCS_RL" target="_blank" rel="noreferrer">GitHub ↗</a>
+        <a href="https://github.com/ZZZPhaethon/CCS_RL/blob/main/README.md" target="_blank" rel="noreferrer">English README ↗</a>
+        <a href="https://github.com/ZZZPhaethon/CCS_RL/blob/main/README_CN.md" target="_blank" rel="noreferrer">中文说明 ↗</a>
+        <a href="https://github.com/ZZZPhaethon/CCS_RL/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License ↗</a>
+      </div>
+      <p class="footer-meta">CCS_RL · Research project · 2026</p>
+    </div>
+  </footer>
+</body>
+</html>
