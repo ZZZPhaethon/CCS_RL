@@ -50,6 +50,9 @@ This is the hypothesis under test, not a settled result. The full argument struc
 [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md).
 
 ## Method — Iterative Action-Q
+<p align="center">
+  <img src="assets/Methodology.png" alt="CCUS teaser" width="95%">
+</p>
 
 Iterative Action-Q is neither PPO nor plain behaviour cloning. Greedy provides the safe default
 action and the first state distribution; the model then repeatedly collects the states **it
