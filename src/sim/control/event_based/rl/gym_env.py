@@ -26,13 +26,25 @@ class HighLevelDispatchGymEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, env: HighLevelDispatchEnv) -> None:
+    def __init__(
+        self,
+        env: HighLevelDispatchEnv,
+        *,
+        episode_seed_min: int = 0,
+        episode_seed_max: int = 2**31 - 2,
+    ) -> None:
         """Initialise action and observation spaces from the wrapped environment.
 
         根据被包装环境初始化动作与观测空间。
         """
         super().__init__()
+        if episode_seed_min > episode_seed_max:
+            raise ValueError(
+                "episode_seed_min must not exceed episode_seed_max."
+            )
         self.env = env
+        self.episode_seed_min = int(episode_seed_min)
+        self.episode_seed_max = int(episode_seed_max)
         self.action_space = spaces.Discrete(env.action_count)
         self.observation_space = spaces.Box(
             low=-10.0,
@@ -52,7 +64,12 @@ class HighLevelDispatchGymEnv(gym.Env):
         采样可复现的每回合场景种子并重置环境。
         """
         super().reset(seed=seed)
-        episode_seed = int(self.np_random.integers(0, 2**31 - 1))
+        episode_seed = int(
+            self.np_random.integers(
+                self.episode_seed_min,
+                self.episode_seed_max + 1,
+            )
+        )
         observation = self.env.reset(seed=episode_seed)
         return observation.astype(np.float32, copy=False), {}
 

@@ -95,8 +95,20 @@ class EventBasedAlgorithmCompatibilityTests(unittest.TestCase):
         self.assertAlmostEqual(
             episode_reward,
             -native.config.reward.reward_scale
-            * native.env.ledger.total_cost,
+            * (
+                native.env.ledger.total_cost
+                + info["terminal_cleanup_operating_cost_eur"]
+            ),
             places=9,
+        )
+        self.assertGreaterEqual(
+            info["terminal_cleanup_operating_cost_eur"],
+            0.0,
+        )
+        self.assertAlmostEqual(
+            info["cumulative_reported_total_cost"],
+            native.env.ledger.total_cost
+            + info["terminal_cleanup_operating_cost_eur"],
         )
         env.close()
 

@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from sim.control.cplex_milp import _terminal_cleanup_cost_for_state
 from sim.environment import CCSEnv
 
 from sim.control.event_based.residual_rl.observation import (
@@ -278,6 +279,23 @@ class MaskedResidualDispatchEnv:
                 break
 
         actual = _metric_delta(self.env, start)
+        actual["terminal_cleanup_operating_cost_eur"] = 0.0
+        if (
+            truncated
+            and self.env.t >= self.env.n_steps
+            and self.config.reward.objective == "realised_total_cost"
+        ):
+            actual_cleanup_cost = float(
+                _terminal_cleanup_cost_for_state(
+                    self.env,
+                    self.env.cost_model.parameters,
+                )
+            )
+            actual["terminal_cleanup_operating_cost_eur"] = (
+                actual_cleanup_cost
+            )
+            actual["operating_cost_eur"] += actual_cleanup_cost
+            actual["total_cost_eur"] += actual_cleanup_cost
         actual_reward, actual_breakdown = high_level_reward(
             stored_t=actual["stored_t"],
             captured_t=actual["captured_t"],
@@ -345,6 +363,9 @@ class MaskedResidualDispatchEnv:
             "captured_t": actual["captured_t"],
             "operating_cost": actual["operating_cost_eur"],
             "total_cost": actual["total_cost_eur"],
+            "terminal_cleanup_operating_cost_eur": actual[
+                "terminal_cleanup_operating_cost_eur"
+            ],
             "counterfactual_stored_t": counterfactual["stored_t"],
             "counterfactual_vented_t": counterfactual["vented_t"],
             "counterfactual_operating_cost_eur": counterfactual[
@@ -353,6 +374,11 @@ class MaskedResidualDispatchEnv:
             "counterfactual_total_cost_eur": counterfactual[
                 "total_cost_eur"
             ],
+            "counterfactual_terminal_cleanup_operating_cost_eur": (
+                counterfactual[
+                    "terminal_cleanup_operating_cost_eur"
+                ]
+            ),
             "incremental_stored_t": incremental_stored_t,
             "avoided_vent_t": avoided_vent_t,
             "operating_cost_saving_eur": operating_cost_saving,
@@ -371,6 +397,10 @@ class MaskedResidualDispatchEnv:
             "cumulative_stored_t": self.env.cumulative_stored_t,
             "cumulative_vented_t": self.env.ledger.vented_t,
             "cumulative_total_cost": self.env.ledger.total_cost,
+            "cumulative_reported_total_cost": (
+                self.env.ledger.total_cost
+                + actual["terminal_cleanup_operating_cost_eur"]
+            ),
             "counterfactual_cumulative_stored_t": (
                 self.counterfactual_env.cumulative_stored_t
             ),
@@ -466,6 +496,20 @@ def _advance_rule_counterfactual(
         if terminated or truncated:
             break
     delta = _metric_delta(env, start)
+    delta["terminal_cleanup_operating_cost_eur"] = 0.0
+    if (
+        env.t >= env.n_steps
+        and config.reward.objective == "realised_total_cost"
+    ):
+        cleanup_cost = float(
+            _terminal_cleanup_cost_for_state(
+                env,
+                env.cost_model.parameters,
+            )
+        )
+        delta["terminal_cleanup_operating_cost_eur"] = cleanup_cost
+        delta["operating_cost_eur"] += cleanup_cost
+        delta["total_cost_eur"] += cleanup_cost
     reward, breakdown = high_level_reward(
         stored_t=delta["stored_t"],
         captured_t=delta["captured_t"],

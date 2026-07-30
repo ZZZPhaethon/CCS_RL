@@ -70,7 +70,13 @@ def evaluate_seed(
     physical = env.env
     captured_t = float(physical.cumulative_captured_t)
     stored_t = float(physical.cumulative_stored_t)
-    total_cost = float(physical.ledger.total_cost)
+    episode_operating_cost = float(physical.ledger.operating_cost)
+    episode_total_cost = float(physical.ledger.total_cost)
+    cleanup_cost = float(
+        info.get("terminal_cleanup_operating_cost_eur", 0.0)
+    )
+    operating_cost = episode_operating_cost + cleanup_cost
+    total_cost = episode_total_cost + cleanup_cost
     hard_violations = sum(
         int(count)
         for code, count in violations.items()
@@ -98,7 +104,21 @@ def evaluate_seed(
         "stored_t": stored_t,
         "vented_t": float(physical.ledger.vented_t),
         "storage_rate": stored_t / captured_t if captured_t > 1e-9 else 0.0,
-        "operating_cost_eur": float(physical.ledger.operating_cost),
+        "episode_vessel_fuel_eur": float(physical.ledger.vessel_fuel),
+        "episode_conditioning_eur": float(physical.ledger.conditioning),
+        "episode_reconditioning_eur": float(
+            physical.ledger.reconditioning
+        ),
+        "episode_loading_eur": float(physical.ledger.loading),
+        "episode_unloading_eur": float(physical.ledger.unloading),
+        "episode_operating_cost_eur": episode_operating_cost,
+        "episode_vent_penalty_eur": float(physical.ledger.vent_penalty),
+        "episode_storage_shortfall_penalty_eur": float(
+            physical.ledger.storage_shortfall_penalty
+        ),
+        "terminal_cleanup_operating_cost_eur": cleanup_cost,
+        "operating_cost_eur": operating_cost,
+        "episode_total_cost_eur": episode_total_cost,
         "total_cost_eur": total_cost,
         "unit_total_cost_eur_per_t": (
             total_cost / stored_t if stored_t > 1e-9 else float("nan")
@@ -168,4 +188,3 @@ def validation_metrics(
             + hard_violation_penalty_eur * hard
         ),
     }
-

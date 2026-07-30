@@ -76,6 +76,9 @@ def _make_status_callback(
     report_every_steps: int,
     simulator_step_counter: SimulatorStepCounter,
     max_simulator_hour_steps: int | None,
+    validation_env: HighLevelDispatchEnv | None = None,
+    validation_seeds: tuple[int, ...] = (),
+    validation_every_simulator_hour_steps: int | None = None,
     progress_mode: str = "lines",
 ):
     """Create a PPO callback that persists readable live training status.
@@ -132,6 +135,13 @@ def _make_status_callback(
             self.progress_bar = None
             self.metrics_file = None
             self.metrics_writer = None
+            self.best_validation_cost = float("inf")
+            self.last_validation_usage = -1.0
+            self.next_validation_usage = (
+                float(validation_every_simulator_hour_steps)
+                if validation_every_simulator_hour_steps is not None
+                else float("inf")
+            )
 
         def _on_training_start(self) -> None:
             self.started_at = perf_counter()
@@ -167,6 +177,11 @@ def _make_status_callback(
                 ),
             )
             self.metrics_writer.writeheader()
+            if validation_seeds:
+                (run_dir / "validation").mkdir(
+                    parents=True,
+                    exist_ok=False,
+                )
             self._record("running")
 
         def _on_step(self) -> bool:
@@ -177,12 +192,26 @@ def _make_status_callback(
                     self.last_progress_step = self.num_timesteps
             if self.num_timesteps - self.last_report_step >= self.report_every:
                 self._record("running")
+            usage = simulator_step_counter.snapshot().hour_steps
+            if usage + 1e-9 >= self.next_validation_usage:
+                self._evaluate_validation(usage)
+                interval = float(
+                    validation_every_simulator_hour_steps
+                )
+                while self.next_validation_usage <= usage + 1e-9:
+                    self.next_validation_usage += interval
             exhausted = self._budget_exhausted()
             if exhausted:
                 self._record("simulator_budget_exhausted")
             return not exhausted
 
         def _on_training_end(self) -> None:
+            usage = simulator_step_counter.snapshot().hour_steps
+            if (
+                validation_seeds
+                and abs(usage - self.last_validation_usage) > 1e-9
+            ):
+                self._evaluate_validation(usage)
             state = (
                 "simulator_budget_exhausted"
                 if self._budget_exhausted()
@@ -193,6 +222,54 @@ def _make_status_callback(
                 self.progress_bar.close()
             if self.metrics_file is not None:
                 self.metrics_file.close()
+
+        def _evaluate_validation(self, usage: float) -> None:
+            if validation_env is None or not validation_seeds:
+                return
+            records = [
+                _evaluate_validation_seed(
+                    self.model,
+                    validation_env,
+                    seed,
+                )
+                for seed in validation_seeds
+            ]
+            mean_cost = sum(
+                float(row["total_cost_eur"]) for row in records
+            ) / len(records)
+            is_best = mean_cost < self.best_validation_cost
+            if is_best:
+                self.best_validation_cost = mean_cost
+                self.model.save(
+                    run_dir / "ppo_high_level_best_validation"
+                )
+                _write_json(
+                    run_dir / "validation" / "best.json",
+                    {
+                        "training_simulator_hour_steps": usage,
+                        "selection_metric": "mean_total_cost_eur",
+                        "mean_total_cost_eur": mean_cost,
+                        "validation_seeds": list(validation_seeds),
+                        "per_seed": records,
+                        "model_path": str(
+                            run_dir
+                            / "ppo_high_level_best_validation"
+                        ),
+                    },
+                )
+            _write_json(
+                run_dir
+                / "validation"
+                / f"simulator_hour_{usage:g}.json",
+                {
+                    "training_simulator_hour_steps": usage,
+                    "is_best": is_best,
+                    "mean_total_cost_eur": mean_cost,
+                    "validation_seeds": list(validation_seeds),
+                    "per_seed": records,
+                },
+            )
+            self.last_validation_usage = usage
 
         def _record(self, state: str) -> None:
             elapsed_seconds = max(1e-9, perf_counter() - self.started_at)
@@ -241,6 +318,11 @@ def _make_status_callback(
                     "max_simulator_hour_steps": max_simulator_hour_steps,
                     "simulator_budget_fraction": budget_fraction,
                     "simulator_budget_exhausted": self._budget_exhausted(),
+                    "best_validation_mean_total_cost_eur": (
+                        self.best_validation_cost
+                        if math.isfinite(self.best_validation_cost)
+                        else None
+                    ),
                     "elapsed_seconds": elapsed_seconds,
                     "decisions_per_second": row["decisions_per_second"],
                     "latest_metrics": row,
@@ -322,6 +404,72 @@ def _format_optional(value: float | None) -> str:
     为精简 tqdm 后缀格式化可能缺失的标量值。
     """
     return "n/a" if value is None else f"{value:.3f}"
+
+
+def _evaluate_validation_seed(
+    model,
+    env: HighLevelDispatchEnv,
+    seed: int,
+) -> dict[str, float | int]:
+    """Evaluate one deterministic validation episode."""
+
+    observation = env.reset(seed=int(seed))
+    decisions = 0
+    done = False
+    info: dict[str, Any] = {}
+    while not done:
+        action, _state = model.predict(
+            observation,
+            deterministic=True,
+            action_masks=env.action_masks(),
+        )
+        observation, _reward, terminated, truncated, info = env.step(
+            int(action)
+        )
+        decisions += 1
+        done = bool(terminated or truncated)
+    episode_total_cost = float(env.env.ledger.total_cost)
+    cleanup_cost = float(
+        info.get("terminal_cleanup_operating_cost_eur", 0.0)
+    )
+    total_cost = episode_total_cost + cleanup_cost
+    stored_t = float(env.env.cumulative_stored_t)
+    return {
+        "seed": int(seed),
+        "decisions": decisions,
+        "episode_total_cost_eur": episode_total_cost,
+        "terminal_cleanup_operating_cost_eur": cleanup_cost,
+        "total_cost_eur": total_cost,
+        "unit_total_cost_eur_per_t": (
+            total_cost / stored_t if stored_t > 1e-9 else float("nan")
+        ),
+        "captured_t": float(env.env.cumulative_captured_t),
+        "vented_t": float(env.env.ledger.vented_t),
+        "stored_t": stored_t,
+    }
+
+
+def _validate_seed_partition(
+    *,
+    training_seed_min: int,
+    training_seed_max: int,
+    validation_seeds: tuple[int, ...],
+) -> None:
+    """Reject invalid or overlapping training/validation seed ranges."""
+
+    if training_seed_min > training_seed_max:
+        raise ValueError(
+            "training_seed_min must not exceed training_seed_max."
+        )
+    overlap = [
+        seed
+        for seed in validation_seeds
+        if training_seed_min <= seed <= training_seed_max
+    ]
+    if overlap:
+        raise ValueError(
+            f"Training and validation seeds overlap: {overlap}."
+        )
 
 
 def _planned_total_timesteps(requested_timesteps: int, rollout_steps: int) -> int:
@@ -455,6 +603,10 @@ def train_high_level_ppo(
     progress_mode: str = "lines",
     reward: HighLevelRewardConfig | None = None,
     max_simulator_hour_steps: int | None = None,
+    training_seed_min: int = 100_000,
+    training_seed_max: int = 999_999,
+    validation_seeds: tuple[int, ...] = (),
+    validation_every_simulator_hour_steps: int | None = None,
 ):
     """Train MaskablePPO over sparse dispatch goals and return the model.
 
@@ -468,6 +620,19 @@ def train_high_level_ppo(
     ):
         raise ValueError(
             "max_simulator_hour_steps must be a positive integer."
+        )
+    validation_seeds = tuple(int(seed) for seed in validation_seeds)
+    _validate_seed_partition(
+        training_seed_min=training_seed_min,
+        training_seed_max=training_seed_max,
+        validation_seeds=validation_seeds,
+    )
+    if (
+        validation_every_simulator_hour_steps is not None
+        and validation_every_simulator_hour_steps <= 0
+    ):
+        raise ValueError(
+            "validation_every_simulator_hour_steps must be positive."
         )
     try:
         from sb3_contrib import MaskablePPO
@@ -501,9 +666,38 @@ def train_high_level_ppo(
         max_simulator_hour_steps=max_simulator_hour_steps,
     )
     gym_env = Monitor(
-        HighLevelDispatchGymEnv(native_env),
+        HighLevelDispatchGymEnv(
+            native_env,
+            episode_seed_min=training_seed_min,
+            episode_seed_max=training_seed_max,
+        ),
         filename=str(run_dir / "monitor"),
     )
+    validation_env = (
+        make_high_level_native_env(
+            scenario=scenario,
+            episode_hours=episode_hours,
+            forecast_context_hours=forecast_context_hours,
+            future_summary_windows_h=future_summary_windows_h,
+            decision_interval_h=decision_interval_h,
+            event_triggered=event_triggered,
+            weather_mode=weather_mode,
+            warm_start=warm_start,
+            scenario_protocol=scenario_protocol,
+            reward=reward,
+        )
+        if validation_seeds
+        else None
+    )
+    if (
+        validation_seeds
+        and validation_every_simulator_hour_steps is None
+        and max_simulator_hour_steps is not None
+    ):
+        validation_every_simulator_hour_steps = max(
+            1,
+            max_simulator_hour_steps // 10,
+        )
     effective_gamma = 1.0
     planned_timesteps = _planned_total_timesteps(total_timesteps, n_steps)
     _write_json(
@@ -538,6 +732,17 @@ def train_high_level_ppo(
             "requested_timesteps": total_timesteps,
             "planned_timesteps": planned_timesteps,
             "max_simulator_hour_steps": max_simulator_hour_steps,
+            "training_seed_min": training_seed_min,
+            "training_seed_max": training_seed_max,
+            "validation_seeds": list(validation_seeds),
+            "validation_every_simulator_hour_steps": (
+                validation_every_simulator_hour_steps
+            ),
+            "checkpoint_selection": (
+                "minimum_validation_mean_total_cost"
+                if validation_seeds
+                else None
+            ),
             "seed": seed,
             "gamma": effective_gamma,
             "n_steps": n_steps,
@@ -557,6 +762,11 @@ def train_high_level_ppo(
         report_every_steps=status_every_steps,
         simulator_step_counter=simulator_step_counter,
         max_simulator_hour_steps=max_simulator_hour_steps,
+        validation_env=validation_env,
+        validation_seeds=validation_seeds,
+        validation_every_simulator_hour_steps=(
+            validation_every_simulator_hour_steps
+        ),
         progress_mode=progress_mode,
     )
     checkpoint_callback = CheckpointCallback(
@@ -612,6 +822,11 @@ def train_high_level_ppo(
                     simulator_budget_exhausted
                 ),
                 "model_path": str(run_dir / "ppo_high_level_final"),
+                "best_validation_model_path": (
+                    str(run_dir / "ppo_high_level_best_validation")
+                    if validation_seeds
+                    else None
+                ),
             },
         )
     finally:
@@ -668,8 +883,21 @@ def main() -> None:
         default=None,
         help=(
             "Hard cap on bottom-level one-hour simulator advances. "
-            "Set this to B_4800 for formal training."
+            "Set this to B_selected for formal training."
         ),
+    )
+    parser.add_argument("--training-seed-min", type=int, default=100_000)
+    parser.add_argument("--training-seed-max", type=int, default=999_999)
+    parser.add_argument(
+        "--validation-seeds",
+        type=int,
+        nargs="*",
+        default=[],
+    )
+    parser.add_argument(
+        "--validation-every-simulator-hour-steps",
+        type=int,
+        default=None,
     )
     parser.add_argument(
         "--reward-scale",
@@ -740,6 +968,12 @@ def main() -> None:
             reward_scale=args.reward_scale
         ),
         max_simulator_hour_steps=args.max_simulator_hour_steps,
+        training_seed_min=args.training_seed_min,
+        training_seed_max=args.training_seed_max,
+        validation_seeds=tuple(args.validation_seeds),
+        validation_every_simulator_hour_steps=(
+            args.validation_every_simulator_hour_steps
+        ),
     )
     print(f"Saved PPO model and metrics under: {run_dir}")
     print("High-level gamma: 1.00000000")

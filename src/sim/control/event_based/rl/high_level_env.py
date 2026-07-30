@@ -18,6 +18,7 @@ from typing import Callable
 
 import numpy as np
 
+from sim.control.cplex_milp import _terminal_cleanup_cost_for_state
 from sim.environment import CCSEnv
 from sim.environment.vessel_mode import vessel_operation_modes
 
@@ -254,6 +255,22 @@ class HighLevelDispatchEnv:
         operating_cost = self.env.ledger.operating_cost - start_operating_cost
         total_cost = self.env.ledger.total_cost - start_total_cost
         captured_t = self.env.cumulative_captured_t - start_captured_t
+        terminal_cleanup_operating_cost_eur = 0.0
+        episode_complete = bool(
+            truncated and self.env.t >= self.env.n_steps
+        )
+        if (
+            episode_complete
+            and self.config.reward.objective == "realised_total_cost"
+        ):
+            terminal_cleanup_operating_cost_eur = float(
+                _terminal_cleanup_cost_for_state(
+                    self.env,
+                    self.env.cost_model.parameters,
+                )
+            )
+            operating_cost += terminal_cleanup_operating_cost_eur
+            total_cost += terminal_cleanup_operating_cost_eur
         reward, reward_breakdown = high_level_reward(
             stored_t=stored_t,
             captured_t=captured_t,
@@ -282,6 +299,10 @@ class HighLevelDispatchEnv:
             "captured_t": captured_t,
             "operating_cost": operating_cost,
             "total_cost": total_cost,
+            "terminal_cleanup_operating_cost_eur": (
+                terminal_cleanup_operating_cost_eur
+            ),
+            "episode_complete": episode_complete,
             "overflow_risk_t_hours": overflow_risk_t_hours,
             "violation_counts": dict(sorted(violations.items())),
             "high_level_reward": reward_breakdown,
@@ -297,6 +318,10 @@ class HighLevelDispatchEnv:
             "cumulative_stored_t": self.env.cumulative_stored_t,
             "cumulative_vented_t": self.env.ledger.vented_t,
             "cumulative_total_cost": self.env.ledger.total_cost,
+            "cumulative_reported_total_cost": (
+                self.env.ledger.total_cost
+                + terminal_cleanup_operating_cost_eur
+            ),
         }
         return (
             high_level_observation(
