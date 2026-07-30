@@ -1,138 +1,323 @@
-<h1 align="center">
-  <img src="assets/logo.png" alt="Logo" width="400"/>
-</h1>
-<h3 align="center">
-Physics-Constrained Simulation and Learned Dispatch Control for Ship-Based CCS Chains
-</h3>
-<p align="center">
-  Languages: English | <a href="README_CN.md">简体中文</a>
-</p>
+<div align="center">
+  <img src="assets/logo.png" alt="CCS_RL logo" width="420"/>
+
+  <h3>Physics-Constrained Simulation and Learned Dispatch Control<br/>for Ship-Based CCS Chains</h3>
+
+  <p>
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="MIT License"></a>
+    <img src="https://img.shields.io/badge/Python-%E2%89%A53.10-3776AB?logo=python&logoColor=white&style=flat-square" alt="Python >=3.10">
+    <img src="https://img.shields.io/badge/Protocol-unified__window__v1-0A7E8C?style=flat-square" alt="unified_window_v1">
+    <img src="https://img.shields.io/badge/E0-179%2F179%20passed-2E8B57?style=flat-square" alt="E0 validation passed">
+    <img src="https://img.shields.io/badge/Artifacts-E0--E5-6F42C1?style=flat-square" alt="E0-E5 artifacts">
+    <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white&style=flat-square" alt="Google Drive dataset"></a>
+  </p>
+
+  <p>
+    <a href="README.md">English</a> · <a href="README_CN.md">简体中文</a>
+  </p>
+
+  <p>
+    <b>One simulator. One frozen protocol. Heuristics, MILP and learned controllers compared under the same physics.</b>
+  </p>
+</div>
 
 <p align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="MIT"></a>
-  <img src="https://img.shields.io/badge/python-%E2%89%A53.10-blue?style=flat-square" alt="Python >=3.10">
-  <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white&style=flat-square" alt="Google Drive Dataset"></a>
+  <img src="assets/Overview.png" alt="Ship-based CCS chain and disturbance-aware dispatch control" width="96%">
 </p>
 
-<p align="center">
-  <img src="assets/Overview.png" alt="CCUS teaser" width="95%">
-</p>
+`CCS_RL` is a research codebase for **hourly operational dispatch of ship-based CO₂
+transport and storage**. It couples an auditable, physics-constrained simulator with
+heuristics, rolling optimisation and reinforcement-learning controllers. Every controller
+acts through the same legal-action interface and is replayed by the same physical engine.
 
-CCS_RL is a research codebase for **hourly operational dispatch of ship-based CO₂
-transport and storage**. It combines a physics-constrained simulator of the full CCS chain
-with a family of controllers — heuristics, rolling MILP, PPO variants, and the current main
-method **Iterative Action-Q** — evaluated against each other under one frozen disturbance and
-information protocol.
+The current main method, **Iterative Action-Q**, keeps Greedy as a safe default and learns
+when a small number of high-value dispatch interventions are worth making.
+
+### ✨ Highlights
+
+- **End-to-end physical chain.** Capture, liquefaction, vessel transport, offshore buffer
+  storage, pipeline flow, injection-well limits and reservoir pressure are settled hourly.
+- **Counterfactual long-horizon control.** Candidate dispatch actions are labelled by rolling
+  the same decision state to the end of the 720 h episode—not by a one-step reward.
+- **Shared physics and accounting.** All methods use the same action masks, disturbances,
+  automatic well rule, cost ledger and terminal cleanup value.
+- **Multiple controller families.** Fixed assignment, Greedy, three PPO formulations,
+  Iterative Action-Q, Rolling MILP and a time-limited full-horizon MILP reference.
+- **Artifact-backed evaluation.** The repository contains machine-readable protocols,
+  per-seed outputs, source data, figures and aggregate tables for E0–E5.
+- **Strong current result.** Across three trained model seeds and 30 evaluation scenarios,
+  Iterative Action-Q reaches **€1.882M mean total cost**, **€372.5k below Greedy**, with
+  **84.7% less venting**.
+
+> [!IMPORTANT]
+> The evaluation block `9,000,031–9,000,060` is fully reported, but model seed 0 of
+> Iterative Action-Q participated in a model-adoption decision. These artifacts are therefore
+> formal and reproducible, but the block must not be described as a pristine untouched
+> holdout. See the [E1 provenance note](experiments_results/E1/README.md).
+
+---
+
+## 📖 Table of contents
+
+- [Research question](#-research-question)
+- [System and method](#-system-and-method)
+- [Unified evaluation protocol](#-unified-evaluation-protocol)
+- [Main results](#-main-results)
+- [What the ablations say](#-what-the-ablations-say)
+- [Quick start](#-quick-start)
+- [Reproducing experiments](#-reproducing-experiments)
+- [Repository layout](#-repository-layout)
+- [Documentation and artifacts](#-documentation-and-artifacts)
+- [Roadmap](#-roadmap)
+- [Citation](#-citation)
+
+## 🚀 Updates
+
+- **2026-07-30** — Published the complete project snapshot with E0–E5 artifacts,
+  paper protocols, figures, tables and provenance records.
+- **2026-07-29** — Completed the seven-controller E1 comparison over scenarios
+  `9,000,031–9,000,060`, including three model seeds for every learned controller.
+- **2026-07-29** — Completed E2 iteration, E3 future-information and E4 stress
+  evaluations with matched budgets and paired scenarios.
+- **2026-07-27** — Locked the Iterative Action-Q production configuration and
+  reproducibility checks.
+
+## 💡 Research question
+
+> In a three-vessel CCS transport–storage system with weather, capture and
+> injection-capacity disturbances, can a controller that retains Greedy as its safe
+> default and learns a small number of high-value interventions reduce cost and CO₂
+> venting at low online decision cost?
 
 The physical chain is:
 
 ```text
-Emitter -> Vessel -> Terminal -> Pipeline -> SubseaManifold -> InjectionWell -> Reservoir
+Emitter → Vessel → Terminal → Pipeline → Subsea Manifold → Injection Well → Reservoir
 ```
 
-Controllers only decide **vessel dispatch**. Injection is handled by a shared automatic
-well controller that always takes the highest feasible rate, so no method gains an advantage
-by relaxing physics. `src/sim/` is the single source of physical truth: it validates every
-action, advances capture, sailing, loading, unloading, injection and reservoir pressure, and
-returns auditable trajectories, cost ledgers and KPIs.
+Controllers decide **vessel dispatch only**. Injection is handled by a shared automatic
+well controller that takes the highest currently feasible rate. A method cannot gain an
+advantage by relaxing mass balance, storage capacity, pressure limits or action legality.
 
----
+<details>
+<summary><b>Research abstract</b></summary>
 
-## Research question
+Ship-based carbon capture and storage couples discrete vessel-routing decisions with
+continuous inventories, weather-dependent travel, fluctuating capture, injection
+availability and subsurface pressure constraints. This repository studies that operational
+control problem with a common physics-constrained simulator and a frozen evaluation
+protocol.
 
-> In a three-vessel CCS transport–storage system with weather, capture and injection-capacity
-> disturbances, can a method that keeps Greedy as its safe default and learns a **small number
-> of high-value interventions** from counterfactual rollouts reduce total cost and CO₂ venting
-> at low online decision cost?
+Iterative Action-Q starts from a Greedy policy, samples decision states, evaluates feasible
+joint actions through counterfactual rollouts to the end of each 720 h episode, and trains a
+distributional multi-head action-value model. At deployment, a confidence and economic
+margin gate permits only a limited number of learned overrides; otherwise the controller
+follows Greedy.
 
-This is the hypothesis under test, not a settled result. The full argument structure lives in
-[`docs/paper_structure_zh.md`](docs/paper_structure_zh.md); the experiment design is locked in
-[`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md).
+The repository also tests direct hourly PPO, high-level PPO, event-residual PPO and rolling
+MILP. The experiments are designed to separate simulator validity (E0), controller
+performance (E1), iteration effects (E2), future-information representations (E3),
+disturbance robustness (E4) and optimisation references (E5).
 
-## Method — Iterative Action-Q
-<p align="center">
-  <img src="assets/Methodology.png" alt="CCUS teaser" width="95%">
-</p>
+</details>
 
-Iterative Action-Q is neither PPO nor plain behaviour cloning. Greedy provides the safe default
-action and the first state distribution; the model then repeatedly collects the states **it
-would itself visit**:
+## 🎨 System and method
+
+<div align="center">
+  <img src="assets/Methodology.png" alt="CCS_RL controller and Iterative Action-Q methodology" width="96%">
+  <p><i>Shared physics-constrained execution, controller families and the Iterative Action-Q training loop.</i></p>
+</div>
+
+### Iterative Action-Q in one view
 
 ```text
-Greedy states G0        -> train P1
-P1 roll-in states G1    -> train P2 on G0+G1
-P2 roll-in states G2    -> train P3 on G0+G1+G2
-P3 roll-in states G3    -> train P4 on all data
+Greedy states G0        → train P1
+P1 roll-in states G1    → train P2 on G0 + G1
+P2 roll-in states G2    → train P3 on G0 + G1 + G2
+P3 roll-in states G3    → train P4 on all collected states
 ```
 
-- **Label.** Every candidate action starts from the same decision state and is simulated to the
-  end of the 720 h episode. The target is `1e-5 x (baseline total cost - candidate total cost)`,
-  so a positive target means the candidate genuinely saves money over the whole horizon — not a
-  one-hour reward and not a truncated 168 h return.
-- **Action space.** Each vessel picks one of `WAIT / Terminal / 3 emitters / FOLLOW`; three
-  vessels give up to `6³ = 216` joint actions, with infeasible ones masked out.
-- **Network.** Shared vessel encoder, structured action embeddings, 5 bootstrap heads, 51
-  quantiles per action.
-- **Deployment gate.** The policy overrides Greedy only under agreement and margin thresholds
-  (e.g. ≥4/5 heads agree, predicted gain above ≈€40k), with a capped number of overrides split
-  across fixed intervention windows. Otherwise it executes `FOLLOW`.
+| Component | Design |
+|---|---|
+| State | Physical system state, Greedy proposal and optional future-information summary |
+| Joint action | Up to `6³ = 216` three-vessel combinations, with infeasible actions masked |
+| Label | `1e-5 × (Greedy total cost − candidate total cost)` from matched rollouts to 720 h |
+| Network | Shared vessel encoder, structured action embeddings, 5 bootstrap heads and 51 quantiles |
+| Safe default | `FOLLOW`, which executes the Greedy proposal |
+| Deployment gate | Override only when head agreement and economic-gain thresholds are met |
+| Intervention budget | Overrides are capped and distributed across fixed episode windows |
 
-Details and the exact production configuration: [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md).
+Implementation: [`src/sim/control/iterative_action_q.py`](src/sim/control/iterative_action_q.py)<br>
+Training specification: [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md)
 
-## Unified comparison protocol — `unified_window_v1`
+### Shared physical execution
 
-All controllers share the same three-vessel network, 720 h episodes, 1 h physical step, initial
-state sampling, economic parameters, action masks and per-seed disturbance trajectories. The
-protocol is machine-readable and frozen:
+`src/sim/` is the single source of physical truth. It validates actions and advances:
 
-- [`experiments/protocols/unified_window_v1_paper_protocol.json`](experiments/protocols/unified_window_v1_paper_protocol.json) — environment, disturbance rates, well rule, forecast protocol, cost formula, training budget.
-- [`experiments/protocols/unified_window_v1_seed_manifest.json`](experiments/protocols/unified_window_v1_seed_manifest.json) — train / validation / test seed ranges.
+```text
+capture → conditioning → loading → sailing → unloading
+        → buffer storage → pipeline → injection → reservoir pressure
+```
 
-| Controller | Paper name | Trained | Runtime future information |
-|---|---|---|---|
-| Fixed vessel–emitter split | Fixed-Assignment Heuristic | no | none |
-| Dynamic greedy shuttle | Greedy | no | none |
-| Direct one-action-per-hour PPO | Hourly Centralized Maskable PPO | yes | shared 168 h summary |
-| Event-based v4 architecture | Event-Residual PPO | yes | shared 168 h summary |
-| **Current main method** | **Iterative Action-Q** | yes | shared 168 h summary |
-| Rolling optimisation | Rolling MILP | no | full hourly 168 h forecast |
-| Offline reference only | Full-horizon MILP (time-limited) | no | perfect foresight |
+Algorithm-layer controllers may propose goals or actions, but they cannot introduce new
+capacities, clipping rules or pressure equations.
 
-Key fairness rules: identical forecast **source** for every forecast-capable method (currently a
-perfect-forecast protocol), a matched environment-interaction budget
-`B_selected = 9,505,319` simulator-hour calls for the three
-learning methods, a common compact trip-cleanup terminal value applied to every method's reported
-cost, and unvisited paired-comparison test seeds `9,000,031–9,000,060`. This range is locked
-against further selection; `9,000,001–9,000,030` is retained as a deprecated historical test block.
+## ⚖️ Unified evaluation protocol
 
-## Preliminary results
+The frozen `unified_window_v1` protocol uses three vessels, 720 h episodes and a 1 h
+physical step. Initial states, economic parameters, action masks and per-seed disturbance
+trajectories are shared.
 
-Development-seed comparison (`8,000,001–8,000,030`, 30 paired seeds, **one training seed per
-learning method**). These remain development-only results.
-Full write-up: [`docs/preliminary results/unified_window_control_comparison_2026-07-26_zh.md`](docs/preliminary%20results/unified_window_control_comparison_2026-07-26_zh.md).
+| Controller | Paper role | Trained | Runtime future information |
+|---|---|:---:|---|
+| Fixed vessel–emitter split | Fixed-Assignment Heuristic | No | None |
+| Dynamic shuttle | Greedy | No | None |
+| Direct hourly policy | Hourly Centralized Maskable PPO | Yes | Shared 168 h summary |
+| 24 h high-level policy | High-level Centralized Maskable PPO | Yes | Shared 168 h summary |
+| Event-triggered residual policy | Event-Residual PPO | Yes | Shared 168 h summary |
+| Counterfactual value controller | **Iterative Action-Q** | Yes | Shared 168 h summary |
+| Receding-horizon optimisation | Rolling MILP | No | Full hourly 168 h forecast |
+| Offline time-limited reference | Full-horizon MILP | No | Perfect information |
 
-| Method | Total cost (EUR) | vs Greedy | Vented (t) | Stored (t) | EUR/t | Wins vs Greedy |
+Key controls for fairness:
+
+- identical simulator, legal-action mask and automatic-well rule;
+- frozen per-seed disturbances and paired scenario comparisons;
+- common cost definition and compact terminal cleanup value;
+- matched simulator-hour budget for the learned methods;
+- three independent training seeds for each learned controller;
+- machine-readable protocol and seed manifests.
+
+Protocol files:
+
+- [`unified_window_v1_paper_protocol.json`](experiments/protocols/unified_window_v1_paper_protocol.json)
+- [`unified_window_v1_seed_manifest.json`](experiments/protocols/unified_window_v1_seed_manifest.json)
+- [`e2_e3_e4_iterative_q_protocol.json`](experiments/protocols/e2_e3_e4_iterative_q_protocol.json)
+
+## 📊 Main results
+
+### E0 — physical validity
+
+E0 validates the simulator and common accounting boundary before comparing controllers.
+
+| Check | Result |
+|---|---:|
+| Supplementary validation items | **20 / 20 passed** |
+| Automated regression tests | **179 / 179 passed** |
+| Maximum 720 h mass-balance error | **6.158 × 10⁻⁸ t** |
+| Hard physical violations | **0** |
+| Validation runtime | **5.53 s** |
+
+Artifacts: [`experiments_results/E0/`](experiments_results/E0/)
+
+### E1 — seven-controller comparison
+
+Mean performance on 30 paired 720 h scenarios. Learned methods aggregate
+`3 model seeds × 30 scenarios = 90` episode records. Terminal cleanup is included.
+
+| Method | Mean total cost | Δ vs Greedy | Vented CO₂ | Stored CO₂ | Unit cost | Wins vs Greedy |
 |---|---:|---:|---:|---:|---:|---:|
-| Greedy | 2,059,907 | — | 7,883.1 | 100,959.4 | 21.01 | — |
-| Residual PPO v4 | 1,942,032 | −117,876 | 5,263.1 | 103,421.5 | 18.87 | 13/30 |
-| Iterative Q (state only) | 1,699,864 | −360,043 | 1,704.5 | 108,989.6 | 15.68 | 23/30 |
-| **Iterative Q (24/72 h future)** | **1,633,631** | **−426,276** | **821.1** | **109,242.1** | **14.97** | **25/30** |
-| Hybrid RL (Greedy base) | 3,134,909 | +1,075,002 | 22,990.4 | 87,728.0 | 36.05 | 2/30 |
+| Fixed-Assignment | €2,586,942 | +€332,730 | 12,120.5 t | 95,578.7 t | €27.23/t | 6 / 30 |
+| Greedy | €2,254,212 | — | 7,296.8 t | 102,984.2 t | €22.40/t | — |
+| Hourly PPO | €5,659,632 | +€3,405,421 | 49,756.8 t | 44,082.9 t | €136.05/t | 0 / 90 |
+| High-level PPO | €2,187,244 | −€66,967 | 3,803.5 t | 107,406.2 t | €20.61/t | 48 / 90 |
+| Event-Residual PPO | €2,239,850 | −€14,362 | 5,963.2 t | 102,490.0 t | €22.01/t | 47 / 90 |
+| **Iterative Action-Q G60-P4** | **€1,881,692** | **−€372,519** | **1,113.0 t** | **110,246.0 t** | **€17.14/t** | **83 / 90** |
+| Rolling MILP | €2,089,728 | −€164,483 | 4,663.2 t | 105,909.6 t | €19.99/t | 16 / 30* |
 
-Paired 95% bootstrap CIs exclude zero for both Iterative Q variants but **not** for Residual PPO
-v4 ([−309,118, +47,944]), so v4 cannot yet be called reliably better than Greedy. Adding the
-24/72 h future summary buys a further −66,233 EUR on average, CI [−119,717, −15,833].
+<sub>*Rolling MILP also ties Greedy on 5/30 scenarios. Its online comparison uses a
+168 h horizon, 24 h replanning and a 600 s solver limit per replan.</sub>
 
-## Installation
+Compared with Greedy, Iterative Action-Q reduces the ratio of mean costs by **16.5%**,
+reduces venting by **84.7%**, increases stored CO₂ by **7.1%** and lowers unit total cost
+by **23.5%**.
 
-Run everything from the repository root.
+<div align="center">
+  <img src="experiments_results/E1/figures/figure_3a_fixed_assignment_baseline.png" alt="Paired controller cost comparison" width="72%">
+  <p><i>Paired scenario cost differences; diamonds show means and bars show 95% confidence intervals.</i></p>
+</div>
+
+Source table:
+[`e1_formal_per_algorithm.csv`](experiments_results/E1/formal_comparison/e1_formal_per_algorithm.csv)
+
+<details>
+<summary><b>Important interpretation notes</b></summary>
+
+- The Full-horizon MILP is an offline perfect-information reference. All 30 runs terminated
+  with time-limited feasible incumbents rather than proven optima, so it is not an oracle.
+- Rolling MILP is the valid online optimisation comparison; its mean wall time is
+  approximately 12,313 s per seed under the reported budget.
+- The three learned methods are averaged over model seeds as well as scenarios. Their
+  win counts therefore use 90 model-seed/scenario pairs.
+- The Iterative Action-Q evaluation block has the model-adoption caveat stated at the top
+  of this README.
+
+</details>
+
+## 🔬 What the ablations say
+
+The artifacts include positive and negative findings. The current evidence supports
+Iterative Action-Q as a strong controller, but does **not** support every initial design
+hypothesis.
+
+### E2 — does iteration help?
+
+| Training stage | Mean cost | Δ vs Greedy | Vented | Wins |
+|---|---:|---:|---:|---:|
+| P1, Greedy roll-in only | €1,993,324 | −€260,887 | 2,449.4 t | 24 / 30 |
+| P2 | €1,950,709 | −€303,503 | 1,971.3 t | 26 / 30 |
+| P3 | €1,927,328 | −€326,884 | 1,740.9 t | 27 / 30 |
+| **P4** | **€1,881,692** | **−€372,519** | 1,113.0 t | **28 / 30** |
+| One-shot, matched budget | €1,885,221 | −€368,991 | **1,069.0 t** | 27 / 30 |
+
+Performance improves monotonically from P1 to P4, but a one-shot Greedy-state model with
+a matched simulator budget nearly matches P4. The current experiment therefore shows a
+clear **data/budget benefit**, while the incremental benefit of policy-induced iterative
+states remains unresolved.
+
+Source: [`table_4_iteration_ablation.csv`](experiments_results/E2/tables/table_4_iteration_ablation.csv)
+
+### E3 — how much future information?
+
+| Representation | Dimensions | Parameters | Mean cost | Δ vs state-only |
+|---|---:|---:|---:|---:|
+| State only | 94 | 4.319M | €1,885,676 | — |
+| **168 h structured summary** | **101** | **4.324M** | **€1,881,692** | −€3,984 |
+| Full 168 h sequence | 1,774 | 4.389M | €2,104,128 | +€218,451 |
+
+The compact summary is statistically close to state-only, while the full hourly sequence is
+materially worse. More forecast detail is not automatically more useful.
+
+Source:
+[`table_5_future_information_ablation.csv`](experiments_results/E3/tables/table_5_future_information_ablation.csv)
+
+### E4 — disturbance stress
+
+| Stress | Greedy | Iterative P4 | P4 Δ vs Greedy | P4 wins |
+|---|---:|---:|---:|---:|
+| Low | €2,004,612 | €1,748,849 | −€255,763 | 27 / 30 |
+| Medium | €2,254,212 | €1,881,692 | −€372,519 | 28 / 30 |
+| High | €3,006,460 | €2,586,735 | −€419,725 | 24 / 30 |
+
+The gated controller remains better than Greedy across all three stress levels. The
+matched one-shot model is slightly better than P4 at high stress, again cautioning against
+attributing all gains to iteration.
+
+Source:
+[`table_s2_action_q_stress_comparison.csv`](experiments_results/E4/tables/table_s2_action_q_stress_comparison.csv)
+
+## ⚡ Quick start
+
+### Installation
+
+Run commands from the repository root.
 
 ```powershell
 uv sync
 uv run python -m pip install -e .
 ```
 
-With RL dependencies (`numpy`, `gymnasium`, `stable-baselines3`, `sb3-contrib`):
+Install the RL stack:
 
 ```powershell
 uv sync --extra rl
@@ -141,28 +326,18 @@ uv run python -m pip install -e ".[rl]"
 
 Without `uv`:
 
-```powershell
+```bash
 pip install -e ".[rl]"
 ```
 
 Additional requirements:
 
-- Python `>=3.10` (GPU training environment uses 3.12).
-- Core physical layer: `searoute>=1.6`, `CoolProp>=6.6`.
-- Iterative Action-Q and the event-based stack additionally need `torch`.
-- Rolling MILP / Full-horizon MILP need a CPLEX installation; CBC is far too slow for 720 h
-  multi-seed studies.
-- Wave-height prediction training uses a separate conda environment:
+- Python `>=3.10` (GPU experiments use Python 3.12);
+- `searoute>=1.6` and `CoolProp>=6.6` for the physical layer;
+- PyTorch for Iterative Action-Q and event-based learned controllers;
+- IBM ILOG CPLEX for Rolling and Full-horizon MILP experiments.
 
-```powershell
-conda env create -f environment-gpu.yml
-conda activate ccs-rlllm-gpu
-pip install -e ".[rl]"
-```
-
-## Quick start
-
-### Physical-layer demo and dashboards
+### Run the physical simulator
 
 ```powershell
 uv run python examples\run_physical_layer_demo.py
@@ -170,42 +345,62 @@ uv run python examples\build_phase1_dashboard.py
 uv run python examples\build_rule_based_dashboards.py
 ```
 
-### Iterative Action-Q pipeline
-
-The four stages map directly onto CLI entry points. On a cluster, use the launcher instead
-(next section) — it wires the whole dependency chain.
+### Run the tests
 
 ```powershell
-# 1. G0 - Greedy roots
-uv run python -m experiments.generate_iterative_q_greedy_data `
-  --out-path output\iq\g0_train.pt --split train `
-  --seeds (1500..1699) --roots-per-seed 12
-
-# 2. Train P1 from scratch on G0
-uv run python scripts\train_iterative_action_q.py `
-  --train-data output\iq\g0_train.pt --validation-data output\iq\g0_val.pt `
-  --out-dir output\iq\p1 --observation-input v4_future_24_72
-
-# 3. G1-G3 - roll the current policy in, keep the states it visits
-uv run python -m experiments.create_iterative_q_lock `
-  --checkpoint output\iq\p1\iterative_action_q.pt --out-path output\iq\p1\lock.json `
-  --protocol-id unified_window_v1 --residual-margin 0.40 --economic-margin-eur 40000
-uv run python -m experiments.generate_iterative_q_policy_data `
-  --lock-config output\iq\p1\lock.json --out-path output\iq\g1_train.pt `
-  --split train --seeds (1500..1539)
-
-# 4. Retrain on cumulative data, then evaluate against Greedy on unseen seeds
-uv run python scripts\train_iterative_action_q.py `
-  --train-data output\iq\g0_train.pt output\iq\g1_train.pt `
-  --validation-data output\iq\g0_val.pt --initial-checkpoint output\iq\p1\iterative_action_q.pt `
-  --out-dir output\iq\p2 --observation-input v4_future_24_72
-uv run python -m experiments.evaluate_iterative_action_q `
-  --checkpoint output\iq\p4\iterative_action_q.pt --out-dir output\iq\p4\eval
+uv run python -m unittest discover -s tests
 ```
 
-`--observation-input` selects the ablation arm: `state_only`, `v4_future_24_72` (the locked E1
-representation), `forecast_168`, or one of the summary window/band variants. `--forecast-encoder`
-switches between `small_mlp`, `tcn` and `gru`.
+Without an editable installation:
+
+```powershell
+$env:PYTHONPATH="$PWD\src"
+python -m unittest discover -s tests
+```
+
+## 🧪 Reproducing experiments
+
+### Iterative Action-Q
+
+The production workflow alternates state collection and cumulative retraining.
+
+```powershell
+# G0 — collect Greedy root states
+uv run python -m experiments.generate_iterative_q_greedy_data `
+  --out-path output\iq\g0_train.pt `
+  --split train `
+  --seeds (1500..1699) `
+  --roots-per-seed 12
+
+# P1 — train the first model
+uv run python scripts\train_iterative_action_q.py `
+  --train-data output\iq\g0_train.pt `
+  --validation-data output\iq\g0_val.pt `
+  --out-dir output\iq\p1 `
+  --observation-input v4_future_24_72
+
+# G1 — collect states visited by the current policy
+uv run python -m experiments.create_iterative_q_lock `
+  --checkpoint output\iq\p1\iterative_action_q.pt `
+  --out-path output\iq\p1\lock.json `
+  --protocol-id unified_window_v1 `
+  --residual-margin 0.40 `
+  --economic-margin-eur 40000
+
+uv run python -m experiments.generate_iterative_q_policy_data `
+  --lock-config output\iq\p1\lock.json `
+  --out-path output\iq\g1_train.pt `
+  --split train `
+  --seeds (1500..1539)
+```
+
+Repeat the collect/retrain cycle through P4, then evaluate:
+
+```powershell
+uv run python -m experiments.evaluate_iterative_action_q `
+  --checkpoint output\iq\p4\iterative_action_q.pt `
+  --out-dir output\iq\p4\eval
+```
 
 ### Unified controller comparison
 
@@ -216,184 +411,122 @@ uv run python -m experiments.compare_unified_window_controls `
   --out-dir output\comparison
 ```
 
-Writes per-seed CSV and a summary JSON with cost components, vent/stored tonnes, override counts
-and wall-clock time.
+The comparison writes per-seed CSV files and a summary JSON containing cost components,
+stored/vented tonnes, intervention counts and wall-clock time.
 
-### Cluster runs
+### HPC / Slurm
 
-`hpc/launch_iterative_action_q.sh` chains data generation, staged training and evaluation into one
-SLURM dependency graph. Check the configuration without submitting anything:
+The launcher wires data generation, staged training and evaluation into one dependency graph.
+Inspect the full plan without submitting:
 
 ```bash
 DRY_RUN=1 bash hpc/launch_iterative_action_q.sh
 ```
 
-Override `PROJECT_DIR`, `RUN_ROOT` and `CONFIG_NAME` for your own paths and run directory; the
-launcher refuses to overwrite an existing run directory and writes all job IDs to
-`RUN_ROOT/job_ids.txt`. Individual `hpc/submit_*.sh` scripts cover single stages (data, training,
-evaluation, ablations, environment checks).
+Set `PROJECT_DIR`, `RUN_ROOT` and `CONFIG_NAME` for the target cluster. Launchers refuse
+to overwrite an existing run directory and record submitted job IDs for provenance.
 
-### Other controllers
-
-```powershell
-# Formal hourly centralized Maskable PPO (no BC, event trigger, or executor)
-uv run python -m sim.control.hourly_ppo.train_hourly_ppo `
-  --episode-hours 720 --forecast-context-hours 168 `
-  --future-summary-windows-h 168 --gamma 1 `
-  --max-simulator-hour-steps 9505319
-
-# Forecast-encoder comparison (demos -> merge -> train -> report subcommands)
-uv run python scripts\compare_forecast_encoders_rl.py --help
-
-# Wave-height prediction models
-uv run python -m sim.scenario_generation.wave_height.prediction.train_lstm
-```
-
-## Tests
-
-```powershell
-uv run python -m unittest discover -s tests
-```
-
-Without an editable install:
-
-```powershell
-$env:PYTHONPATH="$PWD\src"
-python -m unittest discover -s tests
-```
-
-## Repository layout
+## 🗂️ Repository layout
 
 ```text
-CCS_RLLLM/
-|-- data/                 # Capture-rate profiles and external reference data
-|-- docs/                 # Paper plan, method notes, and dated preliminary results
-|-- examples/             # Physical-layer demos and dashboard builders
-|-- experiments/          # Data generation, evaluation, comparison, ablation analysis
-|   `-- protocols/        # Frozen paper protocol and seed manifest
-|-- hpc/                  # SLURM launchers and per-stage submission scripts
-|-- scenarios/            # Reproducible scenario JSON files
-|-- scripts/              # Training entry points
-|-- src/sim/              # Main Python package
-|-- tests/                # 58 unit, structure, and experiment smoke tests
-|-- environment-gpu.yml   # GPU training environment
-`-- pyproject.toml
+CCS_RL/
+├── assets/                 # README and method graphics
+├── data/                   # Capture profiles and external reference data
+├── docs/                   # Paper plan, method notes and result narratives
+├── examples/               # Physical demos and dashboard builders
+├── experiments/            # Generation, evaluation, comparison and aggregation
+│   └── protocols/          # Frozen machine-readable experiment protocols
+├── experiments_results/    # E0–E5 figures, tables, per-seed results and provenance
+├── hpc/                    # Slurm launchers and stage-specific submission scripts
+├── scenarios/              # Reproducible CCS network configurations
+├── scripts/                # Training and analysis entry points
+├── src/sim/                # Main simulation and control package
+├── tests/                  # Unit, contract, regression and smoke tests
+├── environment-gpu.yml     # GPU training environment
+└── pyproject.toml
 ```
 
-### `src/sim` structure
+### Controller families
 
 ```text
-src/sim/
-|-- actions/              # ActionProposal, ActionFrame, ActionResolver
-|-- control/              # Controllers - see below
-|-- entities/             # Emitter, vessel, terminal, pipeline, well, reservoir state
-|-- environment/          # CCSEnv, factories, forecast/past observations, Gym adapters
-|-- operations/           # Capture, loading, unloading, transport, injection, pressure limits
-|-- scenario_generation/  # Disturbance and wave-height scenario generation
-|-- visualization/        # Dashboard payloads and HTML rendering
-|-- economics.py          # Cost and revenue model
-|-- line_source.py        # Reservoir/well pressure line-source model
-|-- metrics.py            # Rollouts, KPIs, evaluation summaries
-|-- network.py            # Physical network graph and single-step settlement
-|-- network_scenarios.py  # Build Northern Lights networks from JSON/data
-|-- routes.py             # Route and distance calculation
-|-- ship_speed.py         # Sea-state effects on vessel speed
-`-- simulator.py          # High-level simulation runner
+src/sim/control/
+├── baselines.py                # Idle and Greedy shuttle policies
+├── rule_based.py               # Fixed-assignment and rule controllers
+├── cplex_milp.py               # CPLEX model backend
+├── rolling_milp.py             # Rolling-horizon optimisation
+├── native_mpc.py               # Native multi-candidate MPC
+├── iterative_action_q.py       # Main distributional Action-Q model
+├── hourly_ppo/                 # Direct hourly PPO
+└── event_based/
+    ├── rl/                     # High-level PPO
+    └── residual_rl_v4/         # Event-Residual PPO
 ```
 
-### `src/sim/control` — controller families
+## 📚 Documentation and artifacts
 
-```text
-control/
-|-- baselines.py                # Idle and greedy shuttle policies
-|-- rule_based.py               # Fixed-assignment and rule controllers
-|-- milp.py / cplex_milp.py     # Static MILP benchmark and CPLEX backend
-|-- rolling_milp.py             # Rolling-horizon MILP with replay-validated warm start
-|-- native_mpc.py               # Multi-candidate native MPC
-|-- iterative_action_q.py       # Main method: the production Q network
-|-- hourly_ppo/                 # Direct one-policy-action-per-hour PPO baseline
-|-- recurrent_distributional_q.py
-|-- imitation.py / demonstrations.py / replay.py
-`-- event_based/                # Algorithm layer, outside the physics layer
-    |-- contracts.py            # DispatchGoal boundary: high-level policy <-> executor
-    |-- evaluation.py           # Physical rollout evaluator for fair comparison
-    |-- hybrid/                 # Rule, native-MPC and rolling-MILP executors
-    |-- rl/                     # Sparse 24 h high-level PPO
-    `-- residual_rl{,_v2,_v3,_v4}/  # Residual intervention PPO, v4 is Event-Residual PPO
-```
-
-`event_based/` decides *which operating goal to pursue*; it must never add capacities, pressure
-equations or clipping rules. Those stay in `entities/`, `operations/` and `network.py` so every
-controller receives identical physics. See [`src/sim/control/event_based/README.md`](src/sim/control/event_based/README.md).
-
-## Documentation map
-
-| Document | Contents |
+| Resource | Contents |
 |---|---|
-| [`docs/paper_structure_zh.md`](docs/paper_structure_zh.md) | Paper argument chain, section-by-section evidence requirements |
-| [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md) | E0–E5 experiment design, fairness protocol, metrics, statistics |
-| [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md) | Method definition, production configuration, code entry points |
-| [`docs/preliminary results/`](docs/preliminary%20results/) | Dated result records — controller comparison, encoder comparison, future-adapter and reproducibility ablations |
-| [`docs/CCS_RL_Research_Core_Idea.md`](docs/CCS_RL_Research_Core_Idea.md) | Original research framing |
-| [`docs/physical_layer_v1_cn.md`](docs/physical_layer_v1_cn.md) | Physical-layer model specification |
-| [`docs/northern_lights_line_source_pressure_study.md`](docs/northern_lights_line_source_pressure_study.md) | Reservoir pressure line-source study |
-| [`docs/experiments_summary.md`](docs/experiments_summary.md) | Historical record of the earlier RL/LLM phase (scripts since removed) |
-| `src/sim/scenario_generation/wave_height/prediction/README.md` | Wave-height prediction models |
+| [`docs/paper_structure_zh.md`](docs/paper_structure_zh.md) | Paper argument and section-level evidence requirements |
+| [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md) | E0–E5 design, fairness rules, metrics and statistics |
+| [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md) | Method definition and production configuration |
+| [`experiments_results/E0/`](experiments_results/E0/) | Physical validity and accounting checks |
+| [`experiments_results/E1/`](experiments_results/E1/) | Seven-controller formal comparison |
+| [`experiments_results/E2/`](experiments_results/E2/) | Iteration and matched-budget ablation |
+| [`experiments_results/E3/`](experiments_results/E3/) | Future-information ablation |
+| [`experiments_results/E4/`](experiments_results/E4/) | Disturbance-stress evaluation |
+| [`experiments_results/E5/`](experiments_results/E5/) | Time-limited full-horizon MILP artifacts |
+| [`docs/preliminary results/`](docs/preliminary%20results/) | Dated development-stage analyses |
 
-## Data
+Large external data and model weights are not all tracked by Git. Restore them to their
+documented directories from the
+[project data folder](https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN).
 
-Large external files are not fully tracked in git. Download them and restore them into the
-matching directories before running the related scripts.
+## 🧭 Roadmap
 
-- Google Drive: <https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN?usp=sharing>
-- `scenarios/` — scenario JSON, including `northern_lights_phase1_3vessels.json`, the network used
-  by the paper protocol.
-- `data/capture_rates/` — Phase 1/Phase 1+ emitter capture-rate profiles and metadata.
-- `data/网络收集资料/` — curated external references such as Climate TRACE source mapping.
-
-## Extending the codebase
-
-**Add a controller.** Implement it under `src/sim/control/` (algorithm-layer controllers go in
-`event_based/`), express actions as `ActionProposal` / `ActionFrame`, route them through
-`ActionResolver` into `network.step()`, register it in the comparison experiment, and add a
-behaviour test under `tests/`.
-
-**Add a scenario.** Add the JSON under `scenarios/`, put any new capture profile in
-`data/capture_rates/`, add a loading entry point in `src/sim/network_scenarios.py` or an
-environment factory, and validate it with a demo or comparison run.
-
-**Add a disturbance.** Generate the episode time series in
-`src/sim/scenario_generation/generator.py`, define runtime resolution in
-`disturbance_resolver.py`, connect it to `CCSEnv` or the relevant operation module, and add
-fixed-seed tests. Changing any `unified_window_v1` disturbance parameter requires a **new protocol
-version** and a rerun of all methods.
-
-## Roadmap
-
-- [x] Physical entities, operation modules, network step, and pressure limits.
-- [x] Action proposal/resolver protocol layer.
-- [x] Rule-based, static MILP, rolling MILP and native MPC controllers.
-- [x] Gymnasium/SB3 RL environments and PPO/BC training entry points.
-- [x] Event-based algorithm layer with hybrid executors and residual RL v1–v4.
-- [x] Iterative Action-Q training, evaluation and gating.
+- [x] Physics-constrained hourly CCS-chain simulator.
+- [x] Shared action proposal, resolution and replay interface.
+- [x] Heuristic, MILP, MPC and PPO controller families.
+- [x] Iterative Action-Q training, gating and evaluation pipeline.
 - [x] Frozen `unified_window_v1` protocol and seed manifest.
-- [ ] Implement the pending protocol requirements: shared automatic well rule in every controller
-      interface, complete cost/activity diagnostics, and the 1 h simulator-step counter for `B_4800`.
-- [ ] Retrain Hourly Centralized Maskable PPO and Event-Residual PPO with objective-aligned rewards.
-- [ ] Run ≥3 independent training seeds and report future frozen-controller comparisons on
-      unvisited test set `9,000,031–9,000,060`.
-- [ ] Replace personal paths in HPC scripts with environment-variable configuration.
-- [ ] Package large datasets and model weights as downloadable release assets.
+- [x] E0 physical validation and E1 seven-controller comparison.
+- [x] E2–E4 iteration, future-information and stress ablations.
+- [x] Versioned source data, figures, tables and provenance artifacts.
+- [ ] Run a new untouched confirmatory evaluation block after all model choices are frozen.
+- [ ] Package model checkpoints and large datasets as versioned release assets.
+- [ ] Replace remaining personal HPC paths with environment-based configuration.
+- [ ] Complete the paper and archival release.
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. When adding a controller:
+
+1. implement it under `src/sim/control/`;
+2. express decisions through `ActionProposal` / `ActionFrame`;
+3. pass all actions through `ActionResolver` and `network.step()`;
+4. register it in the unified comparison;
+5. add fixed-seed behavioural tests;
+6. create a new protocol version if the physical or disturbance assumptions change.
 
 ## 📝 Citation
 
+If this repository supports your research, please cite the software:
+
 ```bibtex
-@software{ccs_rlllm,
-  title  = {CCS_RLLLM: Physics-Constrained Simulation and Learned Dispatch Control for Ship-Based CCS},
-  author = {CCS_RLLLM contributors},
+@software{ccs_rl_2026,
+  title  = {CCS_RL: Physics-Constrained Simulation and Learned Dispatch Control
+            for Ship-Based Carbon Capture and Storage Chains},
+  author = {CCS_RL contributors},
   year   = {2026},
-  note   = {Research code for CCS chain simulation, optimisation control, and reinforcement learning}
+  url    = {https://github.com/ZZZPhaethon/CCS_RL},
+  note   = {Research software for CCS-chain simulation, optimisation and
+            reinforcement-learning control}
 }
 ```
 
-⭐ **If you find this work useful, please star the repository!**
+## 📄 License
+
+This project is released under the [MIT License](LICENSE).
+
+<div align="center">
+  <b>⭐ If you find CCS_RL useful, please consider starring the repository.</b>
+</div>
