@@ -11,23 +11,23 @@
 本文档默认：
 
 - 论文主方法是 **Iterative Action-Q**；
-- Event-based v4 在论文中统一称为 **Event-Residual PPO**；
 - 固定船服务固定 emitter 的规则策略称为 **Fixed-Assignment Heuristic**；
-- Native MPC 不参与比较；
 - Full-horizon MILP 保留为正式实验，但只作为限时、完美信息的离线参考；最终根据可行解、best bound 和 MIP gap 决定放在正文还是 Supplementary；
-- 三种学习控制器采用相同的最大环境交互预算：以 4,800-root Iterative Action-Q 实际消耗的底层 1 h simulator step calls 定义 \(B_{4800}\)；
-- Centralized Maskable PPO 和 Event-Residual PPO 均使用与总成本一致的 objective-aligned reward，不使用额外的 stored-CO₂ credit；
+- E1 比较六种在线控制器，其中三种学习控制器为 Hourly Centralized Maskable PPO、High-level Centralized Maskable PPO 和 Iterative Action-Q G60-P4；
+- 三种学习控制器采用约 \(9.5\times10^6\) 次底层 1 h simulator step calls 的近似匹配环境交互预算；Iterative Action-Q G60-P4 实际使用 9,526,297 次，两个 PPO 的训练 hard cap 为 9,505,319 次；
+- Hourly Centralized Maskable PPO 和 High-level Centralized Maskable PPO 均使用与总成本一致的 objective-aligned reward，不使用额外的 stored-CO₂ credit；
 - 每个 seed 生成 888 h 外生场景，其中前 720 h 是唯一执行与计分区间，后 168 h 只允许作为只读预测/规划上下文；
 - 所有方法只控制船舶调度；井由共享的最大可行注入底层控制器操作，任何方法均不能直接选择注入率；
-- Rolling MILP 使用经过 simulator replay 验证的 Greedy trajectory 作为唯一 warm start，不使用 Native MPC 候选 warm start、shifted previous-plan warm start 或执行 fallback；
-- 所有正式结论均来自预先锁定的测试 seeds，不能使用测试集选择模型、阈值或超参数。
+- Rolling MILP 使用经过 simulator replay 验证的 Greedy trajectory 作为唯一 warm start，不使用额外候选 warm start、shifted previous-plan warm start 或执行 fallback；
+- E1 的六种控制器统一使用固定测试 seeds `9000031–9000060`。
 
 机器可读的设计锁与 seed manifest 分别保存在：
 
 - `experiments/protocols/unified_window_v1_paper_protocol.json`；
 - `experiments/protocols/unified_window_v1_seed_manifest.json`。
 
-其中旧的 `8,000,001–8,000,030` 已登记为 development-only；正式测试预留全新的 `9,000,001–9,000,030`，在所有配置锁定前不得运行。
+E1 正式测试集固定为 `9,000,031–9,000,060`，六种方法均使用这 30 个 seeds
+的现有结果。
 
 ---
 
@@ -53,9 +53,9 @@
 |---|---|---|---|---|
 | 固定船–emitter 分工 | Fixed-Assignment Heuristic | 静态业务规则基线 | 否 | 不使用 |
 | 动态贪心调度 | Greedy | 强实时启发式基线 | 否 | 不使用 |
-| 从零训练 PPO | Centralized Maskable PPO | 目标对齐的标准 model-free RL 基线 | 是 | 同源 168 h summary |
-| Event-based v4 架构 | Event-Residual PPO | 目标对齐的结构化 RL 基线 | 是 | 同源 168 h summary |
-| 当前主方法 | Iterative Action-Q | 论文主方法 | 是 | 同源 168 h summary |
+| 每小时直接决策 PPO | Hourly Centralized Maskable PPO | 目标对齐的最基础 model-free RL 基线 | 是 | 同源 168 h summary |
+| 24 h 高层决策 PPO | High-level Centralized Maskable PPO | 目标对齐的高层 model-free RL 基线 | 是 | 同源 168 h summary |
+| 当前主方法 | Iterative Action-Q G60-P4 | 论文主方法 | 是 | 同源 168 h summary |
 | 滚动优化 | Rolling MILP | 在线优化基线 | 否 | 使用统一 forecast |
 
 ### 3.2 消融方法
@@ -79,11 +79,18 @@ Full-horizon MILP 作为 **time-limited perfect-foresight MILP reference** 运�
 
 ### 3.4 正式比较前的算法实现调整
 
-#### Centralized Maskable PPO
+#### Hourly Centralized Maskable PPO
 
-旧 PPO checkpoint 不进入正式比较。正式版本必须重新在三船 `unified_window_v1` 环境中从零训练，并锁定：
+该方法是正式比较中最基础的 PPO 基线。旧 PPO checkpoint 和
+`sim.control.event_based.rl` 下的高层事件驱动 PPO 均不进入此基线。正式版本必须
+通过 `sim.control.hourly_ppo.train_hourly_ppo` 在三船 `unified_window_v1` 环境中
+从零训练，并锁定：
 
-- `episode_hours = 720`，物理 simulator step 为 1 h；
+- `episode_hours = 720`，物理 simulator step 和 PPO transition 均为 1 h；
+- 每个物理小时都重新计算观测、legal-action mask，并由 PPO 输出一次动作；即使船舶航行中只能合法选择 `WAIT`，该小时仍计为一次 PPO transition；
+- 观测严格由当前物理状态、显式船舶运行模式/航行目的地和统一的未来 168 h structured summary 构成；summary 不包含 `valid_fraction`；
+- 动作为三条船的原生因子化 `MultiDiscrete` 调度动作：每船选择 `WAIT / Terminal / 3 emitters`，在三船场景中对应 `[5, 5, 5]`；动作直接交给 `CCSEnv.step()`；
+- 不使用 event trigger、24 h goal、rule/MPC executor、Greedy default、residual action、BC warm start 或 agent-selected well rate；
 - `injection_reward_eur_per_t = 0`；
 - `store_reward_eur_per_t = 0`；
 - `reward_mode = economic`；
@@ -93,30 +100,22 @@ Full-horizon MILP 作为 **time-limited perfect-foresight MILP reference** 运�
 - 若 storage-shortfall penalty 非零，其逐步增量也必须进入 reward；
 - 使用 legal-action masks；
 - 使用非折扣总成本目标，正式候选设置为 `gamma = 1`；
-- E1 固定使用与另外两种学习方法相同的 168 h structured future summary，且不包含 `valid_fraction`；State-only 仅作为 E3 消融；
-- 不使用 BC warm start，否则应另称 BC–PPO。
+- 720 h 最后一个 transition 加入共同 compact trip cleanup cost，并标记为真正的 MDP terminal，禁止在 cleanup value 之后继续 bootstrap；因训练预算耗尽而提前结束时只标记 truncation，不加入 cleanup；
+- E1 固定使用与另外两种学习方法相同的 168 h structured future summary；State-only 仅作为 E3 消融。
 
-因此，除正的 reward scale 外，PPO 的累计训练回报应与负的 episode total cost 一致。
+因此，除正的 reward scale 外，完整 episode 的 PPO 累计训练回报严格等于
+`−(720 h realised economic cost + common compact trip cleanup cost)`。该定义中的
+“每小时给动作”指 PPO 直接给原生船舶调度动作，而不是给一个由底层规则执行多小时的高层目标。
 
-#### Event-Residual PPO
+#### High-level Centralized Maskable PPO
 
-保留 v4 的 residual action architecture、Greedy default、event trigger、intervention windows、action masks 和 gate，但正式 E1 版本改为 objective-aligned reward：
+该方法通过 `sim.control.event_based.rl.train_high_level_ppo` 训练，并锁定：
 
-- `stored_credit_eur_per_t = 0`；
-- `vent_penalty_eur_per_t = 80`；
-- `excess_vent_penalty_eur_per_t = 0`；
-- `overflow_risk_eur_per_t_hour = 0`；
-- `operating_cost_weight = 1`；
-- `gamma = 1`；
-- 硬物理违规仍由 action masks/constraints 阻止；若保留 hard-violation penalty，只作为不可行保护，不作为正常轨迹 shaping。
-
-由于 reward 已改变，正式 Event-Residual PPO 必须从头训练。原 tail-robust v4 checkpoint 可作为 E4 或 Supplementary 的附加鲁棒版本，但不能替代 E1 的 objective-aligned baseline。
-
-实现上保留原 `train_tail_robust_ppo.py`、默认配置和已有 checkpoint，另设
-`train_objective_aligned_ppo.py` 作为 E1 入口。后者仍使用 v4 的控制结构，但关闭
-tail curriculum、failure replay 和正常轨迹 shaping；其 residual reward 为
-`scale × (Greedy counterfactual total cost − actual total cost)`。由于 Greedy
-反事实轨迹独立于当前策略动作，该控制变量不改变最小化实际总成本的目标。
+- 以 24 h 为最大高层重规划间隔，并在事件触发时提前重新决策；使用 64 个安全的三船联合偏好动作；
+- 使用 dynamic action masks，并由既有高层执行接口把安全意图推进到物理 simulator；
+- 观测使用当前物理状态和与其他学习方法相同的单一 168 h structured summary；
+- `objective = realised_total_cost`、`stored_credit_eur_per_t = 0`、`vent_penalty_eur_per_t = 80`、`operating_cost_weight = 1`、`gamma = 1`；
+- 每个 model seed 的底层 simulator-hour hard cap 为 9,505,319，并按 validation mean total cost 选择 checkpoint。
 
 #### Rolling MILP
 
@@ -127,7 +126,7 @@ tail curriculum、failure replay 和正常轨迹 shaping；其 residual reward �
 - 每次 replan 在当前环境副本上将 Greedy rollout 至 planning horizon；
 - Greedy 动作序列经 simulator replay 验证后作为唯一 CPLEX MIP start；
 - MILP 只优化船舶调度，不包含可自由选择的井注入动作；planning model 使用与 simulator 相同的最大可行注入规则；
-- 不调用 Native MPC 多候选 warm-start selector；
+- 不调用额外的多候选 warm-start selector；
 - 不使用 shifted previous-MILP warm start；
 - 暂不设置执行 fallback；
 - 无 replay-valid incumbent 时终止该 episode，并记录 solver failure、termination status 和已经消耗的求解时间，不为该 seed 填补控制成本。
@@ -154,11 +153,11 @@ Warm start 只用于初始化 MILP 求解，不等于求解失败后的控制 fa
 
 任何方法不得拥有单独放宽的容量、装卸、航行、注入或压力约束。
 
-所有 controller rollout 必须在 720 h 截止。720–888 h 的外生轨迹只能被预测编码器或规划器读取，不得调用 simulator 执行动作，也不得进入 episode cost、vent、stored 或其他表现指标。Full-horizon MILP 可以规划 888 h，但只 replay 和计分其前 720 h 动作；720 h 末端 cleanup value 从该 replay 状态重新计算。
+所有 controller rollout 必须在 720 h 截止。720–888 h 的外生轨迹只能被学习方法的预测编码器或 Rolling MILP 读取，不得调用 simulator 执行动作，也不得进入 episode cost、vent、stored 或其他表现指标。Full-horizon MILP 只读取并优化前 720 h，在 720 h 状态上加入共同的 cleanup value，不使用 720–888 h 外生信息。
 
 ### 4.2 统一底层井控制
 
-井注入不属于在线控制器的动作空间。Fixed-Assignment、Greedy、Centralized PPO、Event-Residual PPO、Iterative Q、Rolling MILP 和 Full-horizon MILP 均只决定船舶调度，并共享同一个确定性底层井控制器。
+井注入不属于在线控制器的动作空间。Fixed-Assignment、Greedy、Hourly Centralized PPO、High-level Centralized PPO、Iterative Q、Rolling MILP 和 Full-horizon MILP 均只决定船舶调度，并共享同一个确定性底层井控制器。
 
 在每个 1 h simulator step，若井处于维护或不可用状态，则 \(q_t^{inj}=0\)；否则：
 
@@ -179,7 +178,7 @@ q_t^{pressure}
 
 公平性要求：
 
-- PPO、Event-Residual PPO 和 Iterative Q 的 action space/candidate actions 中移除井注入率；
+- Hourly PPO、High-level PPO 和 Iterative Q 的 action space/candidate actions 中移除井注入率；
 - Fixed-Assignment 和 Greedy 不再拥有各自的井控制逻辑，而是调用同一底层函数；
 - Rolling MILP 和 Full-horizon MILP 不得通过降低或延迟注入获得额外优化自由度，其预测状态转移必须复现同一规则；
 - 注入运行成本仍由 simulator 按实际自动注入量计入总成本和成本分解；
@@ -226,7 +225,7 @@ E0 必须验证：
 
 1. 所有方法都观察相同当前物理状态。
 2. 所有 forecast-capable 方法访问同一份 168 h forecast 对象，其来源、准确度、更新时间和扰动 realization 一致。
-3. Centralized PPO、Event-Residual PPO 和 Iterative Q 在 E1 中统一使用由该对象计算的同一个 168 h structured summary；不加入 `valid_fraction`，也不在 720 h 处截断摘要。
+3. Hourly Centralized PPO、High-level Centralized PPO 和 Iterative Q 在 E1 中统一使用由该对象计算的同一个 168 h structured summary；不加入 `valid_fraction`，也不在 720 h 处截断摘要。
 4. Rolling MILP 使用同一 forecast 对象的逐小时完整序列；这是表示粒度差异，不是 forecast 来源差异。
 5. Summary 字段、horizon 和归一化方式只能在 validation 阶段统一锁定，不能针对三种学习算法分别选择，也不能按测试 seed 动态改变。
 6. Fixed-Assignment 和 Greedy 按定义不使用 forecast。
@@ -241,11 +240,16 @@ E0 必须验证：
 
 - 训练 seeds：仅用于策略训练、root 生成和 curriculum。
 - 验证 seeds：用于统一 future-summary 配置、超参数、checkpoint 和门控阈值选择。
-- 测试 seeds：只在所有选择锁定后使用。
-- 当前 30 个正式测试 seeds 可继续作为 paired test set，但不得参与任何训练或选择。
+- 测试 seeds：E1 固定使用 `9000031–9000060` 的现有正式结果。
+- E1 不扩展或替换正式测试 seed 集。
 - 正式论文建议至少使用 **3 个独立训练随机种子**；若计算允许，使用 5 个。
 
-4,800 roots 及其 G0–G3 分配也属于方法配置，必须在查看正式 test 结果前锁定。若 4,800 是通过比较同一批 test seeds 上的 1,200/2,400/4,800 等配置后选出的，则该批 seeds 已成为 development set；此时应冻结 4,800-root 配置并使用一批全新的未见 test seeds 报告最终结果。
+正式 Iterative Q 以 E1 冻结模型清单中的 **G60-P4** 为准。该配置共 3,600 nominal roots：
+G0/G1/G2/G3 分别为 2,160/288/432/720，对应 180/24/36/60 个训练场景
+seeds、每 seed 12 roots。G0 是固定、策略无关的 Greedy root bank；G1–G3
+依次使用前一阶段策略进行 learned-policy roll-in，最终使用在 G0+G1+G2+G3
+上训练的 P4。三个正式 model seeds 为 0/1/2；部署门控固定为 5 heads、至少
+4 heads 同意、Q margin 0.40、12 个干预窗口和最多 12 次干预。
 
 建议执行顺序：
 
@@ -278,11 +282,22 @@ E0 必须验证：
 Root 数量不能与 PPO timesteps 直接比较。定义：
 
 \[
-B_{4800}=
-\text{4,800-root Iterative Action-Q 训练数据生成实际消耗的底层 1 h simulator step calls}.
+B_{\mathrm{Q}}=
+\text{3,600-root Iterative Action-Q G60-P4 训练数据生成实际消耗的底层 1 h simulator step calls}
+=9{,}526{,}297.
 \]
 
-\(B_{4800}\) 包括：
+\(B_{\mathrm{Q}}\) 的已审计分解为：
+
+| 数据阶段 | nominal roots | 训练 seeds | 实际可用 roots | 实际 simulator calls |
+|---|---:|---:|---:|---:|
+| G0，固定 Greedy bank | 2,160 | 180 | 2,159 | 5,639,992 |
+| G1，P1 policy roll-in | 288 | 24 | 288 | 760,220 |
+| G2，P2 policy roll-in | 432 | 36 | 432 | 1,206,985 |
+| G3，P3 policy roll-in | 720 | 60 | 720 | 1,919,100 |
+| **合计 / P4** | **3,600** | **300** | **3,599** | **9,526,297** |
+
+\(B_{\mathrm{Q}}\) 包括：
 
 - G0–G3 的训练数据生成；
 - Greedy 或 learned-policy baseline rollout；
@@ -290,29 +305,33 @@ B_{4800}=
 - 每个 root 下所有候选动作的后续 rollout；
 - 已经执行过 simulator steps 的失败或跳过样本。
 
-\(B_{4800}\) 不包括：
+\(B_{\mathrm{Q}}\) 不包括：
 
 - validation 和 test rollout；
 - 神经网络 forward/backward、重复 SGD epoch；
 - 不推进 simulator 的纯 forecast-feature 计算；
 - 正式配置锁定前的超参数搜索。超参数搜索成本单独报告。
 
-E1 的三种学习方法使用同一最大训练预算：
+E1 的三种学习方法使用近似匹配的最大训练环境交互预算：
 
 | 方法 | 最大训练环境交互预算 |
 |---|---:|
-| Iterative Action-Q P4 | \(B_{4800}\) |
-| Centralized Maskable PPO | \(\le B_{4800}\) |
-| Event-Residual PPO | \(\le B_{4800}\) |
+| Iterative Action-Q G60-P4 | 实际 9,526,297 |
+| Hourly Centralized Maskable PPO | hard cap 9,505,319 |
+| High-level Centralized Maskable PPO | hard cap 9,505,319 |
+
+Iterative Q 与两个 PPO 的最大预算差为 20,978 simulator calls，即 0.22%；
+论文统一表述为 approximately matched environment-interaction budget，并逐方法
+报告实际 simulator calls。
 
 具体计数规则：
 
-- Centralized PPO 的每个环境 step 推进 1 h；vectorized training 时所有 workers 的 steps 求和；
-- Event-Residual PPO 的一个高层 transition 可能跨越多个小时；训练预算同时累计实际轨迹和 Greedy 反事实轨迹内部执行的全部 physical hours，不能直接使用 SB3 high-level timesteps。执行前必须为实际/反事实成对推进预留预算，剩余不足一对时提前截断而不得超支；
+- Hourly Centralized PPO 的每个环境 step 必须恰好推进 1 h，并且直接使用该 step 的 PPO 动作；vectorized training 时所有 workers 的 steps 求和；
+- High-level Centralized PPO 的一个高层 transition 可能跨越多个小时；训练预算累计 transition 内实际推进的全部 physical hours，不能直接使用 SB3 high-level timesteps；
 - Iterative Q 按所有真实执行的 roll-in 和 counterfactual rollout 小时求和；
-- 每个独立训练 run 均使用相同的 \(B_{4800}\) 上限。
+- 每个独立训练 run 均遵守上表对应的预算。
 
-三种方法均可使用相同验证规则在预算上限内选择最佳 checkpoint；不强迫性能已收敛的方法耗尽预算。E1 只比较最终选定模型，不要求为 PPO、Event-Residual PPO 和 Iterative Q 建立统一的 25%/50%/75% 中间 checkpoint。
+三种方法均可使用相同验证规则在预算上限内选择最佳 checkpoint；不强迫性能已收敛的方法耗尽预算。E1 只比较最终选定模型，不要求为两个 PPO 和 Iterative Q 建立统一的 25%/50%/75% 中间 checkpoint。
 
 统一报告：
 
@@ -323,7 +342,7 @@ E1 的三种学习方法使用同一最大训练预算：
 - 峰值内存；
 - 最终在线单次决策时间和整段 episode wall time。
 
-相同 simulator budget 不代表相同计算时间，因此 CPU-hours、GPU-hours、并行度和 wall time 仍必须单独报告。主实验可以声称“matched environment-interaction budget”，但只有额外展示性能随累计 simulator calls 的变化时，才讨论 sample efficiency。
+近似相同的 simulator budget 不代表相同计算时间，因此 CPU-hours、GPU-hours、并行度和 wall time 仍必须单独报告。只有额外展示性能随累计 simulator calls 的变化时，才讨论 sample efficiency。
 
 ---
 
@@ -335,13 +354,15 @@ E1 的三种学习方法使用同一最大训练预算：
 |---|---|---|
 | Total cost (EUR) | 720 h episode cost + common compact trip cleanup operating cost | 是 |
 | Paired cost difference vs Greedy | 主要统计结论 | 是 |
-| Total cost per stored tonne (EUR/t) | 经济效率 | 是 |
+| Total cost per captured tonne (EUR/t) | 系统单位成本；分母为全部进入系统的 captured CO₂ | 是 |
 | Vented CO₂ (t) / loss rate | 碳损失 | 是 |
 | Stored CO₂ (t) / storage rate | 封存效果 | 是 |
 | Operating cost (EUR) | 解释成本来源 | 是或成本分解图 |
 | Vent penalty (EUR) | 解释总成本来源 | 是或成本分解图 |
 | Terminal cleanup operating cost (EUR) | 消除有限时域末端库存偏差 | 是或成本分解图 |
 | Episode wall time / decision latency | 在线计算开销 | 简化展示 |
+
+主表与 Figure 3c 的单位成本统一从逐 episode 数据重新计算为 `total_cost_eur / captured_t`。现有汇总文件中的 legacy `unit_total_cost_eur_per_t` 使用 `stored_t` 分母，不用于主表或 Figure 3c。
 
 ### 5.2 必要诊断指标
 
@@ -430,16 +451,16 @@ E1 的三种学习方法使用同一最大训练预算：
 
 1. Fixed-Assignment Heuristic；
 2. Greedy；
-3. Centralized Maskable PPO；
-4. Event-Residual PPO；
-5. Iterative Action-Q；
+3. Hourly Centralized Maskable PPO；
+4. High-level Centralized Maskable PPO；
+5. Iterative Action-Q G60-P4；
 6. Rolling MILP。
 
 ### 实验步骤
 
-1. 在验证集上统一锁定三种学习方法不含 `valid_fraction` 的 168 h summary，并锁定 Iterative Q 的 P4 配置和门控；
-2. 运行 4,800-root Iterative Q 并由统一计数器测得 \(B_{4800}\)；
-3. 使用相同的 \(B_{4800}\) 上限分别训练经过目标对齐的 Centralized PPO 和 Event-Residual PPO，并仅根据 validation 表现选择预算内 checkpoint；
+1. 使用不含 `valid_fraction` 的单一 168 h summary，并锁定 Iterative Q G60-P4 配置和门控；
+2. 使用第 4.7 节记录的约 \(9.5\times10^6\) simulator-call 近似匹配预算；
+3. 两种 PPO 均使用 validation-best checkpoint，Iterative Q 使用冻结的 G60-P4 model seeds 0/1/2；
 4. 锁定 Rolling MILP：
    - replan interval；
    - planning horizon；
@@ -454,18 +475,22 @@ E1 的三种学习方法使用同一最大训练预算：
 
 ### Rolling MILP 设置原则
 
-Rolling MILP 不是本文主方法，因此不要求做完整时间预算扫描。采用一个预先声明、相对宽裕且可复现的固定预算，例如：
+Rolling MILP 不是本文主方法，因此不做完整时间预算扫描。只在 controller-validation seeds `8100001–8100003` 上进行一次配对预算校准：
 
 - replan every 24 h；
 - planning horizon 168 h；
-- 30 s 或 60 s time limit per replan；
+- 比较 30 s 与 300 s time limit per replan；
+- 每个 CPLEX 进程固定 4 threads，并使用 deterministic parallel mode；
 - 与 simulator 相同的 vent、operation 和 terminal accounting；
 - 每次重规划先用 Greedy 从当前 simulator 状态滚动到 planning horizon 末端，并将所得完整、合法且 replay-valid 的离散计划作为唯一 MIP start；
-- 不使用 Native MPC 候选选择，也不使用上一次 MILP 计划平移后的 warm start；
+- Greedy 决定全部船舶动作；cleanup 模型的辅助变量由同一末状态完整补齐，避免部分 MIP start 被 CPLEX 拒绝，这不引入第二个调度策略；
+- 不使用额外的候选选择，也不使用上一次 MILP 计划平移后的 warm start；
 - 超时后执行经过 replay 验证的最佳可行 incumbent；
 - 若没有有效 incumbent，则将该次求解和该 episode 标记为 solver failure/incomplete，不切换到 Greedy 或其他 fallback。
 
-最终具体数值必须在 validation 阶段锁定。
+若 30 s 与 300 s 的 episode completion/failure 状态相同，且 300 s 相对 30 s 的配对中位总成本改善小于 1%，则正式实验锁定 30 s；否则锁定 300 s。若任一预算没有 replay-valid incumbent，优先选择能够完成全部校准 episodes 的预算。两者均失败时停止并记录。
+
+2026-07-30 经作者明确授权，E1 主结果改用后续完成的 600 s/重规划 extended-budget run03；原 300 s 结果保留为 superseded provenance。由于 extended-budget run03 与原 300 s 正式运行的 runner/solver SHA 不同，两者不得解释为同代码下只改变 time limit 的单因素实验。
 
 这里的 Greedy 只用于向求解器提供初始可行解；最终执行的动作必须来自 MILP incumbent。因此，Greedy warm start 不等于在线 Greedy fallback。
 
@@ -474,24 +499,39 @@ Rolling MILP 不是本文主方法，因此不要求做完整时间预算扫描�
 - **Table 3：Main online-controller comparison**
   - Total cost；
   - Δ cost vs Greedy 和 95% CI；
-  - Total cost/stored t；
+  - Total cost/captured t；
   - Vent；
   - Stored；
   - Operating cost；
   - Win/loss vs Greedy。
 - **Figure 3a：Paired total-cost differences**
-  - 每种方法相对 Greedy 的点估计和 95% CI。
+  - 以现实中最容易实施的 Fixed-Assignment 为业务基线，展示 Greedy、两种 PPO、Iterative Q 和 Rolling MILP 的配对总成本差和 95% CI；
+  - 横向点区间图；每种方法展示 30 个测试场景的配对差值，学习型方法先在同一测试 seed 内对 3 个 model seeds 取均值；
+  - 0 EUR 竖线表示与 Fixed-Assignment 持平，负值表示成本更低；95% CI 对测试场景和学习型方法的 model instances 分层重采样。
 - **Figure 3b：Cost decomposition**
-  - 720 h operating cost、vent penalty 与 common terminal-cleanup operating cost 的堆叠图；
-  - 详细分项保存 vessel fuel、conditioning、reconditioning、loading 和 unloading。
+  - 以 vessel fuel、conditioning、reconditioning、loading、unloading、vent penalty 和 common terminal-cleanup operating cost 七类成本分项进行堆叠展示；
+  - 六种方法按平均 total cost 排序；七类分项之和必须与 total cost 一致。
+- **Figure 3c：Unit-cost decomposition**
+  - 使用与 Figure 3b 相同的七类成本分项和颜色，但将每个 episode 的各项成本先除以该 episode 全部进入系统的 `captured_t`，再跨测试记录取均值；
+  - 该分母包括最终 stored、vented 和期末仍在系统内的 CO₂，避免 vent 已计入成本分子后又因缩小 `stored_t` 分母而被重复放大；
+  - 六种方法按平均 unit total cost 排序；堆叠分项之和必须与平均 `total_cost_eur / captured_t` 一致，不使用“平均成本除以平均 captured CO₂”的近似值。
+  - Iterative Q 的旧归档未直接导出 `captured_t`，因此按相同 test seed 使用配对外生场景的 `captured_t`；脚本必须验证其他控制器已导出的同 seed 数值完全一致。
 - **Figure 4：Representative operational trajectory**
   - 直接作为 E1 主比较的解释性结果，紧跟主结果表和 Figure 3；
-  - 展示 Greedy 与 Iterative Q 的 emitter/terminal inventory、cumulative vent、扰动区间、船舶模式和 Iterative Q intervention 时刻。
+  - 使用 model seed 0，在 30 个测试 seeds 中自动选择 Iterative Q 相对 Greedy 成本差最接近中位数的 seed；
+  - 当前选择结果为 seed `9000056`；
+  - 图中只展示 Iterative Q 轨迹，不叠加 Greedy；
+  - 面板 a 以分行色带展示 weather slowdown、真实 capture outage（仅 `capture_availability == 0`）、capture high-output 和 well maintenance；每个 emitter 的 outage 与 high-output 共用一行但采用不同颜色，capture 的逐小时随机波动不作为事件展示；
+  - 面板 b–e 分别展示各 emitter buffer inventory、terminal inventory、三条船的 cargo inventory，以及 cumulative vent；inventory 面板同时标出实际量与最大容量；
+  - 面板 f 区分三条船的运行状态；船名统一写作 Vessel 1、Vessel 2 和 Vessel 3，不使用仿真内部名称；
+  - 不在图中标注 accepted intervention 时刻；
+  - 若现有汇总文件没有逐小时轨迹，只对 seed `9000056` 使用冻结 checkpoint 做一次 trace-only 重放，不改变 E1 统计结果。
+- Figure 3a、Figure 3b、Figure 3c 和 Figure 4 只导出 PDF 与 300 dpi PNG。
 - 逐 seed CSV、统计 JSON 和完整配置快照。
 
 ### 代表性轨迹选择规则
 
-Figure 4 使用 Iterative Q 相对 Greedy 的总成本改善最接近中位数的测试 seed。选择规则必须由脚本自动执行，不能人工选择提升最大或“最好看”的 seed。
+Figure 4 使用 Iterative Q model seed 0 相对 Greedy 的总成本改善最接近中位数的测试 seed；按现有 E1 结果该 seed 为 `9000056`。选择规则必须由脚本自动执行，不能人工选择提升最大或“最好看”的 seed。
 
 失败轨迹不占用独立实验编号。可将 Iterative Q 相对 Greedy 表现最差的测试 seed 放在：
 
@@ -502,10 +542,9 @@ Figure 4 使用 Iterative Q 相对 Greedy 的总成本改善最接近中位数�
 
 - Fixed-Assignment 必须是真正的固定服务映射，不能与动态 Greedy 重复；
 - 六个在线控制器的上层动作均只包含船舶调度；任何方法都不得直接控制井注入率；
-- Centralized PPO 必须使用 legal-action masks，并采用第 3.4 节锁定的目标对齐 reward：移除 stored-credit 和额外塑形项，保留共同的经济成本；
-- Event-Residual PPO 必须从头训练目标对齐版本；原有 tail-robust v4 权重不得直接用于 E1；
-- Event-Residual PPO 与 Iterative Q 的干预次数和决策时机可能不同，应披露而不是强行相等；
-- E1 的 Iterative Q 只使用最终 P4 模型；P1–P4 的阶段比较属于 E2；
+- Hourly Centralized PPO 必须逐小时直接输出原生船舶动作、使用 legal-action masks，并采用第 3.4 节锁定的目标对齐 reward；不得通过高层 goal 或规则执行器代替逐小时 PPO 决策；
+- High-level Centralized PPO 使用 24 h 最大重规划间隔、事件触发更新和 dynamic action masks；
+- E1 的 Iterative Q 只使用最终 G60-P4 模型；P1–P4 的阶段比较属于 E2；
 - 所有结果使用 simulator 实际执行后的成本，不能直接使用 MILP 内部预测 objective；
 - 若某方法未完成完整 episode，必须单独报告失败率和已完成比例，不能只对完成 episodes 求均值后与其他方法直接排名，也不能用未声明的 fallback 补齐结果；
 - 轨迹图只用于解释 E1 的统计结果，不能替代多 seed 比较。
@@ -521,24 +560,24 @@ Figure 4 使用 Iterative Q 相对 Greedy 的总成本改善最接近中位数�
 ### 比较组
 
 1. One-shot Q，G0 原始 roots；
-2. One-shot Q，使用与 P4 Iterative Q 相同的 \(B_{4800}\) 仿真预算，但所有 roots 仍来自 Greedy roll-in；
+2. One-shot Q，使用与 G60-P4 相同的 \(B_{\mathrm{Q}}\) 仿真预算，但所有 roots 仍来自 Greedy roll-in；
 3. Iterative Q P1；
 4. Iterative Q P2；
 5. Iterative Q P3；
 6. Iterative Q P4。
 
-P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 checkpoint。当前预设累计 roots 为：
+P1–P4 是迭代数据聚合阶段，不是人为等分的训练 checkpoint。锁定的新增与累计 roots 为：
 
-| 阶段 | 累计 roots |
-|---|---:|
-| P1 | 2,400 |
-| P2 | 2,880 |
-| P3 | 3,600 |
-| P4 | 4,800 |
+| 阶段 | 新增数据 | 新增 roots | 累计 roots | 累计 simulator calls |
+|---|---|---:|---:|---:|
+| P1 | G0 | 2,160 | 2,160 | 5,639,992 |
+| P2 | G1 | 288 | 2,448 | 6,400,212 |
+| P3 | G2 | 432 | 2,880 | 7,607,197 |
+| P4 | G3 | 720 | 3,600 | 9,526,297 |
 
 各阶段新增 roots 和单个 root 的候选 rollout 长度均可能不同，因此实际累计 simulator step calls 也不会按 25% 等距增长。
 
-若完整 P1–P4 都运行成本过高，正文至少保留：
+若完整 P1–P4 阶段消融成本过高，正文至少保留：
 
 - One-shot Q，预算匹配；
 - Iterative Q P4。
@@ -551,8 +590,8 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 - 相同网络结构、优化器和 early stopping；
 - 相同 future variant；
 - 相同门控和 intervention budget；
-- One-shot matched 使用与 P4 完全相同的 \(B_{4800}\) 上限和计数口径；
-- P1–P4 保持各自真实的数据聚合过程，不为了形成 25%/50%/75% checkpoint 而改变 root 分配。
+- One-shot matched 使用与 G60-P4 完全相同的 \(B_{\mathrm{Q}}\) 上限和计数口径；
+- P1–P4 保持各自真实的数据聚合过程，不为了形成等距 checkpoint 而改变 root 分配。
 
 ### 产出
 
@@ -567,14 +606,13 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
   - Win/loss vs Greedy。
 - **Supplementary Figure S2**
   - 横轴优先使用实际累计 simulator calls，并按真实数值进行非等距放置；
-  - 纵轴为 validation total cost；锁定 P4 后可叠加各阶段一次性 test 评估作为描述性结果，但不得据此选阶段；
-  - 该图用于说明 Iterative Q 内部的数据聚合过程，不要求 PPO 和 Event-Residual PPO 提供对应的 P1–P4 checkpoint。
+  - 纵轴为 total cost，横轴使用上表的实际累计 simulator calls；
+  - 该图用于说明 Iterative Q 内部的数据聚合过程，不要求两个 PPO 提供对应的 P1–P4 checkpoint。
 
 ### 注意事项
 
 - 不能只比较 G0-small 与 P4 后断言“iteration有效”，因为两者数据量不同；
-- Test seeds 不得用于选择 P1–P4；
-- P1–P4 的根数不是各占 25%，不应称为 25%/50%/75%/100% 训练进度；
+- P1–P4 的根数不是等份，不应称为等距训练进度；
 - 如果 matched-budget One-shot 仍明显较差，才能较强地支持“状态分布扩展”解释；
 - 若差异不明显，应将 iteration 描述为训练稳定性或覆盖机制，而不是必然的性能增益。
 
@@ -731,9 +769,9 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 ### 注意事项
 
 - Vectorized PPO 的所有 worker steps 都要计入；
-- Event-Residual PPO 按每个高层 transition 内实际推进的 physical hours 计入，不能直接用 high-level timesteps；
+- High-level PPO 按每个高层 transition 内实际推进的 physical hours 计入，不能直接用 high-level timesteps；
 - Q 的每个候选动作后续 rollout 都要计入；
-- 三种学习方法均需报告是否遵守 \(B_{4800}\) 上限及实际使用比例；
+- 三种学习方法均需报告实际 simulator calls 和对应预算使用比例；
 - CPU-hours、GPU-hours和wall time应分开；
 - 不同硬件上的 wall time不可直接比较，必须同时报告硬件；
 - 即使环境交互预算匹配，也只有在展示性能随累计 simulator calls 的曲线时才能使用“sample-efficient”表述。
@@ -749,11 +787,14 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 ### 设置
 
 - 使用 perfect foresight；
+- 只优化前 720 h，并在 720 h 状态上计算共同 cleanup value；不读取 720–888 h 外生信息；
 - 使用与 simulator 一致的经济参数；
 - 只优化船舶调度，并在模型中执行与 simulator 相同的最大可行井注入规则；
 - 使用与其他方法相同的 compact trip cleanup terminal value；
+- Greedy warm start 覆盖全部 720 h 船舶动作，并从其 720 h 末状态完整补齐 cleanup 辅助变量；
 - 使用与正式测试集相同的场景 seeds；若全部 seeds 的计算成本不可接受，必须在求解前锁定一个代表性 seed 子集；
-- 预先固定 time limit，例如 30 min、1 h 或一个可承受的多小时预算；
+- 主结果 time limit 固定为每个 seed 5 h；原 2 h 结果保留为 superseded provenance；
+- 每个 CPLEX 进程固定 4 threads，并使用 deterministic parallel mode；
 - 不持续求解到 optimal；
 - 对每个 seed 报告 incumbent、best bound、MIP gap、termination status 和 solve time；
 - 所有 incumbent 必须经过 simulator replay，记录 replay total cost、vent、stored 和 mismatch；
@@ -825,52 +866,44 @@ P1–P4 是迭代数据聚合阶段，不是人为切成四个等份的训练 ch
 
 ## 8. 推荐执行顺序
 
-1. **冻结物理层和经济目标**，完成 E0；
-2. **冻结训练、验证和测试 seeds**；
-3. **确认信息协议**：perfect forecast 还是 realistic/noisy forecast；
-4. **实现并验证统一 simulator-step counter**，完成 PPO/Event-Residual PPO 目标对齐和 Rolling MILP Greedy-only warm start；
-5. 使用单训练 seed 完成六种控制器的 smoke test，并确认 Rolling MILP 无 incumbent 时能明确终止和记错；
-   - 实现进度：统一 runner 已完成 Fixed-Assignment、Greedy、Rolling MILP 和 Full-horizon MILP 的单 validation-seed 联调；Rolling MILP 已验证 Greedy-only warm start、无 shifted warm start、无 fallback、限时 incumbent 执行和 replay 记录。三种学习方法需在目标对齐后的 checkpoint 可用后接入同一 runner。
-6. 完成 E2 和 E3 的单 seed 筛选，锁定 Iterative Q P4 配置；
-7. 运行 4,800-root Iterative Q，测得并记录 \(B_{4800}\)；
-8. 在 \(\le B_{4800}\) 下训练目标对齐的 Centralized PPO 和 Event-Residual PPO，并锁定 validation-best checkpoint；
-9. 对三种学习方法训练至少 3 个独立训练 seeds，每个 run 均遵守相同上限；
-10. 运行 E1 正式主比较；
-11. 从 E1 自动选择 representative seed，生成 Figure 4；
-12. 对冻结模型运行 E4 的 Low 和 High；Medium 复用 E1；
-13. 使用预先锁定的时限和 seeds 运行 E5 Full-horizon MILP；
-14. 汇总支持性分析 A1 的训练与在线计算成本；
-15. 根据 E5 的可行率和 MIP gap 决定使用正文 Table 7 还是 Supplementary Table S3；
-16. 一次性生成所有正文和 Supplementary 图表。
+1. **同步 E1 协议**：六种方法、G60-P4 和现有正式测试集 `9000031–9000060`；
+2. **完成 E1 统计表**：生成六方法 Table 3 和配对 bootstrap/hierarchical bootstrap 结果；
+3. **生成 Figure 3**：配对成本差点区间图和成本分解堆叠图；
+4. **生成 Figure 4**：自动选定 seed `9000056`，必要时做一次 trace-only 重放；
+5. **完成 E2**：按 G60-P1–P4 和 matched-budget One-shot Q 进行迭代聚合消融；
+6. **完成 E3**：汇总 State-only、168 h summary 和 full-sequence 结果；
+7. **运行 E4 Low/High**：Medium 直接复用 E1；
+8. **运行 E5**：使用锁定时限完成 Full-horizon MILP 离线参考；
+9. **完成 A1**：汇总训练与部署计算成本；
+10. 一次性生成正文和 Supplementary 图表。
 
 ---
 
 ## 9. 正式实验开始前的锁定清单
 
 - [x] E0 物理仿真层验证已完成，20/20 项检查通过；完整结果位于 `experiments_results/E0/`；
-- [ ] 主方法和 baseline 名称已固定；
+- [x] E1 六种主方法和 baseline 名称已固定；
 - [x] Fixed-Assignment 与 Greedy 的行为不重复：三船正式场景的 5 个 validation seeds 中，两者在可行动状态的决策分歧率为 42.76%，Fixed-Assignment 始终保持一船一 emitter，而 Greedy 会跨 emitter 调度；
 - [x] 总成本公式、经济参数和 penalty 已在机器可读协议中固定；
 - [x] 共同 compact trip cleanup terminal value 已固定；
 - [x] 共享的最大可行井注入函数已实现，正式协议下所有控制器的上层动作空间均已移除井注入率；
 - [x] Rolling MILP 和 Full-horizon MILP 已使用相同自动注入规则，不包含额外井控制自由度；
-- [ ] Forecast 来源、误差和可见范围已固定；
-- [x] Centralized PPO、Event-Residual PPO 与 Iterative Q 已接入同一个 future-summary encoder；窗口可由统一参数切换，算法各自的动作和控制结构不变；
+- [x] Forecast 来源、误差和可见范围已固定为 perfect-forecast protocol；
+- [x] Hourly Centralized PPO、High-level Centralized PPO 与 Iterative Q 已接入同一个 future-summary encoder；窗口可由统一参数切换，算法各自的动作和控制结构不变；
 - [x] 三种学习方法已统一为不含 `valid_fraction` 的 168 h summary；每个样本生成 888 h 场景，720 h 后仅作只读预测/规划上下文；
-- [ ] Rolling MILP 的经济目标、horizon、replan interval、time limit、Greedy-only warm start 和无 fallback 失败规则已固定；
-- [ ] Full-horizon MILP time limit、测试 seed 集和 replay 验证规则已固定；
+- [x] Rolling MILP 的经济目标、168 h horizon、24 h replan interval、600 s time limit、Greedy-only warm start 和无 fallback 失败规则已固定；原 300 s 结果仅作 provenance；
+- [x] Full-horizon MILP 的 5 h time limit、测试 seed 集和 replay 验证规则已固定；原 2 h 结果仅作 provenance；
 - [ ] Low/Medium/High stress 参数已在验证集检查并锁定；
-- [ ] Q 门控、window 和最大 intervention 数已固定；
-- [x] Centralized PPO 已移除 stored-credit/额外塑形项，动作空间缩减为 64 个纯船舶调度意图，保留共同经济成本，并固定 action mask、\(\gamma=1\) 和 deterministic evaluation；
-- [x] Centralized PPO 已接入底层 simulator-hour hard cap：每次 1 h 推进前检查预算，训练产物记录实际 calls、simulated hours、预算使用率及耗尽状态；
-- [x] Event-Residual PPO 的独立 E1 训练入口已实现：保留原 v4 入口和 checkpoint，使用 objective-aligned residual reward、\(\gamma=1\)、自动最大井注入和统一 168 h summary，并对实际/Greedy 反事实 simulator calls 实施成对 hard cap；真实 MaskablePPO smoke test 已验证预算停止和 validation-best 输出；
-- [ ] Event-Residual PPO 已采用同一经济目标从头训练；原 tail-robust v4 仅作为可选补充结果；
-- [ ] 4,800-root Iterative Q 的 \(B_{4800}\) 已由统一计数器测得，PPO 和 Event-Residual PPO 的每个训练 run 均设置相同上限；
-- [x] 训练、验证、legacy-development 和正式测试 seed 范围已写入 manifest；
+- [x] Q 门控、window 和最大 intervention 数已固定：5 heads、至少 4 heads、margin 0.40、12 windows、最多 12 次；
+- [x] Hourly Centralized PPO 已实现为直接逐小时接口：当前状态 + 168 h summary、三船原生 `[5,5,5]` `MultiDiscrete` 动作、legal-action mask、自动最大井注入，无 event/goal/executor/Greedy/residual/BC；完整 episode 末端 reward 含共同 cleanup value 且不继续 bootstrap；
+- [x] Hourly Centralized PPO 已接入底层 simulator-hour hard cap：每次 1 h 推进前检查预算，训练产物记录实际 calls、simulated hours、预算使用率及耗尽状态；
+- [x] High-level Centralized PPO 已按 24 h 最大重规划间隔、事件触发更新、统一 168 h summary、目标对齐 reward 和 9,505,319 hard cap 完成三个 model seeds；
+- [x] 3,600-root Iterative Q G60-P4 的 G0/G1/G2/G3=2,160/288/432/720 已锁定，实际训练预算为 9,526,297 simulator calls；
+- [x] 训练、验证、legacy-development 和 E1 正式测试集均已写入 manifest v5；
 - [ ] 训练模型不能读取测试 seeds；
-- [ ] 若 4,800 roots 曾根据当前正式 test 结果确定，则这些 seeds 已降级为 development，另建未触碰的正式 test set；
+- [x] E1 正式测试集固定为 `9000031–9000060`，六种方法结果均已完成；
 - [x] Simulator step accounting 已实现：在 `PhysicalSimulator.step()` 成功推进后统一累计 calls 与 simulated hours；深拷贝的 Q root/candidate 共享同一计数器，数据集 metadata 和 summary 均记录实际用量；
-- [ ] 所有方法能输出同一套 per-seed metrics；
+- [x] E1 六种方法均能输出统一的 per-seed 核心指标；
 - [ ] 统计脚本已在 toy data 上验证；
 - [ ] 轨迹案例的自动选择规则已实现；
 - [ ] 所有输出目录禁止静默覆盖。

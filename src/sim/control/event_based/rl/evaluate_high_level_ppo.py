@@ -23,6 +23,7 @@ def evaluate_run(
     *,
     seeds: Iterable[int] = range(1, 6),
     executor: str = "rule",
+    model_choice: str = "best",
 ) -> tuple[list[dict[str, Any]], dict[str, float]]:
     """Evaluate one saved PPO deterministically and persist seed-level metrics.
 
@@ -61,10 +62,14 @@ def evaluate_run(
         executor=executor,
         reward=reward_config,
     )
-    model = MaskablePPO.load(
-        run_dir / "ppo_high_level_final",
-        device="cpu",
+    if model_choice not in {"best", "final"}:
+        raise ValueError("model_choice must be 'best' or 'final'.")
+    model_stem = (
+        "ppo_high_level_best_validation"
+        if model_choice == "best"
+        else "ppo_high_level_final"
     )
+    model = MaskablePPO.load(run_dir / model_stem, device="cpu")
     seed_values = tuple(int(seed) for seed in seeds)
     if not seed_values:
         raise ValueError("At least one evaluation seed is required.")
@@ -88,7 +93,17 @@ def evaluate_run(
         "stored_t",
         "vented_t",
         "storage_rate",
+        "episode_vessel_fuel_eur",
+        "episode_conditioning_eur",
+        "episode_reconditioning_eur",
+        "episode_loading_eur",
+        "episode_unloading_eur",
+        "episode_operating_cost_eur",
+        "episode_vent_penalty_eur",
+        "episode_storage_shortfall_penalty_eur",
+        "terminal_cleanup_operating_cost_eur",
         "operating_cost_eur",
+        "episode_total_cost_eur",
         "total_cost_eur",
         "unit_total_cost_eur_per_t",
         "hard_violations",
@@ -172,7 +187,15 @@ def _evaluate_seed(model, env, seed: int) -> dict[str, Any]:
     physical_env = env.env
     stored_t = float(physical_env.cumulative_stored_t)
     captured_t = float(physical_env.cumulative_captured_t)
-    total_cost = float(physical_env.ledger.total_cost)
+    episode_operating_cost = float(
+        physical_env.ledger.operating_cost
+    )
+    episode_total_cost = float(physical_env.ledger.total_cost)
+    cleanup_cost = float(
+        info.get("terminal_cleanup_operating_cost_eur", 0.0)
+    )
+    operating_cost = episode_operating_cost + cleanup_cost
+    total_cost = episode_total_cost + cleanup_cost
     hard_violations = sum(
         int(count)
         for code, count in violations.items()
@@ -187,7 +210,27 @@ def _evaluate_seed(model, env, seed: int) -> dict[str, Any]:
         "stored_t": stored_t,
         "vented_t": float(physical_env.ledger.vented_t),
         "storage_rate": stored_t / captured_t if captured_t > 1e-9 else 0.0,
-        "operating_cost_eur": float(physical_env.ledger.operating_cost),
+        "episode_vessel_fuel_eur": float(
+            physical_env.ledger.vessel_fuel
+        ),
+        "episode_conditioning_eur": float(
+            physical_env.ledger.conditioning
+        ),
+        "episode_reconditioning_eur": float(
+            physical_env.ledger.reconditioning
+        ),
+        "episode_loading_eur": float(physical_env.ledger.loading),
+        "episode_unloading_eur": float(physical_env.ledger.unloading),
+        "episode_operating_cost_eur": episode_operating_cost,
+        "episode_vent_penalty_eur": float(
+            physical_env.ledger.vent_penalty
+        ),
+        "episode_storage_shortfall_penalty_eur": float(
+            physical_env.ledger.storage_shortfall_penalty
+        ),
+        "terminal_cleanup_operating_cost_eur": cleanup_cost,
+        "operating_cost_eur": operating_cost,
+        "episode_total_cost_eur": episode_total_cost,
         "total_cost_eur": total_cost,
         "unit_total_cost_eur_per_t": (
             total_cost / stored_t if stored_t > 1e-9 else float("nan")
@@ -212,11 +255,17 @@ def main() -> None:
         choices=("rule", "mpc"),
         default="rule",
     )
+    parser.add_argument(
+        "--model",
+        choices=("best", "final"),
+        default="best",
+    )
     args = parser.parse_args()
     _records, summary = evaluate_run(
         args.run_dir,
         seeds=args.seeds,
         executor=args.executor,
+        model_choice=args.model,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     output_dir = args.run_dir / (

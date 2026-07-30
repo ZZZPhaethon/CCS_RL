@@ -92,22 +92,23 @@ protocol is machine-readable and frozen:
 |---|---|---|---|
 | Fixed vessel–emitter split | Fixed-Assignment Heuristic | no | none |
 | Dynamic greedy shuttle | Greedy | no | none |
-| PPO from scratch | Centralized Maskable PPO | yes | shared 24/72 h summary |
-| Event-based v4 architecture | Event-Residual PPO | yes | shared 24/72 h summary |
-| **Current main method** | **Iterative Action-Q** | yes | shared 24/72 h summary |
+| Direct one-action-per-hour PPO | Hourly Centralized Maskable PPO | yes | shared 168 h summary |
+| Event-based v4 architecture | Event-Residual PPO | yes | shared 168 h summary |
+| **Current main method** | **Iterative Action-Q** | yes | shared 168 h summary |
 | Rolling optimisation | Rolling MILP | no | full hourly 168 h forecast |
 | Offline reference only | Full-horizon MILP (time-limited) | no | perfect foresight |
 
 Key fairness rules: identical forecast **source** for every forecast-capable method (currently a
-perfect-forecast protocol), a matched environment-interaction budget `B_4800` for the three
+perfect-forecast protocol), a matched environment-interaction budget
+`B_selected = 9,505,319` simulator-hour calls for the three
 learning methods, a common compact trip-cleanup terminal value applied to every method's reported
-cost, and formal test seeds `9,000,001–9,000,030` that stay untouched until all method,
-checkpoint, gate and reporting choices are locked.
+cost, and unvisited paired-comparison test seeds `9,000,031–9,000,060`. This range is locked
+against further selection; `9,000,001–9,000,030` is retained as a deprecated historical test block.
 
 ## Preliminary results
 
 Development-seed comparison (`8,000,001–8,000,030`, 30 paired seeds, **one training seed per
-learning method**). These are *not* formal results — the locked test seeds have not been run.
+learning method**). These remain development-only results.
 Full write-up: [`docs/preliminary results/unified_window_control_comparison_2026-07-26_zh.md`](docs/preliminary%20results/unified_window_control_comparison_2026-07-26_zh.md).
 
 | Method | Total cost (EUR) | vs Greedy | Vented (t) | Stored (t) | EUR/t | Wins vs Greedy |
@@ -235,9 +236,11 @@ evaluation, ablations, environment checks).
 ### Other controllers
 
 ```powershell
-# Centralized Maskable PPO with BC warm start
-uv run python scripts\train_ppo_bc.py --scenario northern_lights_phase1_3vessels `
-  --reward-mode economic --bc-episodes 30 --bc-epochs 20 --timesteps 150000
+# Formal hourly centralized Maskable PPO (no BC, event trigger, or executor)
+uv run python -m sim.control.hourly_ppo.train_hourly_ppo `
+  --episode-hours 720 --forecast-context-hours 168 `
+  --future-summary-windows-h 168 --gamma 1 `
+  --max-simulator-hour-steps 9505319
 
 # Forecast-encoder comparison (demos -> merge -> train -> report subcommands)
 uv run python scripts\compare_forecast_encoders_rl.py --help
@@ -308,6 +311,7 @@ control/
 |-- rolling_milp.py             # Rolling-horizon MILP with replay-validated warm start
 |-- native_mpc.py               # Multi-candidate native MPC
 |-- iterative_action_q.py       # Main method: the production Q network
+|-- hourly_ppo/                 # Direct one-policy-action-per-hour PPO baseline
 |-- recurrent_distributional_q.py
 |-- imitation.py / demonstrations.py / replay.py
 `-- event_based/                # Algorithm layer, outside the physics layer
@@ -375,8 +379,9 @@ version** and a rerun of all methods.
 - [x] Frozen `unified_window_v1` protocol and seed manifest.
 - [ ] Implement the pending protocol requirements: shared automatic well rule in every controller
       interface, complete cost/activity diagnostics, and the 1 h simulator-step counter for `B_4800`.
-- [ ] Retrain Centralized Maskable PPO and Event-Residual PPO with objective-aligned rewards.
-- [ ] Run ≥3 independent training seeds and report on the locked test seeds `9,000,001–9,000,030`.
+- [ ] Retrain Hourly Centralized Maskable PPO and Event-Residual PPO with objective-aligned rewards.
+- [ ] Run ≥3 independent training seeds and report future frozen-controller comparisons on
+      unvisited test set `9,000,031–9,000,060`.
 - [ ] Replace personal paths in HPC scripts with environment-variable configuration.
 - [ ] Package large datasets and model weights as downloadable release assets.
 

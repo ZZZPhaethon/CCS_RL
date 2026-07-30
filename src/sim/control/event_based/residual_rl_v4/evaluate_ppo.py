@@ -42,17 +42,42 @@ def evaluate_run(
     config = json.loads(
         (run_dir / "config.json").read_text(encoding="utf-8")
     )
-    if config.get("algorithm") != "maskable_residual_ppo_v4":
+    algorithm = config.get("algorithm")
+    if algorithm not in {
+        "maskable_residual_ppo_v4",
+        "event_residual_ppo_objective_aligned",
+    }:
         raise ValueError(
-            f"Unsupported algorithm: {config.get('algorithm')!r}."
+            f"Unsupported algorithm: {algorithm!r}."
         )
     if model_choice not in {"best", "final"}:
         raise ValueError("model_choice must be 'best' or 'final'.")
-    model_stem = (
-        "maskable_residual_v4_best_validation"
-        if model_choice == "best"
-        else "maskable_residual_v4_final"
-    )
+    if algorithm == "event_residual_ppo_objective_aligned":
+        model_stem = (
+            "event_residual_e1_best_validation"
+            if model_choice == "best"
+            else "event_residual_e1_final"
+        )
+        reward_config = config["reward"]
+        gate_config = config["gate"]
+        gate_mode = config["gate_mode"]
+        outside_risk_penalty = config[
+            "outside_risk_intervention_penalty"
+        ]
+        cvar_tail_fraction = 0.25
+    else:
+        model_stem = (
+            "maskable_residual_v4_best_validation"
+            if model_choice == "best"
+            else "maskable_residual_v4_final"
+        )
+        reward_config = config["high_level_reward"]
+        gate_config = config["risk_gate"]
+        gate_mode = config["risk_gate_mode"]
+        outside_risk_penalty = config[
+            "outside_risk_intervention_penalty"
+        ]
+        cvar_tail_fraction = float(config["cvar_tail_fraction"])
     model_path = run_dir / model_stem
     model = MaskablePPO.load(model_path, device="cpu")
     env = make_tail_robust_native_env(
@@ -77,14 +102,10 @@ def evaluate_run(
         hard_scenario_probability=float(
             hard_scenario_probability
         ),
-        reward=HighLevelRewardConfig(
-            **config["high_level_reward"]
-        ),
-        gate=AdaptiveRiskGateConfig(**config["risk_gate"]),
-        gate_mode=str(config["risk_gate_mode"]),
-        outside_risk_intervention_penalty=float(
-            config["outside_risk_intervention_penalty"]
-        ),
+        reward=HighLevelRewardConfig(**reward_config),
+        gate=AdaptiveRiskGateConfig(**gate_config),
+        gate_mode=str(gate_mode),
+        outside_risk_intervention_penalty=float(outside_risk_penalty),
         override_windows_h=tuple(
             tuple(float(value) for value in window)
             for window in config.get("override_windows_h", ())
@@ -93,7 +114,7 @@ def evaluate_run(
     records = evaluate_seeds(model, env, seeds)
     summary = validation_metrics(
         records,
-        cvar_tail_fraction=float(config["cvar_tail_fraction"]),
+        cvar_tail_fraction=cvar_tail_fraction,
         tail_vent_penalty_eur_per_t=500.0,
     )
     numeric_keys = (
@@ -105,6 +126,17 @@ def evaluate_run(
         "stored_t",
         "vented_t",
         "storage_rate",
+        "episode_vessel_fuel_eur",
+        "episode_conditioning_eur",
+        "episode_reconditioning_eur",
+        "episode_loading_eur",
+        "episode_unloading_eur",
+        "episode_operating_cost_eur",
+        "episode_vent_penalty_eur",
+        "episode_storage_shortfall_penalty_eur",
+        "terminal_cleanup_operating_cost_eur",
+        "operating_cost_eur",
+        "episode_total_cost_eur",
         "total_cost_eur",
         "unit_total_cost_eur_per_t",
         "hard_violations",

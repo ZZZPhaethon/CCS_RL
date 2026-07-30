@@ -99,6 +99,8 @@ def test_small_dense_dataset_has_paired_actions_and_aligned_returns(tmp_path):
         )
         assert len(np.unique(data["root_time_h"])) == 1
         assert len(np.unique(data["actions"][:, 0])) == len(data["actions"])
+        assert np.all(data["baseline_terminal_cleanup_operating_cost_eur"] >= 0.0)
+        assert np.all(data["candidate_terminal_cleanup_operating_cost_eur"] >= 0.0)
         expected = 1e-5 * (
             data["baseline_total_cost_eur"] - data["candidate_total_cost_eur"]
         )

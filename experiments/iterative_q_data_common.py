@@ -9,6 +9,7 @@ import numpy as np
 from scripts import compare_forecast_encoders_rl as compare
 
 from sim.control.baselines import greedy_shuttle_policy
+from sim.control.cplex_milp import _terminal_cleanup_cost_for_state
 from sim.control.event_based.rl.observation_encoder import (
     FORECAST_WINDOWS_H,
     FUTURE_SUMMARY_REPRESENTATION_ID,
@@ -63,6 +64,11 @@ def add_scenario_protocol_arguments(parser) -> None:
         nargs="*",
         default=list(FORECAST_WINDOWS_H),
     )
+    parser.add_argument(
+        "--stress-level",
+        choices=("low", "medium", "high"),
+        default="medium",
+    )
 
 
 def _compare_args(args):
@@ -109,6 +115,7 @@ def make_native_env(
             weather_process="window",
             hard_probability=probability,
             scenario_protocol=protocol,
+            stress_level=str(getattr(args, "stress_level", "medium")),
         )
         env = build_phase1_env(
             scenario="northern_lights_phase1_3vessels",
@@ -175,14 +182,29 @@ def make_event_env(
 
 def metrics(env) -> dict[str, float]:
     stored_t = float(env.ledger.stored_t)
+    episode_operating_cost_eur = float(env.ledger.operating_cost)
+    episode_total_cost_eur = float(env.ledger.total_cost)
+    terminal_cleanup_operating_cost_eur = float(
+        _terminal_cleanup_cost_for_state(env, env.cost_model.parameters)
+    )
+    operating_cost_eur = (
+        episode_operating_cost_eur + terminal_cleanup_operating_cost_eur
+    )
+    total_cost_eur = (
+        episode_total_cost_eur + terminal_cleanup_operating_cost_eur
+    )
     return {
-        "total_cost_eur": float(env.ledger.total_cost),
-        "operating_cost_eur": float(env.ledger.operating_cost),
+        "episode_total_cost_eur": episode_total_cost_eur,
+        "terminal_cleanup_operating_cost_eur": (
+            terminal_cleanup_operating_cost_eur
+        ),
+        "total_cost_eur": total_cost_eur,
+        "operating_cost_eur": operating_cost_eur,
         "vent_penalty_eur": float(env.ledger.vent_penalty),
         "vented_t": float(env.ledger.vented_t),
         "stored_t": stored_t,
         "unit_cost_eur_per_t": (
-            float(env.ledger.total_cost) / stored_t if stored_t > 1e-9 else np.nan
+            total_cost_eur / stored_t if stored_t > 1e-9 else np.nan
         ),
     }
 

@@ -56,6 +56,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--protocol-id", required=True)
     parser.add_argument("--residual-margin", type=float, required=True)
     parser.add_argument("--economic-margin-eur", type=float, required=True)
+    parser.add_argument("--required-heads", type=int, default=4)
     parser.add_argument("--max-overrides", type=int, default=8)
     parser.add_argument(
         "--windows-h",
@@ -63,6 +64,8 @@ def parse_args(argv=None) -> argparse.Namespace:
         default=[list(window) for window in DEFAULT_WINDOWS_H],
     )
     args = parser.parse_args(argv)
+    if args.required_heads <= 0:
+        parser.error("required heads must be positive")
     if args.max_overrides <= 0:
         parser.error("max overrides must be positive")
     if args.max_overrides > len(args.windows_h):
@@ -94,6 +97,12 @@ def main() -> None:
         "iterative_action_q_future_summary",
     }:
         raise ValueError("checkpoint is not an iterative Q model")
+    checkpoint_heads = int(model_configuration.get("heads", 5))
+    if args.required_heads > checkpoint_heads:
+        raise ValueError(
+            "required heads cannot exceed checkpoint ensemble size "
+            f"({checkpoint_heads})"
+        )
 
     payload = {
         "protocol_id": args.protocol_id,
@@ -103,7 +112,7 @@ def main() -> None:
             "observation_input", "state_only"
         ),
         "policy": {
-            "required_heads": 4,
+            "required_heads": int(args.required_heads),
             "residual_margin": args.residual_margin,
             "economic_margin_eur": args.economic_margin_eur,
             "max_overrides": int(args.max_overrides),

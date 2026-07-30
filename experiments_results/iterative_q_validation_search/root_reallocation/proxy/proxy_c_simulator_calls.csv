@@ -1,0 +1,4 @@
+stage,stage_dir,shards,seeds,realized_roots,candidate_rows,training_simulator_calls,training_simulator_hours
+G0,output/iterative_q_validation_search/root_reallocation_proxy_20260728/bank_g0_160,16,160,1919,12004,5033442,5033442
+G1,output/iterative_q_validation_search/root_reallocation_proxy_20260728/bank_g1_40,16,40,480,3077,1270670,1270670
+G2,output/iterative_q_validation_search/root_reallocation_proxy_20260728/bank_g2_40,16,40,480,3125,1244945,1244945

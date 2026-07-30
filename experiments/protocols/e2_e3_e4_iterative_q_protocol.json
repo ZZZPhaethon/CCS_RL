@@ -1,0 +1,124 @@
+{
+  "protocol_id": "paper_e2_e3_e4_iterative_q_2026-07-30",
+  "base_protocol": "experiments/protocols/unified_window_v1_paper_protocol.json",
+  "seed_manifest": "experiments/protocols/unified_window_v1_seed_manifest.json",
+  "formal_test": {
+    "range_inclusive": [
+      9000031,
+      9000060
+    ],
+    "count": 30,
+    "paired_across_model_seeds": true,
+    "paired_across_stress_levels": true
+  },
+  "frozen_e1_model": {
+    "name": "G60-P4",
+    "model_seeds": [
+      0,
+      1,
+      2
+    ],
+    "manifest": "experiments_results/E1/models/iterative_q/current.json",
+    "observation_input": "shared_future_summary",
+    "forecast_context_hours": 168,
+    "required_heads": 4,
+    "q_margin_reward_units": 0.4,
+    "q_margin_eur": 40000,
+    "maximum_interventions": 12,
+    "policy_windows_h": [
+      [108, 155],
+      [156, 203],
+      [204, 251],
+      [252, 299],
+      [300, 347],
+      [348, 395],
+      [396, 443],
+      [444, 491],
+      [492, 539],
+      [540, 587],
+      [588, 635],
+      [636, 680]
+    ]
+  },
+  "E2": {
+    "result_root": "experiments_results/E2",
+    "stage_models": [
+      "G60-P1",
+      "G60-P2",
+      "G60-P3",
+      "G60-P4"
+    ],
+    "cumulative_simulator_calls": {
+      "P1": 5639992,
+      "P2": 6400212,
+      "P3": 7607197,
+      "P4": 9526297
+    },
+    "one_shot_original_alias": "G60-P1",
+    "one_shot_matched": {
+      "roll_in": "Greedy only",
+      "base_training_seed_range_inclusive": [
+        1500,
+        1679
+      ],
+      "additional_training_seed_range_inclusive": [
+        1680,
+        1800
+      ],
+      "budget_target_simulator_calls": 9526297
+    }
+  },
+  "E3": {
+    "result_root": "experiments_results/E3",
+    "variants": {
+      "state_only": "train from the frozen E1 G0-G3 roots and labels",
+      "structured_summary_168": "reuse the frozen E1 G60-P4 models and E1 medium-stress results",
+      "full_sequence_168": "small MLP encoder trained from the same augmented roots and labels"
+    }
+  },
+  "E4": {
+    "result_root": "experiments_results/E4",
+    "training_stress": "medium",
+    "weights_and_gate_frozen": true,
+    "profiles": {
+      "low": {
+        "weather_window_mean_hours": 24.0,
+        "weather_window_speed_factor_range": [0.7, 0.9],
+        "capture_high_output_mean_hours": 24.0,
+        "capture_high_output_multiplier_range": [1.1, 1.4],
+        "well_maintenance_mean_hours": 6.0
+      },
+      "medium": {
+        "weather_window_mean_hours": 48.0,
+        "weather_window_speed_factor_range": [0.5, 0.8],
+        "capture_high_output_mean_hours": 48.0,
+        "capture_high_output_multiplier_range": [1.25, 1.75],
+        "well_maintenance_mean_hours": 12.0
+      },
+      "high": {
+        "weather_window_mean_hours": 96.0,
+        "weather_window_speed_factor_range": [0.4, 0.7],
+        "capture_high_output_mean_hours": 96.0,
+        "capture_high_output_multiplier_range": [1.5, 2.0],
+        "well_maintenance_mean_hours": 24.0
+      }
+    },
+    "fixed_across_profiles": [
+      "event rates",
+      "capture outage rate and duration",
+      "initial inventory ranges",
+      "economic parameters",
+      "episode horizon",
+      "test seeds"
+    ]
+  },
+  "figure_export": {
+    "backend": "Python/matplotlib",
+    "formats": [
+      "PDF",
+      "PNG"
+    ],
+    "png_dpi": 300,
+    "source_data_required": true
+  }
+}

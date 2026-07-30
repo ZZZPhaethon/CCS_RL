@@ -1,0 +1,2 @@
+algorithm,model_seeds,test_episodes,mean_total_cost_eur,between_model_seed_sd_total_cost_eur,mean_unit_cost_eur_per_t,mean_vented_t,mean_stored_t,mean_delta_vs_greedy_eur,hierarchical_bootstrap_95pct_ci_low_eur,hierarchical_bootstrap_95pct_ci_high_eur,wins,ties,losses,win_rate
+Hourly Centralized Maskable PPO,"0,1,2",90,5659632.195624892,255170.65111236984,136.05162720037183,49756.756780677155,44082.93672106332,3405420.631988325,3159057.500443545,3684811.4485643087,0,0,90,0.0

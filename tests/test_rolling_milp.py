@@ -236,6 +236,7 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         self.assertEqual(controller.warm_start_mode, "greedy")
         self.assertTrue(controller.terminal_cleanup_value)
         self.assertIsNone(controller.mip_gap_rel)
+        self.assertIsNone(controller.solver_threads)
         self.assertEqual(controller.terminal_cleanup_mip_start_mode, "partial")
         self.assertTrue(controller.vessel_visit_load_cuts)
         self.assertEqual(controller.vessel_visit_load_cut_stride_h, 12)
@@ -248,6 +249,14 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         self.assertTrue(controller.route_cargo_flow_linking)
         self.assertTrue(controller.cleanup_unary_trip_slots)
         self.assertFalse(controller.cleanup_aggregate_full_trip_dominance)
+
+    def test_controller_allows_no_warm_start(self):
+        controller = RollingMilpController(
+            _cold_env(),
+            warm_start_mode="none",
+        )
+
+        self.assertEqual(controller.warm_start_mode, "none")
         self.assertFalse(controller.cleanup_return_partition_cut)
         self.assertFalse(controller.cleanup_source_mode_partition_cut)
         self.assertFalse(
@@ -295,6 +304,7 @@ class RollingMilpInterfaceTests(unittest.TestCase):
         controller = RollingMilpController(
             _cold_env(),
             mip_gap_rel=0.05,
+            solver_threads=4,
             terminal_cleanup_mip_start_mode="complete",
             shifted_milp_warm_start=True,
             vessel_visit_load_cuts=True,
@@ -319,6 +329,7 @@ class RollingMilpInterfaceTests(unittest.TestCase):
 
         self.assertTrue(controller.shifted_milp_warm_start)
         self.assertEqual(controller.mip_gap_rel, 0.05)
+        self.assertEqual(controller.solver_threads, 4)
         self.assertEqual(controller.terminal_cleanup_mip_start_mode, "complete")
         self.assertTrue(controller.vessel_visit_load_cuts)
         self.assertEqual(controller.vessel_visit_load_cut_stride_h, 12)
@@ -570,6 +581,39 @@ class NativeMpcTests(unittest.TestCase):
 
         self.assertEqual(controller.objective_mode, "economic")
 
+    def test_native_mpc_economic_objective_includes_terminal_cleanup(self):
+        cheap_episode_expensive_cleanup = _NativeMpcCandidate(
+            name="cheap_episode_expensive_cleanup",
+            native_actions_by_hour=[],
+            vented_t=0.0,
+            end_unstored_t=10.0,
+            operating_cost=10.0,
+            total_cost=10.0,
+            is_valid=True,
+            terminal_cleanup_operating_cost=100.0,
+        )
+        expensive_episode_cheap_cleanup = _NativeMpcCandidate(
+            name="expensive_episode_cheap_cleanup",
+            native_actions_by_hour=[],
+            vented_t=0.0,
+            end_unstored_t=10.0,
+            operating_cost=20.0,
+            total_cost=20.0,
+            is_valid=True,
+            terminal_cleanup_operating_cost=0.0,
+        )
+
+        best, _limits = _select_native_mpc_candidate(
+            [
+                cheap_episode_expensive_cleanup,
+                expensive_episode_cheap_cleanup,
+            ],
+            objective_mode="economic",
+            vent_eur_per_t=80.0,
+        )
+
+        self.assertEqual(best.name, "expensive_episode_cheap_cleanup")
+
     def test_native_mpc_accepts_a_goal_preference_candidate(self):
         env = _cold_env(cap_hours=24)
         controller = RollingNativeMpcController(
@@ -584,6 +628,27 @@ class NativeMpcTests(unittest.TestCase):
         self.assertGreater(
             controller.candidate_evaluations,
             len(native_mpc_candidate_names(env)),
+        )
+
+    def test_native_mpc_can_add_terminal_cleanup_to_candidate_values(self):
+        env = _cold_env(cap_hours=24)
+        controller = RollingNativeMpcController(
+            env,
+            planning_horizon_h=24,
+            objective_mode="economic",
+            terminal_cleanup_value=True,
+        )
+
+        with patch(
+            "sim.control.native_mpc._terminal_cleanup_cost_for_state",
+            return_value=123.0,
+        ) as cleanup:
+            run_episode(env, controller, seed=1)
+
+        self.assertEqual(cleanup.call_count, controller.candidate_evaluations)
+        self.assertEqual(
+            controller.last_terminal_cleanup_operating_cost,
+            123.0,
         )
 
     def test_native_mpc_economic_safe_rejects_boundary_exploiting_candidate(self):
@@ -694,6 +759,22 @@ class NativeMpcTests(unittest.TestCase):
         self.assertTrue(controller.last_trace_replay_is_exact)
         self.assertGreaterEqual(controller.candidate_evaluations, 2)
 
+    def test_native_mpc_supports_automatic_well_control(self):
+        env = _cold_env(
+            cap_hours=24,
+            well_control_mode="automatic_max",
+        )
+        controller = RollingNativeMpcController(
+            env,
+            planning_horizon_h=24,
+        )
+
+        metrics = run_episode(env, controller, seed=1)
+
+        self.assertEqual(metrics.elapsed_hours, 24)
+        self.assertNotIn("wells", controller._native_actions_by_hour[0])
+        self.assertTrue(controller.last_trace_replay_is_exact)
+
 
 @unittest.skipUnless(HAVE_PULP, "pulp not installed")
 class RollingMilpTests(unittest.TestCase):
@@ -777,6 +858,7 @@ class RollingMilpTests(unittest.TestCase):
         self.assertEqual(
             solve.call_args.kwargs["cplex_options"],
             [
+                "set parallel 1",
                 "set simplex tolerances feasibility 1e-7",
                 "set mip limits cutpasses 1",
                 "set mip strategy heuristicfreq 10",
@@ -809,7 +891,10 @@ class RollingMilpTests(unittest.TestCase):
         self.assertEqual(solve.call_args.kwargs["max_nonstored_t"], 123.0)
         self.assertEqual(
             solve.call_args.kwargs["cplex_options"],
-            ["set simplex tolerances feasibility 1e-7"],
+            [
+                "set parallel 1",
+                "set simplex tolerances feasibility 1e-7",
+            ],
         )
 
     def test_native_cplex_economic_strict_uses_separate_mpc_boundary_limits(self):

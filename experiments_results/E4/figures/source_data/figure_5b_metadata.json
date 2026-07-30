@@ -1,0 +1,27 @@
+{
+  "figure": "Figure 5b",
+  "claim": "Test whether the matched Greedy-only Action-Q model retains the frozen iterative P4 model's stress robustness.",
+  "test_seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "test_seed_count": 30,
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "interval_definition": "95% percentile hierarchical bootstrap confidence interval; test scenarios and model instances are resampled independently.",
+  "bootstrap_draws": 20000,
+  "bootstrap_seed": 20260730,
+  "n_definition": "Three independently trained model seeds crossed with 30 locked formal-test scenario seeds per stress level.",
+  "center_statistic": "Grand mean across model and scenario seeds.",
+  "baseline_definition": "Frozen Greedy deployment policy evaluated on the identical formal-test scenarios.",
+  "train_validation_test_split": "Frozen training models; formal test seeds 9000031-9000060 used descriptively, with no gate or model selection.",
+  "multiple_comparison_correction": "Not applied; three pre-specified descriptive stress levels.",
+  "formats": [
+    "pdf",
+    "png"
+  ],
+  "png_dpi": 300
+}

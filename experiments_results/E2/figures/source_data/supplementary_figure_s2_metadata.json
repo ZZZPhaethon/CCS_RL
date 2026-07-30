@@ -1,0 +1,22 @@
+{
+  "figure": "Supplementary Figure S2",
+  "claim": "Compare policy-induced iterative aggregation with a Greedy-only one-shot model at the same simulator budget.",
+  "test_seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "test_seed_count": 30,
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "interval_definition": "95% percentile hierarchical bootstrap confidence interval; test scenarios and model instances are resampled independently.",
+  "bootstrap_draws": 20000,
+  "bootstrap_seed": 20260730,
+  "formats": [
+    "pdf",
+    "png"
+  ],
+  "png_dpi": 300
+}

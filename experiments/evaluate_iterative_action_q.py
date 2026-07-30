@@ -17,6 +17,7 @@ else:  # pragma: no cover
     import compare_forecast_encoders_rl as compare
 
 from sim.control.baselines import greedy_shuttle_policy
+from sim.control.cplex_milp import _terminal_cleanup_cost_for_state
 from sim.control.event_based.rl.observation_encoder import (
     FUTURE_SUMMARY_REPRESENTATION_ID,
     future_summary_observation,
@@ -59,12 +60,51 @@ def parse_args(argv=None):
         default="none",
     )
     parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--validation-only",
+        action="store_true",
+        help=(
+            "Require every evaluation seed to belong to the locked controller-"
+            "validation range and reject formal-test seeds."
+        ),
+    )
+    parser.add_argument(
+        "--seed-manifest",
+        default="experiments/protocols/unified_window_v1_seed_manifest.json",
+    )
     common.add_scenario_protocol_arguments(parser)
     args = parser.parse_args(argv)
     if args.episode_hours <= 0 or args.reward_scale <= 0.0:
         parser.error("episode hours and reward scale must be positive")
     args.gates = [parse_gate(value) for value in args.gates]
+    if args.validation_only:
+        validate_controller_validation_seeds(args)
     return args
+
+
+def validate_controller_validation_seeds(args) -> None:
+    manifest = json.loads(
+        Path(args.seed_manifest).read_text(encoding="utf-8")
+    )
+    validation_start, validation_end = manifest["controller_validation"][
+        "range_inclusive"
+    ]
+    formal_start, formal_end = manifest["formal_test"]["range_inclusive"]
+    invalid = [
+        int(seed)
+        for seed in args.eval_seeds
+        if not int(validation_start) <= int(seed) <= int(validation_end)
+    ]
+    formal = [
+        int(seed)
+        for seed in args.eval_seeds
+        if int(formal_start) <= int(seed) <= int(formal_end)
+    ]
+    if invalid or formal:
+        raise ValueError(
+            "validation-only evaluation rejected seeds outside the locked "
+            f"controller-validation range: invalid={invalid}, formal={formal}"
+        )
 
 
 def parse_gate(value: str) -> dict[str, object]:
@@ -173,14 +213,48 @@ def make_event_env(args, variant):
 
 def _metrics(env):
     stored = float(env.ledger.stored_t)
+    episode_vessel_fuel_eur = float(env.ledger.vessel_fuel)
+    episode_conditioning_eur = float(env.ledger.conditioning)
+    episode_reconditioning_eur = float(env.ledger.reconditioning)
+    episode_loading_eur = float(env.ledger.loading)
+    episode_unloading_eur = float(env.ledger.unloading)
+    episode_operating_cost_eur = float(env.ledger.operating_cost)
+    episode_vent_penalty_eur = float(env.ledger.vent_penalty)
+    episode_storage_shortfall_penalty_eur = float(
+        env.ledger.storage_shortfall_penalty
+    )
+    episode_total_cost_eur = float(env.ledger.total_cost)
+    terminal_cleanup_operating_cost_eur = float(
+        _terminal_cleanup_cost_for_state(env, env.cost_model.parameters)
+    )
+    operating_cost_eur = (
+        episode_operating_cost_eur + terminal_cleanup_operating_cost_eur
+    )
+    total_cost_eur = (
+        episode_total_cost_eur + terminal_cleanup_operating_cost_eur
+    )
     return {
-        "total_cost_eur": float(env.ledger.total_cost),
-        "operating_cost_eur": float(env.ledger.operating_cost),
+        "episode_vessel_fuel_eur": episode_vessel_fuel_eur,
+        "episode_conditioning_eur": episode_conditioning_eur,
+        "episode_reconditioning_eur": episode_reconditioning_eur,
+        "episode_loading_eur": episode_loading_eur,
+        "episode_unloading_eur": episode_unloading_eur,
+        "episode_operating_cost_eur": episode_operating_cost_eur,
+        "episode_vent_penalty_eur": episode_vent_penalty_eur,
+        "episode_storage_shortfall_penalty_eur": (
+            episode_storage_shortfall_penalty_eur
+        ),
+        "episode_total_cost_eur": episode_total_cost_eur,
+        "terminal_cleanup_operating_cost_eur": (
+            terminal_cleanup_operating_cost_eur
+        ),
+        "total_cost_eur": total_cost_eur,
+        "operating_cost_eur": operating_cost_eur,
         "vent_penalty_eur": float(env.ledger.vent_penalty),
         "vented_t": float(env.ledger.vented_t),
         "stored_t": stored,
         "unit_cost_eur_per_t": (
-            float(env.ledger.total_cost) / stored if stored > 1e-9 else np.nan
+            total_cost_eur / stored if stored > 1e-9 else np.nan
         ),
     }
 
@@ -559,6 +633,13 @@ def run(args):
         "kind": "iterative_action_q_policy_evaluation",
         "checkpoint": str(args.checkpoint),
         "eval_seeds": [int(seed) for seed in args.eval_seeds],
+        "scenario_protocol": str(args.scenario_protocol),
+        "stress_level": str(args.stress_level),
+        "forecast_context_hours": int(args.forecast_context_hours),
+        "validation_only": bool(args.validation_only),
+        "seed_manifest": (
+            str(args.seed_manifest) if args.validation_only else None
+        ),
         "gates": args.gates,
         "summary": _summary(rows),
     }

@@ -42,6 +42,7 @@ def test_smoke_defaults_use_validation_seed_and_short_solver_limits(tmp_path):
     assert args.full_milp_time_limit_seconds == 30.0
     assert args.rolling_planning_horizon_hours == 48
     assert args.full_milp_horizon_hours == 48
+    assert args.solver_threads == 4
 
 
 def test_greedy_warm_start_is_complete_and_replay_valid():
@@ -54,6 +55,18 @@ def test_greedy_warm_start_is_complete_and_replay_valid():
     assert all("vessels" in action for action in actions)
     assert all("wells" not in action for action in actions)
     assert env.simulator_step_usage().calls == 8
+
+
+def test_greedy_warm_start_can_plan_into_read_only_context():
+    env = _toy_env(hours=2, scenario_hours=5)
+    env.reset(seed=1)
+    env.step({"vessels": [0] * len(env.vessel_ids)})
+
+    actions = greedy_warm_start_actions(env, 4)
+
+    assert len(actions) == 4
+    assert env.t == 1
+    assert env.n_steps == 2
 
 
 def test_materialized_milp_actions_omit_wells_in_automatic_mode():
@@ -92,6 +105,7 @@ def test_rolling_smoke_locks_greedy_only_without_fallback(tmp_path):
         rolling_planning_horizon_hours=4,
         rolling_time_limit_seconds=1.0,
         mip_gap_relative=None,
+        solver_threads=4,
         seed=8_100_001,
     )
 
@@ -113,6 +127,8 @@ def test_rolling_smoke_locks_greedy_only_without_fallback(tmp_path):
     kwargs = controller_type.call_args.kwargs
     assert kwargs["warm_start_mode"] == "greedy"
     assert kwargs["shifted_milp_warm_start"] is False
+    assert kwargs["terminal_cleanup_mip_start_mode"] == "complete"
+    assert kwargs["solver_threads"] == 4
     assert row["fallback_used"] is False
     assert row["run_status"] == "completed"
 
@@ -149,26 +165,29 @@ def test_rolling_milp_plans_into_read_only_forecast_context():
     assert planner.call_args.args[1] == 4
 
 
-def test_full_milp_plans_context_but_scores_only_evaluation_prefix():
-    planning_env = _toy_env(hours=5, scenario_hours=5)
+def test_full_milp_optimizes_and_scores_only_evaluation_horizon():
+    planning_env = _toy_env(hours=2, scenario_hours=5)
     replay_env = _toy_env(hours=2, scenario_hours=5)
     actions = [
         {"vessels": [0] * len(planning_env.vessel_ids)}
-        for _hour in range(5)
+        for _hour in range(2)
     ]
     result = SimpleNamespace(
-        horizon_h=5,
+        horizon_h=2,
         stage_diagnostics=(),
         native_actions_by_hour=actions,
         status="Optimal",
         is_valid=True,
         validation_error="",
+        augmented_objective_value=0.0,
+        terminal_cleanup_cost=0.0,
     )
     args = Namespace(
         full_milp_horizon_hours=2,
         forecast_context_hours=3,
         full_milp_time_limit_seconds=1.0,
         mip_gap_relative=None,
+        solver_threads=4,
         seed=8_100_001,
     )
 
@@ -192,8 +211,13 @@ def test_full_milp_plans_context_but_scores_only_evaluation_prefix():
     ):
         row, _diagnostics = smoke._run_full_milp(args)
 
-    assert solve.call_args.kwargs["horizon_h"] == 5
-    assert row["planning_horizon_hours"] == 5
+    assert solve.call_args.kwargs["horizon_h"] == 2
+    assert solve.call_args.kwargs["threads"] == 4
+    assert (
+        solve.call_args.kwargs["terminal_cleanup_mip_start_mode"]
+        == "complete"
+    )
+    assert row["planning_horizon_hours"] == 2
     assert row["evaluation_horizon_hours"] == 2
     assert row["run_status"] == "completed"
     assert replay_env.t == 2

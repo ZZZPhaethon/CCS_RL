@@ -1,0 +1,29 @@
+{
+  "figure": "Validation-only gate sweep",
+  "claim": "Determine whether relaxed confidence and intervention constraints reveal an Iterative P4 advantage without using formal-test outcomes for gate selection.",
+  "validation_seed_range_inclusive": [
+    8100001,
+    8100020
+  ],
+  "validation_seed_count": 20,
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "configurations": 31,
+  "exploratory_multiple_comparisons": true,
+  "interval_definition": "95% percentile hierarchical bootstrap confidence interval; validation scenarios and model instances are resampled independently.",
+  "bootstrap_draws": 20000,
+  "bootstrap_seed": 20260730,
+  "n_definition": "Three independently trained model seeds crossed with 20 locked controller-validation scenario seeds per gate.",
+  "center_statistic": "Grand mean across model and validation seeds.",
+  "baseline_definition": "Greedy deployment policy evaluated on the identical validation scenarios.",
+  "train_validation_test_split": "Gate comparisons use controller-validation seeds 8100001-8100020 only; formal-test seeds are prohibited.",
+  "multiple_comparison_correction": "None; the 31-gate scan is explicitly exploratory and validation-only.",
+  "formats": [
+    "pdf",
+    "png"
+  ],
+  "png_dpi": 300
+}

@@ -175,6 +175,8 @@ class CplexStageDiagnostic:
     reduced_rows: int | None = None
     reduced_columns: int | None = None
     reduced_nonzeros: int | None = None
+    first_incumbent_time_s: float | None = None
+    first_incumbent_objective: float | None = None
     warm_start_requested: bool = False
     warm_start_accepted: bool | None = None
     warm_start_message: str = ""
@@ -2677,6 +2679,9 @@ def solve_full_scenario_with_cplex(
             # and bound are both shifted.  _value(objective) includes the
             # constant; restore it to the bound before reporting a gap.
             best_bound += objective_constant
+        first_incumbent_objective = parsed["first_incumbent_objective"]
+        if first_incumbent_objective is not None:
+            first_incumbent_objective += objective_constant
         if objective_value is not None and best_bound is not None:
             relative_gap = max(0.0, objective_value - best_bound) / max(
                 1e-10,
@@ -2705,6 +2710,8 @@ def solve_full_scenario_with_cplex(
                 reduced_rows=parsed["reduced_rows"],
                 reduced_columns=parsed["reduced_columns"],
                 reduced_nonzeros=parsed["reduced_nonzeros"],
+                first_incumbent_time_s=parsed["first_incumbent_time_s"],
+                first_incumbent_objective=first_incumbent_objective,
                 warm_start_requested=warm_start,
                 warm_start_accepted=parsed["warm_start_accepted"],
                 warm_start_message=parsed["warm_start_message"],
@@ -3348,6 +3355,19 @@ def _parse_cplex_log(log: str, warm_start_requested: bool) -> dict[str, object]:
             int(value.replace(",", "")) for value in reduced_matches[-1].groups()
         )
 
+    first_incumbent_time_s = None
+    first_incumbent_objective = None
+    incumbent_matches = list(
+        re.finditer(
+            rf"Found incumbent of value\s+({_CPLEX_NUMBER})\s+after\s+"
+            rf"({_CPLEX_NUMBER})\s+sec",
+            log,
+        )
+    )
+    if incumbent_matches:
+        first_incumbent_objective = float(incumbent_matches[0].group(1))
+        first_incumbent_time_s = float(incumbent_matches[0].group(2))
+
     termination_reason = ""
     termination_matches = re.findall(
         r"^MIP\s+-\s+([^:\r\n]+?)(?::|$)",
@@ -3369,6 +3389,15 @@ def _parse_cplex_log(log: str, warm_start_requested: bool) -> dict[str, object]:
                 for token in ("no solution", "rejected", "infeasible", "failed")
             )
             warm_start_accepted = not rejected
+            if warm_start_accepted:
+                mip_start_objectives = re.findall(
+                    rf"MIP start.*?defined initial solution with objective\s+"
+                    rf"({_CPLEX_NUMBER})",
+                    log,
+                )
+                if mip_start_objectives:
+                    first_incumbent_time_s = 0.0
+                    first_incumbent_objective = float(mip_start_objectives[0])
 
     return {
         "best_bound": best_bound,
@@ -3378,6 +3407,8 @@ def _parse_cplex_log(log: str, warm_start_requested: bool) -> dict[str, object]:
         "reduced_rows": reduced_rows,
         "reduced_columns": reduced_columns,
         "reduced_nonzeros": reduced_nonzeros,
+        "first_incumbent_time_s": first_incumbent_time_s,
+        "first_incumbent_objective": first_incumbent_objective,
         "warm_start_accepted": warm_start_accepted,
         "warm_start_message": warm_start_message,
         "termination_reason": termination_reason,
@@ -4311,7 +4342,12 @@ def _set_start_value(var_map, key, value: float) -> None:
         return
     var = var_map if key is None else var_map.get(key)
     if var is not None:
-        var.setInitialValue(max(0.0, float(value)))
+        start_value = float(value)
+        if var.lowBound is not None:
+            start_value = max(float(var.lowBound), start_value)
+        if var.upBound is not None:
+            start_value = min(float(var.upBound), start_value)
+        var.setInitialValue(start_value)
 
 
 def _empty_result() -> FullScenarioCplexMilpResult:

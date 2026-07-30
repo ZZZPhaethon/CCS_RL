@@ -1,0 +1,11 @@
+name=Iterative Q v2 P4 selective-anchor ablation
+data_root=output/iterative_q_validation_search/uniform_margin40_p1_p4
+initial_checkpoint=output/iterative_q_validation_search/uniform_margin40_p1_p4/p3/iterative_action_q.pt
+data_stages=g0:g1:g2:g3
+anchor_coefficients=0.1,0.3,1.0
+release_margin_eur=40000
+anchor_temperature=0.5
+model_seed=0
+evaluation_seeds=8100001:8100002:8100003:8100004:8100005:8100006:8100007:8100008:8100009:8100010:8100011:8100012:8100013:8100014:8100015:8100016:8100017:8100018:8100019:8100020
+validation_only=1
+selection_gate=4_heads,0.40_margin,12_windows

@@ -1,0 +1,6 @@
+gate,required_heads,q_margin_reward_units,q_margin_eur,max_interventions,training_simulator_calls,model_seed,mean_total_cost_eur,mean_delta_vs_greedy_eur,wins,ties,losses,mean_vented_t,mean_stored_t,mean_override_events
+base10,4,0.40,40000,10,7495692,0,1894004.00,-180004.37,14,0,6,1489.17,107874.99,10.00
+base12,4,0.40,40000,12,7495692,0,1880076.53,-193931.83,15,0,5,1167.58,109720.85,11.65
+margin30_cap12,4,0.30,30000,12,7495692,0,1902422.63,-171585.73,15,0,5,1470.23,108664.59,11.80
+margin50_cap12,4,0.50,50000,12,7495692,0,1877389.51,-196618.85,16,0,4,1122.87,109000.55,11.15
+strict5_cap12,5,0.40,40000,12,7495692,0,1875558.54,-198449.83,15,0,5,1122.81,110120.03,11.70

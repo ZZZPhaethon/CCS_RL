@@ -27,6 +27,14 @@ G0_ROOTS_PER_SEED="${G0_ROOTS_PER_SEED:-${#ROOT_FRACTIONS[@]}}"
 SCENARIO_PROTOCOL="${SCENARIO_PROTOCOL:-q_original}"
 HARD_SCENARIO_PROBABILITY="${HARD_SCENARIO_PROBABILITY:-0.5}"
 FORECAST_CONTEXT_HOURS="${FORECAST_CONTEXT_HOURS:-168}"
+FUTURE_SUMMARY_WINDOWS_H="${FUTURE_SUMMARY_WINDOWS_H:-}"
+FUTURE_SUMMARY_ARGS=()
+if [[ -n "$FUTURE_SUMMARY_WINDOWS_H" ]]; then
+  IFS=':' read -r -a FUTURE_SUMMARY_WINDOWS <<< "$FUTURE_SUMMARY_WINDOWS_H"
+  FUTURE_SUMMARY_ARGS+=(
+    --future-summary-windows-h "${FUTURE_SUMMARY_WINDOWS[@]}"
+  )
+fi
 
 TRAIN_TASKS=$(((TRAIN_COUNT + CHUNK_SIZE - 1) / CHUNK_SIZE))
 if (( SLURM_ARRAY_TASK_ID < TRAIN_TASKS )); then
@@ -67,4 +75,5 @@ python -u experiments/generate_iterative_q_greedy_data.py \
   --scenario-protocol "$SCENARIO_PROTOCOL" \
   --hard-scenario-probability "$HARD_SCENARIO_PROBABILITY" \
   --forecast-context-hours "$FORECAST_CONTEXT_HOURS" \
+  "${FUTURE_SUMMARY_ARGS[@]}" \
   --device cpu

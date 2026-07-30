@@ -351,7 +351,10 @@ def generate_dataset(args):
         "follow_indices": schema_wrapper.residual_env.follow_indices.tolist(),
         "follow_action_index": int(schema_wrapper.follow_action()),
         "reward_scale": float(args.reward_scale),
-        "objective": "pure economic operating cost plus vent penalty",
+        "objective": (
+            "720 h economic episode cost plus common compact terminal cleanup "
+            "operating cost"
+        ),
         "residual_reward": "scaled locked-policy anchor cost minus candidate cost",
         "uses_mpc": False,
         "scenario_protocol": str(args.scenario_protocol),

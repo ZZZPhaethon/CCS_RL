@@ -507,7 +507,7 @@ def main() -> None:
         "--max-simulator-hour-steps",
         type=int,
         default=None,
-        help="Set to the measured B_4800 for formal E1 training.",
+        help="Set to the measured B_selected for formal E1 training.",
     )
     parser.add_argument(
         "--validation-every-simulator-hour-steps",

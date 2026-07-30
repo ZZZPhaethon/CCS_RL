@@ -10,7 +10,12 @@ from typing import Callable
 
 from ..environment import CCSEnv, VESSEL_GO_TERMINAL, VESSEL_WAIT
 from .baselines import greedy_shuttle_policy
-from .replay import ReplayExpectation, replay_native_actions
+from .cplex_milp import _terminal_cleanup_cost_for_state
+from .replay import (
+    ReplayExpectation,
+    action_for_well_control_mode,
+    replay_native_actions,
+)
 from .rolling_milp import _capture_tonnes, _sail_hours_between
 
 Policy = Callable[[CCSEnv], dict[str, list]]
@@ -33,6 +38,7 @@ class _NativeMpcCandidate:
     operating_cost: float
     total_cost: float
     is_valid: bool
+    terminal_cleanup_operating_cost: float = 0.0
     is_exact: bool = False
     mismatches: tuple[str, ...] = ()
     execution_vented_t: float = 0.0
@@ -64,12 +70,14 @@ class RollingNativeMpcController:
         progress: Callable[[str], None] | None = None,
         objective_mode: str = "lexicographic",
         preferred_policies: dict[str, Policy] | None = None,
+        terminal_cleanup_value: bool = False,
     ) -> None:
         self.replan_every = max(1, int(replan_every))
         self.planning_horizon_h = max(1, int(planning_horizon_h))
         self.progress = progress
         self.objective_mode = str(objective_mode).lower()
         self.preferred_policies = dict(preferred_policies or {})
+        self.terminal_cleanup_value = bool(terminal_cleanup_value)
         if self.objective_mode not in _OBJECTIVE_MODES:
             raise ValueError(f"Unknown native MPC objective mode: {objective_mode}")
         self.vent_eur_per_t = float(env.cost_model.parameters.carbon_price_eur_per_t)
@@ -79,6 +87,7 @@ class RollingNativeMpcController:
         self.last_trace_replay_is_valid = False
         self.last_trace_replay_is_exact = False
         self.last_trace_replay_mismatches: tuple[str, ...] = ()
+        self.last_terminal_cleanup_operating_cost = 0.0
         self.candidate_evaluations = 0
         self.last_safe_progress_limit_t: float | None = None
         self.last_safe_vent_limit_t: float | None = None
@@ -98,19 +107,26 @@ class RollingNativeMpcController:
             raise RuntimeError("rolling_native_mpc trace ended before the next replan")
         action = self._native_actions_by_hour[elapsed]
         self._validate_native_action(env, action)
-        return {
-            "vessels": [int(choice) for choice in action["vessels"]],
-            "wells": [int(choice) for choice in action["wells"]],
-        }
+        return action_for_well_control_mode(env, action)
 
     def _replan(self, env: CCSEnv, now: float) -> None:
         remaining_h = max(1, min(self.planning_horizon_h, env.n_steps - env.t))
         candidates = [
             _rollout_native_candidate(
-                env, greedy_shuttle_policy, remaining_h, "greedy", self.replan_every
+                env,
+                greedy_shuttle_policy,
+                remaining_h,
+                "greedy",
+                self.replan_every,
+                terminal_cleanup_value=self.terminal_cleanup_value,
             ),
             _rollout_native_candidate(
-                env, _forecast_urgency_policy, remaining_h, "forecast_urgency", self.replan_every
+                env,
+                _forecast_urgency_policy,
+                remaining_h,
+                "forecast_urgency",
+                self.replan_every,
+                terminal_cleanup_value=self.terminal_cleanup_value,
             ),
         ]
         for assignment in _dedicated_assignments(env):
@@ -122,6 +138,7 @@ class RollingNativeMpcController:
                     remaining_h,
                     name,
                     self.replan_every,
+                    terminal_cleanup_value=self.terminal_cleanup_value,
                 )
             )
         for name, policy in self.preferred_policies.items():
@@ -132,6 +149,7 @@ class RollingNativeMpcController:
                     remaining_h,
                     name,
                     self.replan_every,
+                    terminal_cleanup_value=self.terminal_cleanup_value,
                 )
             )
         self.candidate_evaluations += len(candidates)
@@ -154,32 +172,46 @@ class RollingNativeMpcController:
         self.last_trace_replay_is_valid = best.is_valid
         self.last_trace_replay_is_exact = best.is_exact
         self.last_trace_replay_mismatches = best.mismatches
+        self.last_terminal_cleanup_operating_cost = (
+            best.terminal_cleanup_operating_cost
+        )
         if self.progress is not None:
             self.progress(
                 f"  rolling_native_mpc replan at t={now:.0f} h; candidate={best.name}; "
                 f"objective={self.objective_mode}; forecast_vent={best.vented_t:,.1f} t; "
-                f"end_unstored={best.end_unstored_t:,.1f} t"
+                f"end_unstored={best.end_unstored_t:,.1f} t; "
+                f"terminal_cleanup=EUR {best.terminal_cleanup_operating_cost:,.0f}"
             )
     @staticmethod
     def _candidate_key(candidate: _NativeMpcCandidate) -> tuple[float, float, float]:
         return (
             candidate.vented_t,
             candidate.end_unstored_t,
-            candidate.operating_cost,
+            candidate.operating_cost
+            + candidate.terminal_cleanup_operating_cost,
         )
 
     @staticmethod
     def _validate_native_action(env: CCSEnv, action: dict[str, list[int]]) -> None:
         vessel_actions = action.get("vessels", [])
         well_actions = action.get("wells", [])
-        if len(vessel_actions) != len(env.vessel_ids) or len(well_actions) != len(env.well_ids):
+        if len(vessel_actions) != len(env.vessel_ids):
+            raise RuntimeError("rolling_native_mpc trace has the wrong action dimension")
+        if not env.automatic_well_control and len(well_actions) != len(env.well_ids):
             raise RuntimeError("rolling_native_mpc trace has the wrong action dimension")
         for vessel_id, choice, mask in zip(env.vessel_ids, vessel_actions, env.vessel_action_mask()):
             if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
                 raise RuntimeError(f"rolling_native_mpc action is infeasible for {vessel_id}: {choice}")
-        for well_id, choice, mask in zip(env.well_ids, well_actions, env.well_rate_action_mask()):
-            if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
-                raise RuntimeError(f"rolling_native_mpc action is infeasible for {well_id}: {choice}")
+        if not env.automatic_well_control:
+            for well_id, choice, mask in zip(
+                env.well_ids,
+                well_actions,
+                env.well_rate_action_mask(),
+            ):
+                if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
+                    raise RuntimeError(
+                        f"rolling_native_mpc action is infeasible for {well_id}: {choice}"
+                    )
 
 
 def _select_native_mpc_candidate(
@@ -255,7 +287,9 @@ def _select_native_mpc_candidate(
 
     def economic_key(candidate: _NativeMpcCandidate) -> tuple[float, float, float]:
         return (
-            candidate.operating_cost + vent_eur_per_t * candidate.vented_t,
+            candidate.operating_cost
+            + candidate.terminal_cleanup_operating_cost
+            + vent_eur_per_t * candidate.vented_t,
             candidate.vented_t + candidate.end_unstored_t,
             candidate.vented_t,
         )
@@ -279,6 +313,8 @@ def _rollout_native_candidate(
     horizon_h: int,
     name: str,
     execution_h: int | None = None,
+    *,
+    terminal_cleanup_value: bool = False,
 ) -> _NativeMpcCandidate:
     replay_env = copy.deepcopy(env)
     start_stored_t = float(replay_env.cumulative_stored_t)
@@ -297,10 +333,7 @@ def _rollout_native_candidate(
     execution_steps = min(horizon_h, execution_h if execution_h is not None else horizon_h)
     for _ in range(horizon_h):
         action = policy(replay_env)
-        native_action = {
-            "vessels": [int(choice) for choice in action["vessels"]],
-            "wells": [int(choice) for choice in action["wells"]],
-        }
+        native_action = action_for_well_control_mode(replay_env, action)
         actions.append(native_action)
         before_stored_t = float(replay_env.cumulative_stored_t)
         _obs, reward, terminated, truncated, info = replay_env.step(native_action)
@@ -370,6 +403,16 @@ def _rollout_native_candidate(
         expected=expected,
     )
     actual = replay.actual
+    terminal_cleanup_operating_cost = (
+        float(
+            _terminal_cleanup_cost_for_state(
+                replay_env,
+                replay_env.cost_model.parameters,
+            )
+        )
+        if terminal_cleanup_value
+        else 0.0
+    )
     legacy_is_valid = not (set(violations) & invalid)
     return _NativeMpcCandidate(
         name=name,
@@ -379,6 +422,7 @@ def _rollout_native_candidate(
         operating_cost=actual.operating_cost,
         total_cost=actual.total_cost,
         is_valid=legacy_is_valid and replay.is_executable and replay.is_exact,
+        terminal_cleanup_operating_cost=terminal_cleanup_operating_cost,
         is_exact=replay.is_exact,
         mismatches=replay.mismatches,
         execution_vented_t=execution_vented_t,

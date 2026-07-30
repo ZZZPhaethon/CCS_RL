@@ -402,6 +402,7 @@ class CplexMilpInterfaceTests(unittest.TestCase):
             """
 Reduced MIP has 1,234 rows, 5,678 columns, and 90,123 nonzeros.
 MIP start 'm1' defined initial solution with objective 1000.0000.
+Found incumbent of value 9.5000000000e+02 after 1.25 sec. (10.00 ticks)
 MIP - Time limit exceeded, integer feasible:  Objective =  3.9524708239e+02
 Current MIP best bound =  3.1000000000e+02 (gap = 27.5%)
 Solution time =  120.01 sec.  Iterations = 12,345  Nodes = 678
@@ -417,6 +418,8 @@ Solution time =  120.01 sec.  Iterations = 12,345  Nodes = 678
         self.assertEqual(parsed["reduced_rows"], 1234)
         self.assertEqual(parsed["reduced_columns"], 5678)
         self.assertEqual(parsed["reduced_nonzeros"], 90123)
+        self.assertEqual(parsed["first_incumbent_time_s"], 0.0)
+        self.assertEqual(parsed["first_incumbent_objective"], 1000.0)
         self.assertTrue(parsed["warm_start_accepted"])
         self.assertIn("defined initial solution", parsed["warm_start_message"])
 
@@ -430,6 +433,17 @@ Solution time =  120.01 sec.  Iterations = 12,345  Nodes = 678
             parsed["termination_reason"],
             "Time limit exceeded, no integer solution.",
         )
+        self.assertIsNone(parsed["first_incumbent_time_s"])
+        self.assertIsNone(parsed["first_incumbent_objective"])
+
+    def test_parse_cplex_log_extracts_first_incumbent_without_warm_start(self):
+        parsed = cplex_milp._parse_cplex_log(
+            "Found incumbent of value 4.2500e+02 after 12.75 sec. (30 ticks)\n",
+            warm_start_requested=False,
+        )
+
+        self.assertEqual(parsed["first_incumbent_time_s"], 12.75)
+        self.assertEqual(parsed["first_incumbent_objective"], 425.0)
 
     @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
     def test_mip_start_audit_reports_violated_and_partial_constraints(self):
@@ -449,6 +463,22 @@ Solution time =  120.01 sec.  Iterations = 12,345  Nodes = 678
         self.assertEqual(audit.partial_constraint_count, 1)
         self.assertEqual(audit.violated_constraint_count, 1)
         self.assertAlmostEqual(audit.max_constraint_violation, 1.0)
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_mip_start_value_clamps_floating_point_roundoff_to_bounds(self):
+        terminal_stock = cplex_milp.pulp.LpVariable(
+            "terminal_stock_159",
+            lowBound=0.0,
+            upBound=9150.0,
+        )
+
+        cplex_milp._set_start_value(
+            {159: terminal_stock},
+            159,
+            9150.000000000002,
+        )
+
+        self.assertEqual(terminal_stock.varValue, 9150.0)
 
     def test_initial_sailing_fuel_hours_include_only_in_horizon_sailing_steps(self):
         starts = {

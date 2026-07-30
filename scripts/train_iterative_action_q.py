@@ -12,7 +12,12 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import ConcatDataset, DataLoader, Dataset
+from torch.utils.data import (
+    ConcatDataset,
+    DataLoader,
+    Dataset,
+    WeightedRandomSampler,
+)
 
 from sim.control.iterative_action_q import (
     IterativeActionQuantileQ,
@@ -131,6 +136,30 @@ def parse_args(argv=None):
     parser.add_argument("--listwise-coefficient", type=float, default=1.0)
     parser.add_argument("--classification-coefficient", type=float, default=1.0)
     parser.add_argument("--follow-anchor-coefficient", type=float, default=0.5)
+    parser.add_argument(
+        "--previous-policy-anchor-coefficient", type=float, default=0.0
+    )
+    parser.add_argument(
+        "--previous-policy-release-margin-eur", type=float, default=40000.0
+    )
+    parser.add_argument(
+        "--previous-policy-anchor-plateau-margin-eur",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--previous-policy-anchor-temperature", type=float, default=0.5
+    )
+    parser.add_argument(
+        "--previous-policy-anchor-weighting",
+        choices=("hard", "linear", "plateau_linear"),
+        default="hard",
+    )
+    parser.add_argument(
+        "--allow-anchor-without-initial-checkpoint",
+        action="store_true",
+        help="Allow a non-neural behavior policy, such as Greedy P0, to be the anchor.",
+    )
     parser.add_argument("--pairwise-min-cost-eur", type=float, default=10000.0)
     parser.add_argument("--ranking-temperature", type=float, default=0.5)
     parser.add_argument("--model-seed", type=int, default=0)
@@ -143,6 +172,55 @@ def parse_args(argv=None):
     parser.add_argument("--future-dropout", type=float, default=0.0)
     parser.add_argument("--root-sample-fraction", type=float, default=1.0)
     parser.add_argument("--root-sample-seed", type=int, default=0)
+    parser.add_argument(
+        "--stage-sampling-temperature",
+        type=float,
+        default=1.0,
+        help=(
+            "Sample stage s in proportion to effective_root_count**temperature; "
+            "1.0 preserves natural root-count sampling."
+        ),
+    )
+    parser.add_argument(
+        "--near-duplicate-weighting",
+        choices=("none", "inverse_cluster"),
+        default="none",
+    )
+    parser.add_argument(
+        "--near-duplicate-cosine-threshold",
+        type=float,
+        default=0.995,
+    )
+    parser.add_argument(
+        "--near-duplicate-rms-threshold",
+        type=float,
+        default=0.10,
+    )
+    parser.add_argument(
+        "--root-advantage-weighting",
+        choices=("none", "stratified"),
+        default="none",
+    )
+    parser.add_argument(
+        "--root-advantage-threshold-eur",
+        type=float,
+        default=40000.0,
+    )
+    parser.add_argument(
+        "--root-no-improvement-weight",
+        type=float,
+        default=0.5,
+    )
+    parser.add_argument(
+        "--root-moderate-improvement-weight",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--root-strong-improvement-weight",
+        type=float,
+        default=2.0,
+    )
     parser.add_argument(
         "--checkpoint-selection-metric",
         choices=("composite", "top1_mean_return"),
@@ -171,6 +249,20 @@ def parse_args(argv=None):
         parser.error("bootstrap probability must be in (0, 1]")
     if not 0.0 < args.root_sample_fraction <= 1.0:
         parser.error("root sample fraction must be in (0, 1]")
+    if args.stage_sampling_temperature < 0.0:
+        parser.error("stage sampling temperature must be non-negative")
+    if not 0.0 <= args.near_duplicate_cosine_threshold <= 1.0:
+        parser.error("near-duplicate cosine threshold must be inside [0, 1]")
+    if args.near_duplicate_rms_threshold < 0.0:
+        parser.error("near-duplicate RMS threshold must be non-negative")
+    if args.root_advantage_threshold_eur <= 0.0:
+        parser.error("root advantage threshold must be positive")
+    if min(
+        args.root_no_improvement_weight,
+        args.root_moderate_improvement_weight,
+        args.root_strong_improvement_weight,
+    ) <= 0.0:
+        parser.error("root advantage weights must be positive")
     if args.future_residual_scale_limit <= 0.0:
         parser.error("future residual scale limit must be positive")
     if not 0.0 <= args.future_dropout < 1.0:
@@ -185,9 +277,44 @@ def parse_args(argv=None):
         args.listwise_coefficient,
         args.classification_coefficient,
         args.follow_anchor_coefficient,
+        args.previous_policy_anchor_coefficient,
+        args.previous_policy_release_margin_eur,
+        args.previous_policy_anchor_plateau_margin_eur,
         args.pairwise_min_cost_eur,
     ) < 0.0:
         parser.error("loss coefficients and pairwise threshold must be non-negative")
+    if args.previous_policy_anchor_temperature <= 0.0:
+        parser.error("previous-policy anchor temperature must be positive")
+    if (
+        args.previous_policy_anchor_coefficient > 0.0
+        and not args.initial_checkpoint
+        and not args.allow_anchor_without_initial_checkpoint
+    ):
+        parser.error(
+            "previous-policy anchoring requires --initial-checkpoint unless "
+            "--allow-anchor-without-initial-checkpoint is set"
+        )
+    if (
+        args.previous_policy_anchor_coefficient > 0.0
+        and args.previous_policy_anchor_weighting == "linear"
+        and args.previous_policy_release_margin_eur <= 0.0
+    ):
+        parser.error(
+            "linear previous-policy anchoring requires a positive release margin"
+        )
+    if (
+        args.previous_policy_anchor_coefficient > 0.0
+        and args.previous_policy_anchor_weighting == "plateau_linear"
+        and not (
+            0.0
+            <= args.previous_policy_anchor_plateau_margin_eur
+            < args.previous_policy_release_margin_eur
+        )
+    ):
+        parser.error(
+            "plateau-linear previous-policy anchoring requires "
+            "0 <= plateau margin < release margin"
+        )
     return args
 
 
@@ -205,6 +332,12 @@ def _load(path: str):
             data["future_summaries"] = loaded["future_summaries"].copy()
         if "future_forecasts" in loaded:
             data["future_forecasts"] = loaded["future_forecasts"].copy()
+        if "anchor_action" in loaded:
+            data["anchor_action"] = loaded["anchor_action"].copy()
+        if "action_masks" in loaded:
+            data["action_masks"] = loaded["action_masks"].copy()
+        if "window_index" in loaded:
+            data["window_index"] = loaded["window_index"].copy()
         metadata = json.loads(str(loaded["metadata_json"]))
     return data, metadata
 
@@ -363,11 +496,20 @@ class GroupedDenseActionDataset(Dataset):
         observation_input: str = "state_only",
         root_sample_fraction: float = 1.0,
         root_sample_seed: int = 0,
+        previous_policy_anchor: bool = False,
+        default_anchor_action: int | None = None,
+        reward_scale: float = 1.0,
     ):
         keys = np.stack((data["scenario_seed"], data["root_time_h"]), axis=1)
         self.groups = []
         self.root_hours = []
         self.root_keys = []
+        self.root_states = []
+        self.root_futures = []
+        self.root_anchor_actions = []
+        self.root_action_mask_signatures = []
+        self.root_window_indices = []
+        self.root_best_saving_eur = []
         unique_keys = np.unique(keys, axis=0)
         if root_sample_fraction < 1.0:
             rng = np.random.default_rng(root_sample_seed)
@@ -463,23 +605,117 @@ class GroupedDenseActionDataset(Dataset):
                     raise ValueError("dense action data unexpectedly contains FOLLOW")
                 actions = np.concatenate((actions, [int(follow_action_index)]))
                 targets = np.concatenate((targets, [0.0])).astype(np.float32)
+            anchor_action = -1
+            if "anchor_action" in data:
+                behavior_anchor_values = np.asarray(
+                    data["anchor_action"][indices]
+                ).reshape(-1)
+                if len(np.unique(behavior_anchor_values)) != 1:
+                    raise ValueError(
+                        "same-root behavior anchor actions are inconsistent"
+                    )
+                behavior_anchor_action = int(behavior_anchor_values[0])
+            elif default_anchor_action is not None:
+                behavior_anchor_action = int(default_anchor_action)
+            else:
+                behavior_anchor_action = -1
+            if previous_policy_anchor:
+                if "anchor_action" not in data:
+                    raise ValueError(
+                        "previous-policy anchoring requires anchor_action data"
+                    )
+                anchor_values = np.asarray(
+                    data["anchor_action"][indices]
+                ).reshape(-1)
+                if len(np.unique(anchor_values)) != 1:
+                    raise ValueError(
+                        "same-root previous-policy anchor actions are inconsistent"
+                    )
+                anchor_action = int(anchor_values[0])
+                anchor_matches = actions == anchor_action
+                if not anchor_matches.any():
+                    raise ValueError(
+                        "previous-policy anchor action is absent from candidates"
+                    )
+                if not np.allclose(
+                    targets[anchor_matches], 0.0, atol=2e-5
+                ):
+                    raise ValueError(
+                        "previous-policy anchor target must be zero"
+                    )
             self.groups.append(
                 (
                     reference_state.astype(np.float32),
                     reference_future.astype(np.float32),
                     actions,
                     targets,
+                    anchor_action,
                 )
             )
             self.root_hours.append(int(key[1]))
             self.root_keys.append((int(key[0]), int(key[1])))
+            self.root_states.append(reference_state.astype(np.float32))
+            self.root_futures.append(reference_future.astype(np.float32))
+            self.root_anchor_actions.append(behavior_anchor_action)
+            if "action_masks" in data:
+                reference_mask = np.asarray(
+                    data["action_masks"][indices[0]]
+                ).astype(bool, copy=False)
+                if not np.all(
+                    np.asarray(data["action_masks"][indices])
+                    == reference_mask
+                ):
+                    raise ValueError(
+                        "same-root legal action masks are inconsistent"
+                    )
+                mask_signature = np.packbits(
+                    reference_mask.reshape(-1)
+                ).tobytes()
+            else:
+                mask_signature = b""
+            self.root_action_mask_signatures.append(mask_signature)
+            if "window_index" in data:
+                window_values = np.asarray(
+                    data["window_index"][indices]
+                ).reshape(-1)
+                if len(np.unique(window_values)) != 1:
+                    raise ValueError(
+                        "same-root window indices are inconsistent"
+                    )
+                window_index = int(window_values[0])
+            else:
+                window_index = max(
+                    0, min(11, (int(key[1]) - 108) // 48)
+                )
+            self.root_window_indices.append(window_index)
+            self.root_best_saving_eur.append(
+                float(np.max(targets)) / float(reward_scale)
+            )
+        self.root_states = np.asarray(self.root_states, dtype=np.float32)
+        if self.root_futures and self.root_futures[0].size:
+            self.root_futures = np.asarray(
+                self.root_futures, dtype=np.float32
+            )
+        else:
+            self.root_futures = np.empty(
+                (len(self.root_states), 0), dtype=np.float32
+            )
+        self.root_anchor_actions = np.asarray(
+            self.root_anchor_actions, dtype=np.int64
+        )
+        self.root_window_indices = np.asarray(
+            self.root_window_indices, dtype=np.int16
+        )
+        self.root_best_saving_eur = np.asarray(
+            self.root_best_saving_eur, dtype=np.float64
+        )
         self.max_actions = max(len(group[2]) for group in self.groups)
 
     def __len__(self):
         return len(self.groups)
 
     def __getitem__(self, index):
-        state, future, actions, targets = self.groups[index]
+        state, future, actions, targets, anchor_action = self.groups[index]
         padded_actions = np.full(self.max_actions, -1, dtype=np.int64)
         padded_targets = np.zeros(self.max_actions, dtype=np.float32)
         valid = np.zeros(self.max_actions, dtype=bool)
@@ -493,6 +729,7 @@ class GroupedDenseActionDataset(Dataset):
             padded_targets,
             valid,
             self.root_hours[index],
+            anchor_action,
         )
 
 
@@ -502,6 +739,8 @@ def _combined_dataset(
     observation_input,
     root_sample_fraction=1.0,
     root_sample_seed=0,
+    previous_policy_anchor_last_dataset=False,
+    return_parts=False,
 ):
     datasets = [
         GroupedDenseActionDataset(
@@ -513,13 +752,257 @@ def _combined_dataset(
                 np.random.SeedSequence([root_sample_seed, dataset_index])
                 .generate_state(1)[0]
             ),
+            (
+                previous_policy_anchor_last_dataset
+                and dataset_index == len(rows) - 1
+            ),
+            int(follow_action_index),
+            float(metadata["reward_scale"]),
         )
         for dataset_index, (data, metadata) in enumerate(rows)
     ]
     max_actions = max(dataset.max_actions for dataset in datasets)
     for dataset in datasets:
         dataset.max_actions = max_actions
-    return datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
+    combined = (
+        datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
+    )
+    if return_parts:
+        return combined, datasets
+    return combined
+
+
+def _normalized_root_features(dataset, normalization):
+    state = (
+        dataset.root_states
+        - np.asarray(normalization["state_mean"], dtype=np.float32)
+    ) / np.asarray(normalization["state_std"], dtype=np.float32)
+    if dataset.root_futures.shape[1] == 0:
+        return state
+    future = (
+        dataset.root_futures
+        - np.asarray(normalization["future_mean"], dtype=np.float32)
+    ) / np.asarray(normalization["future_std"], dtype=np.float32)
+    return np.concatenate((state, future), axis=1)
+
+
+def _near_duplicate_cluster_weights(
+    datasets,
+    normalization,
+    cosine_threshold,
+    rms_threshold,
+):
+    features = np.concatenate(
+        [
+            _normalized_root_features(dataset, normalization)
+            for dataset in datasets
+        ],
+        axis=0,
+    ).astype(np.float64, copy=False)
+    windows = np.concatenate(
+        [dataset.root_window_indices for dataset in datasets]
+    )
+    anchors = np.concatenate(
+        [dataset.root_anchor_actions for dataset in datasets]
+    )
+    masks = [
+        signature
+        for dataset in datasets
+        for signature in dataset.root_action_mask_signatures
+    ]
+    count = len(features)
+    parents = np.arange(count, dtype=np.int64)
+
+    def find(index):
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(first, second):
+        first_root = find(first)
+        second_root = find(second)
+        if first_root != second_root:
+            parents[second_root] = first_root
+
+    grouped_indices = {}
+    for index, key in enumerate(zip(windows, anchors, masks)):
+        grouped_indices.setdefault(key, []).append(index)
+    dimension = max(1, features.shape[1])
+    for indices in grouped_indices.values():
+        if len(indices) < 2:
+            continue
+        selected = np.asarray(indices, dtype=np.int64)
+        values = features[selected]
+        dot = values @ values.T
+        squared_norm = np.maximum(
+            np.einsum("ij,ij->i", values, values), 0.0
+        )
+        denominator = np.sqrt(
+            squared_norm[:, None] * squared_norm[None, :]
+        )
+        cosine = np.divide(
+            dot,
+            denominator,
+            out=np.zeros_like(dot),
+            where=denominator > 1e-12,
+        )
+        both_zero = (
+            squared_norm[:, None] <= 1e-12
+        ) & (squared_norm[None, :] <= 1e-12)
+        cosine[both_zero] = 1.0
+        squared_distance = np.maximum(
+            squared_norm[:, None] + squared_norm[None, :] - 2.0 * dot,
+            0.0,
+        )
+        rms = np.sqrt(squared_distance / float(dimension))
+        pairs = np.argwhere(
+            np.triu(
+                (cosine >= float(cosine_threshold))
+                & (rms <= float(rms_threshold)),
+                k=1,
+            )
+        )
+        for first, second in pairs:
+            union(int(selected[first]), int(selected[second]))
+    roots = np.asarray([find(index) for index in range(count)])
+    _unique, inverse, cluster_sizes = np.unique(
+        roots, return_inverse=True, return_counts=True
+    )
+    stage_ids = np.concatenate(
+        [
+            np.full(len(dataset), stage_index, dtype=np.int16)
+            for stage_index, dataset in enumerate(datasets)
+        ]
+    )
+    cross_stage_clusters = 0
+    roots_in_cross_stage_clusters = 0
+    for cluster_index, cluster_size in enumerate(cluster_sizes):
+        if len(np.unique(stage_ids[inverse == cluster_index])) > 1:
+            cross_stage_clusters += 1
+            roots_in_cross_stage_clusters += int(cluster_size)
+    weights = 1.0 / cluster_sizes[inverse].astype(np.float64)
+    return weights, {
+        "roots": int(count),
+        "clusters": int(len(cluster_sizes)),
+        "cross_stage_clusters": int(cross_stage_clusters),
+        "roots_in_cross_stage_clusters": int(
+            roots_in_cross_stage_clusters
+        ),
+        "effective_unique_fraction": float(len(cluster_sizes) / count),
+        "largest_cluster": int(cluster_sizes.max()),
+        "mean_cluster_size": float(cluster_sizes.mean()),
+    }
+
+
+def root_sampling_weights(
+    datasets,
+    normalization,
+    *,
+    stage_sampling_temperature=1.0,
+    near_duplicate_weighting="none",
+    near_duplicate_cosine_threshold=0.995,
+    near_duplicate_rms_threshold=0.10,
+    root_advantage_weighting="none",
+    root_advantage_threshold_eur=40000.0,
+    root_no_improvement_weight=0.5,
+    root_moderate_improvement_weight=1.0,
+    root_strong_improvement_weight=2.0,
+):
+    lengths = np.asarray([len(dataset) for dataset in datasets], dtype=int)
+    total = int(lengths.sum())
+    duplicate_weights = np.ones(total, dtype=np.float64)
+    duplicate_audit = {
+        "roots": total,
+        "clusters": total,
+        "cross_stage_clusters": 0,
+        "roots_in_cross_stage_clusters": 0,
+        "effective_unique_fraction": 1.0,
+        "largest_cluster": 1,
+        "mean_cluster_size": 1.0,
+    }
+    if near_duplicate_weighting == "inverse_cluster":
+        duplicate_weights, duplicate_audit = (
+            _near_duplicate_cluster_weights(
+                datasets,
+                normalization,
+                near_duplicate_cosine_threshold,
+                near_duplicate_rms_threshold,
+            )
+        )
+    elif near_duplicate_weighting != "none":
+        raise ValueError(
+            f"unknown near-duplicate weighting: {near_duplicate_weighting}"
+        )
+
+    best_savings = np.concatenate(
+        [dataset.root_best_saving_eur for dataset in datasets]
+    )
+    advantage_weights = np.ones(total, dtype=np.float64)
+    if root_advantage_weighting == "stratified":
+        advantage_weights = np.where(
+            best_savings <= 0.0,
+            float(root_no_improvement_weight),
+            np.where(
+                best_savings >= float(root_advantage_threshold_eur),
+                float(root_strong_improvement_weight),
+                float(root_moderate_improvement_weight),
+            ),
+        )
+    elif root_advantage_weighting != "none":
+        raise ValueError(
+            f"unknown root advantage weighting: {root_advantage_weighting}"
+        )
+
+    offsets = np.concatenate(([0], np.cumsum(lengths)))
+    effective_counts = np.asarray(
+        [
+            duplicate_weights[offsets[index] : offsets[index + 1]].sum()
+            for index in range(len(datasets))
+        ],
+        dtype=np.float64,
+    )
+    stage_scores = np.power(
+        effective_counts, float(stage_sampling_temperature)
+    )
+    stage_probabilities = stage_scores / stage_scores.sum()
+    weights = np.zeros(total, dtype=np.float64)
+    stage_rows = []
+    for index, dataset in enumerate(datasets):
+        start, end = int(offsets[index]), int(offsets[index + 1])
+        modifiers = (
+            duplicate_weights[start:end] * advantage_weights[start:end]
+        )
+        weights[start:end] = (
+            stage_probabilities[index] * modifiers / modifiers.sum()
+        )
+        savings = dataset.root_best_saving_eur
+        stage_rows.append(
+            {
+                "stage_index": index,
+                "roots": int(lengths[index]),
+                "effective_roots": float(effective_counts[index]),
+                "sampling_probability": float(
+                    stage_probabilities[index]
+                ),
+                "no_improvement_roots": int(np.count_nonzero(savings <= 0.0)),
+                "strong_improvement_roots": int(
+                    np.count_nonzero(
+                        savings >= float(root_advantage_threshold_eur)
+                    )
+                ),
+            }
+        )
+    return weights, {
+        "stage_sampling_temperature": float(stage_sampling_temperature),
+        "near_duplicate_weighting": near_duplicate_weighting,
+        "near_duplicate": duplicate_audit,
+        "root_advantage_weighting": root_advantage_weighting,
+        "root_advantage_threshold_eur": float(
+            root_advantage_threshold_eur
+        ),
+        "stages": stage_rows,
+    }
 
 
 def selected_action_quantiles(q: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
@@ -528,6 +1011,84 @@ def selected_action_quantiles(q: torch.Tensor, actions: torch.Tensor) -> torch.T
     safe = actions.clamp(min=0)
     index = safe[:, None, :, None].expand(-1, q.shape[1], -1, q.shape[3])
     return q.gather(2, index).permute(0, 2, 1, 3)
+
+
+def selective_previous_policy_anchor_loss(
+    expected: torch.Tensor,
+    actions: torch.Tensor,
+    targets: torch.Tensor,
+    valid: torch.Tensor,
+    anchor_actions: torch.Tensor,
+    release_margin: float,
+    temperature: float,
+    weighting: str = "hard",
+    plateau_margin: float = 0.0,
+):
+    """Keep the previous action unless exact data clears the release margin."""
+
+    anchor_rows = anchor_actions >= 0
+    exact_best = targets.masked_fill(~valid, -torch.inf).max(dim=1).values
+    if weighting == "hard":
+        anchor_weights = (
+            anchor_rows & (exact_best <= float(release_margin))
+        ).to(expected.dtype)
+    elif weighting == "linear":
+        if release_margin <= 0.0:
+            raise ValueError("linear anchor weighting requires a positive margin")
+        anchor_weights = anchor_rows.to(expected.dtype) * torch.clamp(
+            1.0 - exact_best / float(release_margin),
+            min=0.0,
+            max=1.0,
+        )
+    elif weighting == "plateau_linear":
+        if not 0.0 <= plateau_margin < release_margin:
+            raise ValueError(
+                "plateau-linear weighting requires "
+                "0 <= plateau margin < release margin"
+            )
+        anchor_weights = anchor_rows.to(expected.dtype) * torch.clamp(
+            1.0
+            - (exact_best - float(plateau_margin))
+            / float(release_margin - plateau_margin),
+            min=0.0,
+            max=1.0,
+        )
+    else:
+        raise ValueError(f"unknown previous-policy anchor weighting: {weighting}")
+    protected = anchor_rows & (anchor_weights > 0.0)
+    released = anchor_rows & ~protected
+    anchor_matches = (
+        actions == anchor_actions[:, None]
+    ) & valid & anchor_rows[:, None]
+    if anchor_rows.any() and not anchor_matches[anchor_rows].any(dim=1).all():
+        raise ValueError("previous-policy anchor action is absent from batch")
+
+    logits = expected.permute(0, 2, 1) / float(temperature)
+    logits = logits.masked_fill(~valid[:, None, :], -torch.inf)
+    anchor_positions = anchor_matches.to(torch.int64).argmax(dim=1)
+    per_head = -F.log_softmax(logits, dim=-1).gather(
+        2,
+        anchor_positions[:, None, None].expand(-1, expected.shape[2], 1),
+    ).squeeze(-1)
+    per_root = per_head.mean(dim=1)
+    effective_weight = anchor_weights.sum()
+    loss = (
+        (per_root * anchor_weights).sum() / effective_weight
+        if effective_weight > 0.0
+        else expected.sum() * 0.0
+    )
+    ensemble_best = logits.mean(dim=1).argmax(dim=1)
+    selected_actions = actions.gather(1, ensemble_best[:, None]).squeeze(1)
+    agreement = protected & (selected_actions == anchor_actions)
+    return loss, {
+        "protected_roots": int(protected.sum().item()),
+        "released_roots": int(released.sum().item()),
+        "agreement_roots": int(agreement.sum().item()),
+        "effective_weight": float(effective_weight.item()),
+        "weighted_agreement": float(
+            (agreement.to(expected.dtype) * anchor_weights).sum().item()
+        ),
+    }
 
 
 def model_quantiles(model, state, future, device):
@@ -551,17 +1112,33 @@ def evaluate(
     device,
     reward_scale,
     pairwise_min_cost_eur,
+    previous_policy_release_margin_eur=None,
+    previous_policy_anchor_weighting="hard",
+    previous_policy_anchor_plateau_margin_eur=0.0,
 ):
     actual_rows = []
     predicted_rows = []
     pair_correct = []
     selected_returns = []
     oracle_returns = []
+    anchor_protected = 0
+    anchor_released = 0
+    anchor_agreement = 0
+    anchor_effective_weight = 0.0
+    anchor_weighted_agreement = 0.0
     by_root = {}
     model.eval()
     minimum_return = float(pairwise_min_cost_eur) * float(reward_scale)
     with torch.no_grad():
-        for state, future, actions, targets, valid, root_hours in loader:
+        for (
+            state,
+            future,
+            actions,
+            targets,
+            valid,
+            root_hours,
+            anchor_actions,
+        ) in loader:
             batch = len(state)
             q = model_quantiles(model, state, future, device)
             chosen = selected_action_quantiles(q[:, 0], actions.to(device))
@@ -578,6 +1155,63 @@ def evaluate(
                 predicted_rows.append(row_predicted)
                 selected_returns.append(float(row_actual[np.argmax(row_predicted)]))
                 oracle_returns.append(float(row_actual.max()))
+                if (
+                    previous_policy_release_margin_eur is not None
+                    and int(anchor_actions[row]) >= 0
+                ):
+                    release_margin = (
+                        float(previous_policy_release_margin_eur)
+                        * float(reward_scale)
+                    )
+                    exact_best = float(row_actual.max())
+                    if previous_policy_anchor_weighting == "hard":
+                        anchor_weight = float(exact_best <= release_margin)
+                    elif previous_policy_anchor_weighting == "linear":
+                        anchor_weight = float(
+                            np.clip(
+                                1.0 - exact_best / release_margin,
+                                0.0,
+                                1.0,
+                            )
+                        )
+                    elif previous_policy_anchor_weighting == "plateau_linear":
+                        plateau_margin = (
+                            float(previous_policy_anchor_plateau_margin_eur)
+                            * float(reward_scale)
+                        )
+                        if not 0.0 <= plateau_margin < release_margin:
+                            raise ValueError(
+                                "plateau-linear weighting requires "
+                                "0 <= plateau margin < release margin"
+                            )
+                        anchor_weight = float(
+                            np.clip(
+                                1.0
+                                - (exact_best - plateau_margin)
+                                / (release_margin - plateau_margin),
+                                0.0,
+                                1.0,
+                            )
+                        )
+                    else:
+                        raise ValueError(
+                            "unknown previous-policy anchor weighting: "
+                            f"{previous_policy_anchor_weighting}"
+                        )
+                    if anchor_weight <= 0.0:
+                        anchor_released += 1
+                    else:
+                        anchor_protected += 1
+                        row_actions = actions[row].numpy()[row_valid]
+                        selected_action = int(
+                            row_actions[np.argmax(row_predicted)]
+                        )
+                        agrees = int(
+                            selected_action == int(anchor_actions[row])
+                        )
+                        anchor_agreement += agrees
+                        anchor_effective_weight += anchor_weight
+                        anchor_weighted_agreement += anchor_weight * agrees
                 for left in range(len(row_actual)):
                     for right in range(left + 1, len(row_actual)):
                         difference = row_actual[left] - row_actual[right]
@@ -636,6 +1270,26 @@ def evaluate(
         }
         for hour, bucket in sorted(by_root.items())
     }
+    if anchor_protected + anchor_released:
+        metrics["previous_policy_anchor"] = {
+            "protected_groups": anchor_protected,
+            "released_groups": anchor_released,
+            "protected_top1_agreement": (
+                float(anchor_agreement / anchor_protected)
+                if anchor_protected
+                else None
+            ),
+            "effective_weight_sum": anchor_effective_weight,
+            "mean_anchor_weight": float(
+                anchor_effective_weight
+                / (anchor_protected + anchor_released)
+            ),
+            "weighted_top1_agreement": (
+                float(anchor_weighted_agreement / anchor_effective_weight)
+                if anchor_effective_weight > 0.0
+                else None
+            ),
+        }
     return metrics
 
 
@@ -741,22 +1395,90 @@ def run(args):
             for key in normalization_keys[3:]:
                 normalization[key] = source["normalization"][key]
     follow_index = int(train_metadata["follow_action_index"])
-    train_dataset = _combined_dataset(
+    use_previous_policy_anchor = (
+        args.previous_policy_anchor_coefficient > 0.0
+    )
+    if use_previous_policy_anchor:
+        latest_train_data, latest_train_metadata = train_rows[-1]
+        latest_validation_data, latest_validation_metadata = validation_rows[-1]
+        for data, metadata, split in (
+            (latest_train_data, latest_train_metadata, "train"),
+            (latest_validation_data, latest_validation_metadata, "validation"),
+        ):
+            if metadata.get("anchors_in_data") is not True:
+                raise ValueError(
+                    f"latest {split} dataset must contain policy anchors"
+                )
+            if "anchor_action" not in data:
+                raise ValueError(
+                    f"latest {split} dataset lacks anchor_action"
+                )
+    train_dataset, train_stage_datasets = _combined_dataset(
         train_rows,
         follow_index,
         args.observation_input,
         args.root_sample_fraction,
         args.root_sample_seed,
+        use_previous_policy_anchor,
+        return_parts=True,
     )
     validation_dataset = _combined_dataset(
-        validation_rows, follow_index, args.observation_input
+        validation_rows,
+        follow_index,
+        args.observation_input,
+        previous_policy_anchor_last_dataset=use_previous_policy_anchor,
     )
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(args.model_seed),
+    custom_sampling = (
+        args.stage_sampling_temperature != 1.0
+        or args.near_duplicate_weighting != "none"
+        or args.root_advantage_weighting != "none"
     )
+    sampling_audit = None
+    if custom_sampling:
+        sampling_weights, sampling_audit = root_sampling_weights(
+            train_stage_datasets,
+            normalization,
+            stage_sampling_temperature=args.stage_sampling_temperature,
+            near_duplicate_weighting=args.near_duplicate_weighting,
+            near_duplicate_cosine_threshold=(
+                args.near_duplicate_cosine_threshold
+            ),
+            near_duplicate_rms_threshold=(
+                args.near_duplicate_rms_threshold
+            ),
+            root_advantage_weighting=args.root_advantage_weighting,
+            root_advantage_threshold_eur=(
+                args.root_advantage_threshold_eur
+            ),
+            root_no_improvement_weight=(
+                args.root_no_improvement_weight
+            ),
+            root_moderate_improvement_weight=(
+                args.root_moderate_improvement_weight
+            ),
+            root_strong_improvement_weight=(
+                args.root_strong_improvement_weight
+            ),
+        )
+        sampler = WeightedRandomSampler(
+            torch.as_tensor(sampling_weights, dtype=torch.double),
+            num_samples=len(train_dataset),
+            replacement=True,
+            generator=torch.Generator().manual_seed(args.model_seed),
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            sampler=sampler,
+        )
+        print(json.dumps({"root_sampling": sampling_audit}), flush=True)
+    else:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            generator=torch.Generator().manual_seed(args.model_seed),
+        )
     validation_loader = DataLoader(
         validation_dataset, batch_size=args.batch_size, shuffle=False
     )
@@ -875,7 +1597,21 @@ def run(args):
     for epoch in range(1, args.epochs + 1):
         model.train()
         losses = []
-        for state, future, actions, targets, valid, _root_hours in train_loader:
+        previous_policy_anchor_loss_sum = 0.0
+        previous_policy_effective_weight = 0.0
+        previous_policy_protected_roots = 0
+        previous_policy_released_roots = 0
+        previous_policy_agreement_roots = 0
+        previous_policy_weighted_agreement = 0.0
+        for (
+            state,
+            future,
+            actions,
+            targets,
+            valid,
+            _root_hours,
+            anchor_actions,
+        ) in train_loader:
             batch = len(state)
             q = model_quantiles(model, state, future, device)
             root_q = q[:, 0]
@@ -951,24 +1687,64 @@ def run(args):
                 (*follow_q.shape[:-1], 1), device=device, dtype=follow_q.dtype
             )
             anchor_loss = quantile_huber_loss(follow_q, zero).mean()
+            previous_policy_anchor_loss, anchor_metrics = (
+                selective_previous_policy_anchor_loss(
+                    expected,
+                    actions_device,
+                    targets_device,
+                    valid_device,
+                    anchor_actions.to(device),
+                    (
+                        float(args.previous_policy_release_margin_eur)
+                        * reward_scale
+                    ),
+                    float(args.previous_policy_anchor_temperature),
+                    args.previous_policy_anchor_weighting,
+                    (
+                        float(args.previous_policy_anchor_plateau_margin_eur)
+                        * reward_scale
+                    ),
+                )
+            )
             loss = (
                 behavior_loss
                 + float(args.ranking_coefficient) * ranking_loss
                 + float(args.listwise_coefficient) * listwise_loss
                 + float(args.classification_coefficient) * classification_loss
                 + float(args.follow_anchor_coefficient) * anchor_loss
+                + float(args.previous_policy_anchor_coefficient)
+                * previous_policy_anchor_loss
             )
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 10.0)
             optimizer.step()
             losses.append(float(loss.item()))
+            protected_roots = anchor_metrics["protected_roots"]
+            effective_weight = anchor_metrics["effective_weight"]
+            previous_policy_anchor_loss_sum += (
+                float(previous_policy_anchor_loss.item()) * effective_weight
+            )
+            previous_policy_effective_weight += effective_weight
+            previous_policy_protected_roots += protected_roots
+            previous_policy_released_roots += anchor_metrics["released_roots"]
+            previous_policy_agreement_roots += anchor_metrics["agreement_roots"]
+            previous_policy_weighted_agreement += anchor_metrics[
+                "weighted_agreement"
+            ]
         validation = evaluate(
             model,
             validation_loader,
             device,
             reward_scale,
             args.pairwise_min_cost_eur,
+            (
+                args.previous_policy_release_margin_eur
+                if use_previous_policy_anchor
+                else None
+            ),
+            args.previous_policy_anchor_weighting,
+            args.previous_policy_anchor_plateau_margin_eur,
         )
         score = selection_score(
             validation, args.checkpoint_selection_metric
@@ -979,6 +1755,37 @@ def run(args):
             "selection_score": score,
             "validation": validation,
         }
+        if use_previous_policy_anchor:
+            row["previous_policy_anchor"] = {
+                "loss": (
+                    previous_policy_anchor_loss_sum
+                    / previous_policy_effective_weight
+                    if previous_policy_effective_weight > 0.0
+                    else None
+                ),
+                "protected_roots": previous_policy_protected_roots,
+                "released_roots": previous_policy_released_roots,
+                "protected_top1_agreement": (
+                    previous_policy_agreement_roots
+                    / previous_policy_protected_roots
+                    if previous_policy_protected_roots
+                    else None
+                ),
+                "effective_weight_sum": previous_policy_effective_weight,
+                "mean_anchor_weight": (
+                    previous_policy_effective_weight
+                    / (
+                        previous_policy_protected_roots
+                        + previous_policy_released_roots
+                    )
+                ),
+                "weighted_top1_agreement": (
+                    previous_policy_weighted_agreement
+                    / previous_policy_effective_weight
+                    if previous_policy_effective_weight > 0.0
+                    else None
+                ),
+            }
         history.append(row)
         print(json.dumps(row), flush=True)
         if score > best_score + 1e-8:
@@ -996,6 +1803,13 @@ def run(args):
         device,
         reward_scale,
         args.pairwise_min_cost_eur,
+        (
+            args.previous_policy_release_margin_eur
+            if use_previous_policy_anchor
+            else None
+        ),
+        args.previous_policy_anchor_weighting,
+        args.previous_policy_anchor_plateau_margin_eur,
     )
     configuration = vars(args).copy()
     configuration["q_head"] = {
@@ -1043,6 +1857,7 @@ def run(args):
         "validation_groups": len(validation_dataset),
         "loaded_pretrained_tensors": len(compatible),
         "configuration": configuration,
+        "root_sampling": sampling_audit,
         "final_validation": final_validation,
         "history": history,
     }

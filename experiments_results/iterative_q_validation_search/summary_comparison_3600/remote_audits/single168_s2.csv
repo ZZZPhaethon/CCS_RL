@@ -1,0 +1,4 @@
+stage,stage_dir,shards,seeds,realized_roots,candidate_rows,training_simulator_calls,training_simulator_hours
+G0,output/iterative_q_validation_search/baseline_p1_p4/g0,20,200,2399,14938,6328003,6328003
+G1,output/iterative_q_exact_3600_single168_s2_20260728_cpu/g1,16,40,479,3184,1318321,1318321
+G2,output/iterative_q_exact_3600_single168_s2_20260728_cpu/g2,24,60,719,4435,1811802,1811802

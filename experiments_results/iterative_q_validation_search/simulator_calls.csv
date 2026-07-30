@@ -1,0 +1,6 @@
+data_stage,rollin_policy,train_seeds,roots_per_seed,incremental_roots,incremental_training_simulator_calls,cumulative_roots,cumulative_training_simulator_calls,calls_per_incremental_root
+G0,Greedy,200,12,2400,6328003,2400,6328003,2636.6679
+G1,P1,40,12,480,1270670,2880,7598673,2647.2292
+G2,P2,60,12,720,1906646,3600,9505319,2648.1194
+G3,P3,100,12,1200,3248848,4800,12754167,2707.3733
+G2-lite,P2,30,12,360,909794,3240,8508467,2527.2056

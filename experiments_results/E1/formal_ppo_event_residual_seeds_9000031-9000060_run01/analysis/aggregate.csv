@@ -1,0 +1,2 @@
+algorithm,model_seeds,test_episodes,mean_total_cost_eur,between_model_seed_sd_total_cost_eur,mean_unit_cost_eur_per_t,mean_vented_t,mean_stored_t,mean_delta_vs_greedy_eur,hierarchical_bootstrap_95pct_ci_low_eur,hierarchical_bootstrap_95pct_ci_high_eur,wins,ties,losses,win_rate
+Event-Residual PPO,"0,1,2",90,2239849.944915161,80552.67335398943,22.01413687917144,5963.221691362042,102490.02047109675,-14361.618721405333,-118314.02992903242,94923.15481512262,47,0,43,0.5222222222222223
