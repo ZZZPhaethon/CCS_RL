@@ -31,6 +31,27 @@
 | `training_ppo_hourly_20260728_run01/` | Hourly PPO 训练与 validation 产物 |
 | `models/` | 冻结模型；三种 PPO 分别使用 `ppo_hourly/`、`ppo_high_level/` 和 `ppo_event_residual/` |
 
+## 模型权重位置
+
+以下路径均相对于本目录 `experiments_results/E1/`。Iterative Action-Q 每个
+model seed 保存一个冻结的 P4 checkpoint；三种 PPO 每个 model seed 同时保存
+validation-best checkpoint 和训练结束时的 final checkpoint。
+
+| 模型 | Model seed | 冻结 / validation-best 权重 | Final 权重 |
+|---|---:|---|---|
+| Iterative Action-Q G60-P4 | 0 | [`models/iterative_q/g60_p4_model_seed_0/iterative_action_q.pt`](models/iterative_q/g60_p4_model_seed_0/iterative_action_q.pt) | — |
+| Iterative Action-Q G60-P4 | 1 | [`models/iterative_q/g60_p4_model_seed_1/iterative_action_q.pt`](models/iterative_q/g60_p4_model_seed_1/iterative_action_q.pt) | — |
+| Iterative Action-Q G60-P4 | 2 | [`models/iterative_q/g60_p4_model_seed_2/iterative_action_q.pt`](models/iterative_q/g60_p4_model_seed_2/iterative_action_q.pt) | — |
+| Hourly Centralized Maskable PPO | 0 | [`models/ppo_hourly/model_seed_0/ppo_hourly_best_validation.zip`](models/ppo_hourly/model_seed_0/ppo_hourly_best_validation.zip) | [`models/ppo_hourly/model_seed_0/ppo_hourly_final.zip`](models/ppo_hourly/model_seed_0/ppo_hourly_final.zip) |
+| Hourly Centralized Maskable PPO | 1 | [`models/ppo_hourly/model_seed_1/ppo_hourly_best_validation.zip`](models/ppo_hourly/model_seed_1/ppo_hourly_best_validation.zip) | [`models/ppo_hourly/model_seed_1/ppo_hourly_final.zip`](models/ppo_hourly/model_seed_1/ppo_hourly_final.zip) |
+| Hourly Centralized Maskable PPO | 2 | [`models/ppo_hourly/model_seed_2/ppo_hourly_best_validation.zip`](models/ppo_hourly/model_seed_2/ppo_hourly_best_validation.zip) | [`models/ppo_hourly/model_seed_2/ppo_hourly_final.zip`](models/ppo_hourly/model_seed_2/ppo_hourly_final.zip) |
+| High-level Centralized Maskable PPO | 0 | [`models/ppo_high_level/model_seed_0/ppo_high_level_best_validation.zip`](models/ppo_high_level/model_seed_0/ppo_high_level_best_validation.zip) | [`models/ppo_high_level/model_seed_0/ppo_high_level_final.zip`](models/ppo_high_level/model_seed_0/ppo_high_level_final.zip) |
+| High-level Centralized Maskable PPO | 1 | [`models/ppo_high_level/model_seed_1/ppo_high_level_best_validation.zip`](models/ppo_high_level/model_seed_1/ppo_high_level_best_validation.zip) | [`models/ppo_high_level/model_seed_1/ppo_high_level_final.zip`](models/ppo_high_level/model_seed_1/ppo_high_level_final.zip) |
+| High-level Centralized Maskable PPO | 2 | [`models/ppo_high_level/model_seed_2/ppo_high_level_best_validation.zip`](models/ppo_high_level/model_seed_2/ppo_high_level_best_validation.zip) | [`models/ppo_high_level/model_seed_2/ppo_high_level_final.zip`](models/ppo_high_level/model_seed_2/ppo_high_level_final.zip) |
+| Event-Residual PPO | 0 | [`models/ppo_event_residual/model_seed_0/event_residual_e1_best_validation.zip`](models/ppo_event_residual/model_seed_0/event_residual_e1_best_validation.zip) | [`models/ppo_event_residual/model_seed_0/event_residual_e1_final.zip`](models/ppo_event_residual/model_seed_0/event_residual_e1_final.zip) |
+| Event-Residual PPO | 1 | [`models/ppo_event_residual/model_seed_1/event_residual_e1_best_validation.zip`](models/ppo_event_residual/model_seed_1/event_residual_e1_best_validation.zip) | [`models/ppo_event_residual/model_seed_1/event_residual_e1_final.zip`](models/ppo_event_residual/model_seed_1/event_residual_e1_final.zip) |
+| Event-Residual PPO | 2 | [`models/ppo_event_residual/model_seed_2/event_residual_e1_best_validation.zip`](models/ppo_event_residual/model_seed_2/event_residual_e1_best_validation.zip) | [`models/ppo_event_residual/model_seed_2/event_residual_e1_final.zip`](models/ppo_event_residual/model_seed_2/event_residual_e1_final.zip) |
+
 ## 2026-07-29 完整性核对
 
 当前统一整理的七个在线控制器为 Fixed-Assignment、Greedy、Hourly Centralized
