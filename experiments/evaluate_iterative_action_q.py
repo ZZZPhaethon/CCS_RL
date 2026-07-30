@@ -18,6 +18,7 @@ else:  # pragma: no cover
 
 from sim.control.baselines import greedy_shuttle_policy
 from sim.control.event_based.rl.observation_encoder import (
+    FUTURE_SUMMARY_REPRESENTATION_ID,
     future_summary_observation,
 )
 from sim.control.iterative_action_q import (
@@ -267,16 +268,19 @@ def _load_model(args, device):
             future_std=normalization["future_std"],
             **model_arguments,
         ).to(device)
+        if "future_summary_windows_h" in metadata:
+            model.forecast_summary_windows_h = tuple(
+                int(value) for value in metadata["future_summary_windows_h"]
+            )
         if q_head == "iterative_action_q_future_summary":
             if "future_summary_bands_h" in metadata:
                 model.forecast_summary_bands_h = tuple(
                     (int(start), int(end))
                     for start, end in metadata["future_summary_bands_h"]
                 )
-            else:
-                model.forecast_summary_windows_h = tuple(
-                    int(value) for value in metadata["future_summary_windows_h"]
-                )
+        model.future_summary_representation_id = metadata.get(
+            "future_summary_representation_id"
+        )
     elif q_head == "iterative_action_q_future_residual_summary":
         model = IterativeResidualFutureActionQuantileQ(
             metadata["state_feature_names"],
@@ -292,6 +296,9 @@ def _load_model(args, device):
         ).to(device)
         model.forecast_summary_windows_h = tuple(
             int(value) for value in metadata["future_summary_windows_h"]
+        )
+        model.future_summary_representation_id = metadata.get(
+            "future_summary_representation_id"
         )
     elif q_head == "iterative_action_q_future_168":
         model = IterativeForecastActionQuantileQ(
@@ -343,7 +350,17 @@ def expected_q_for_observation(
             else:
                 windows_h = getattr(model, "forecast_summary_windows_h", None)
                 bands_h = getattr(model, "forecast_summary_bands_h", None)
-                if bands_h is not None:
+                representation_id = getattr(
+                    model,
+                    "future_summary_representation_id",
+                    None,
+                )
+                if representation_id == FUTURE_SUMMARY_REPRESENTATION_ID:
+                    summary_values = future_summary_observation(
+                        env,
+                        windows_h,
+                    )
+                elif bands_h is not None:
                     summary_values = masked_forecast_band_summary_observation(
                         env, bands_h
                     )

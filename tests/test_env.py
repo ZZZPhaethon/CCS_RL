@@ -97,6 +97,76 @@ class EnvSpaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "weather_observation_layout"):
             _env(include_weather_obs=True, weather_observation_layout="unknown")
 
+    def test_unknown_well_control_mode_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "well_control_mode"):
+            _env(well_control_mode="unknown")
+
+    def test_automatic_well_mode_exposes_vessel_actions_only(self):
+        env = _env(well_control_mode="automatic_max")
+        env.reset(seed=0)
+
+        self.assertTrue(env.automatic_well_control)
+        self.assertEqual(env.well_rate_action_dims, [])
+        self.assertEqual(env.well_rate_action_mask(), [])
+        self.assertEqual(env.well_rate_levels_mtpa(), [])
+        self.assertEqual(env.well_rate_bounds(), [])
+        self.assertEqual(env.action_spec()["well_rate_action_dims"], [])
+        self.assertEqual(
+            len(env.automatic_well_rates_tph()),
+            len(env.well_ids),
+        )
+        self.assertIn(
+            "automatic_well_rates_tph",
+            env._action_info(),
+        )
+
+    def test_automatic_well_mode_rejects_controller_well_actions(self):
+        env = _env(well_control_mode="automatic_max")
+        env.reset(seed=0)
+
+        with self.assertRaisesRegex(ValueError, "well actions are forbidden"):
+            env.step(_action())
+
+    def test_automatic_well_mode_injects_at_highest_feasible_rate(self):
+        env = _env(well_control_mode="automatic_max")
+        env.reset(seed=0)
+        terminal_id = env.terminal_ids[0]
+        env.simulator.state.entity_inventory_t[terminal_id] = 1_000.0
+        expected = env.automatic_well_rates_tph()
+
+        env.step({"vessels": [VESSEL_WAIT, VESSEL_WAIT]})
+
+        self.assertTrue(all(rate_tph > 0.0 for rate_tph in expected))
+        discrete_rates_tph = {
+            mtpa_to_tph(rate_mtpa)
+            for rate_mtpa in WELL_RATE_LEVELS_MTPA
+        }
+        self.assertTrue(
+            any(
+                all(
+                    abs(rate_tph - level_tph) > 1e-6
+                    for level_tph in discrete_rates_tph
+                )
+                for rate_tph in expected
+            )
+        )
+        self.assertGreater(sum(env.simulator.state.last_injection_flow_tph.values()), 0.0)
+        self.assertGreaterEqual(
+            env.simulator.state.entity_inventory_t[terminal_id],
+            0.0,
+        )
+
+    def test_automatic_well_mode_turns_unavailable_wells_off(self):
+        env = _env(well_control_mode="automatic_max")
+        env.reset(seed=0)
+        for well_id in env.well_ids:
+            env.simulator.state.well_available[well_id] = False
+
+        self.assertEqual(
+            env.automatic_well_rates_tph(),
+            [0.0] * len(env.well_ids),
+        )
+
     def test_vessel_action_mask_shape_matches_vessel_action_dims(self):
         env = _env()
         env.reset(seed=0)

@@ -18,29 +18,56 @@ from sim.environment.vessel_mode import (
 )
 
 
-FORECAST_WINDOWS_H = (24, 72)
+FORECAST_WINDOWS_H = (168,)
+FUTURE_SUMMARY_REPRESENTATION_ID = "window_summary_mean_min_v1"
 
 
-def future_summary_observation(env: CCSEnv) -> np.ndarray:
-    """Return the exact 24 h/72 h future summaries used by high-level PPO."""
+def validated_future_summary_windows(
+    windows_h: Iterable[int],
+) -> tuple[int, ...]:
+    """Return a canonical, validated sequence of summary horizons."""
 
+    raw_windows = tuple(windows_h)
+    if any(int(value) != value for value in raw_windows):
+        raise ValueError("future-summary windows must be whole hours.")
+    windows = tuple(int(value) for value in raw_windows)
+    if any(value <= 0 for value in windows):
+        raise ValueError("future-summary windows must be positive.")
+    if tuple(sorted(set(windows))) != windows:
+        raise ValueError(
+            "future-summary windows must be unique and increasing."
+        )
+    return windows
+
+
+def future_summary_observation(
+    env: CCSEnv,
+    windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
+) -> np.ndarray:
+    """Return future summaries for the requested horizons."""
+
+    windows_h = validated_future_summary_windows(windows_h)
     if env.simulator is None or env.scenario is None:
         raise RuntimeError("Call env.reset() before requesting future summaries.")
     return np.asarray(
         [
             value
-            for window in FORECAST_WINDOWS_H
+            for window in windows_h
             for value in _window_summary(env, window)
         ],
         dtype=np.float32,
     )
 
 
-def future_summary_feature_names(env: CCSEnv) -> tuple[str, ...]:
+def future_summary_feature_names(
+    env: CCSEnv,
+    windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
+) -> tuple[str, ...]:
     """Return feature names for :func:`future_summary_observation`."""
 
+    windows_h = validated_future_summary_windows(windows_h)
     names: list[str] = []
-    for window_h in FORECAST_WINDOWS_H:
+    for window_h in windows_h:
         names.extend(
             f"{emitter}.availability_mean_{window_h}h"
             for emitter in env.emitter_ids
@@ -60,10 +87,13 @@ def future_summary_feature_names(env: CCSEnv) -> tuple[str, ...]:
     return tuple(names)
 
 
-def high_level_observation(env: CCSEnv) -> np.ndarray:
-    """Return native state features plus fixed-size 24 h/72 h forecasts.
+def high_level_observation(
+    env: CCSEnv,
+    windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
+) -> np.ndarray:
+    """Return native state features plus a fixed-size 168 h forecast summary.
 
-    返回原生状态特征与固定长度的 24 小时/72 小时预测。
+    返回原生状态特征与固定长度的 168 小时预测摘要。
 
     The native observation includes inventories, vessel cargo/location,
     terminal condition, injection availability, and reservoir pressure margin.
@@ -85,18 +115,22 @@ def high_level_observation(env: CCSEnv) -> np.ndarray:
         ],
         dtype=np.float32,
     )
-    forecast = future_summary_observation(env)
+    forecast = future_summary_observation(env, windows_h)
     return np.concatenate((base, vessel_context, forecast)).astype(
         np.float32,
         copy=False,
     )
 
 
-def high_level_observation_size(env: CCSEnv) -> int:
+def high_level_observation_size(
+    env: CCSEnv,
+    windows_h: tuple[int, ...] = FORECAST_WINDOWS_H,
+) -> int:
     """Return the fixed observation length for a configured environment.
 
     返回已配置环境的固定观测长度。
     """
+    windows_h = validated_future_summary_windows(windows_h)
     per_window = len(env.emitter_ids) + 2 * len(env.well_ids) + 2
     vessel_context = len(vessel_operation_mode_feature_names(env)) + len(
         vessel_sailing_destination_feature_names(env)
@@ -104,7 +138,7 @@ def high_level_observation_size(env: CCSEnv) -> int:
     return (
         env.observation_size
         + vessel_context
-        + len(FORECAST_WINDOWS_H) * per_window
+        + len(windows_h) * per_window
     )
 
 

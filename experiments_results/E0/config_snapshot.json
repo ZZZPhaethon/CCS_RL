@@ -1,0 +1,165 @@
+{
+  "common_automatic_well_rates_tph": {
+    "Centralized Maskable PPO": [
+      285.3881278538813
+    ],
+    "Event-Residual PPO": [
+      285.3881278538813
+    ],
+    "Fixed-Assignment Heuristic": [
+      285.3881278538813
+    ],
+    "Full-horizon MILP": [
+      285.3881278538813
+    ],
+    "Greedy": [
+      285.3881278538813
+    ],
+    "Iterative Action-Q": [
+      285.3881278538813
+    ],
+    "Rolling MILP": [
+      285.3881278538813
+    ]
+  },
+  "common_well_rate_spread_tph": 0.0,
+  "controlled_scenario_configs": {
+    "no_disturbance": {
+      "capture_high_output_mean_hours": 1000.0,
+      "capture_high_output_multiplier_range": [
+        1.5,
+        1.5
+      ],
+      "capture_high_output_rate_per_week": 0.0,
+      "capture_noise_std": 0.0,
+      "capture_outage_mean_hours": 12.0,
+      "capture_outage_rate_per_week": 0.0,
+      "emitter_initial_fill_range": [
+        0.0,
+        0.5
+      ],
+      "episode_hours": 168,
+      "leg_wave_slowdown_multiplier": 1.0,
+      "leg_wave_speed_factor_floor": 0.0,
+      "randomize_initial_inventory": false,
+      "reservoir_initial_pressure_fill_range": [
+        0.0,
+        0.5
+      ],
+      "terminal_initial_fill_range": [
+        0.0,
+        0.5
+      ],
+      "time_step_hours": 1.0,
+      "warm_start": false,
+      "weather_process": "window",
+      "weather_update_hours": 24.0,
+      "weather_update_speed_factor_range": [
+        0.75,
+        1.0
+      ],
+      "weather_window_mean_hours": 1000.0,
+      "weather_window_rate_per_week": 0.0,
+      "weather_window_speed_factor_range": [
+        0.6,
+        0.6
+      ],
+      "well_maintenance_mean_hours": 1000.0,
+      "well_maintenance_rate_per_week": 0.0
+    },
+    "single_vessel_single_emitter": {
+      "capture_high_output_mean_hours": 48.0,
+      "capture_high_output_multiplier_range": [
+        1.25,
+        1.75
+      ],
+      "capture_high_output_rate_per_week": 0.0,
+      "capture_noise_std": 0.0,
+      "capture_outage_mean_hours": 12.0,
+      "capture_outage_rate_per_week": 0.0,
+      "emitter_initial_fill_range": [
+        0.0,
+        0.5
+      ],
+      "episode_hours": 96,
+      "leg_wave_slowdown_multiplier": 1.0,
+      "leg_wave_speed_factor_floor": 0.0,
+      "randomize_initial_inventory": false,
+      "reservoir_initial_pressure_fill_range": [
+        0.0,
+        0.5
+      ],
+      "terminal_initial_fill_range": [
+        0.0,
+        0.5
+      ],
+      "time_step_hours": 1.0,
+      "warm_start": false,
+      "weather_process": "window",
+      "weather_update_hours": 24.0,
+      "weather_update_speed_factor_range": [
+        0.75,
+        1.0
+      ],
+      "weather_window_mean_hours": 48.0,
+      "weather_window_rate_per_week": 0.0,
+      "weather_window_speed_factor_range": [
+        0.6,
+        0.8
+      ],
+      "well_maintenance_mean_hours": 24.0,
+      "well_maintenance_rate_per_week": 0.0
+    }
+  },
+  "e0_schema_version": 1,
+  "formal_test_seeds_accessed": false,
+  "git": {
+    "commit": "be2586cf9d75cfc5f0f979c4649b6c6dfa954717",
+    "dirty": true,
+    "status": [
+      " M docs/paper_experiment_plan_zh.md",
+      " M experiments/compare_unified_window_controls.py",
+      " M experiments/create_iterative_q_lock.py",
+      " M experiments/protocols/unified_window_v1_paper_protocol.json",
+      " M experiments/smoke_test_paper_controllers.py",
+      " M scripts/compare_forecast_encoders_rl.py",
+      " M scripts/train_iterative_action_q.py",
+      " M src/sim/control/event_based/residual_rl/README.md",
+      " M src/sim/control/event_based/residual_rl_v4/evaluate_greedy.py",
+      " M src/sim/control/event_based/residual_rl_v4/evaluate_ppo.py",
+      " M src/sim/control/event_based/rl/README.md",
+      " M src/sim/control/event_based/rl/evaluate_high_level_ppo.py",
+      " M src/sim/control/event_based/rl/observation_encoder.py",
+      " M src/sim/control/event_based/rl/train_high_level_ppo.py",
+      " M src/sim/control/rolling_milp.py",
+      " M src/sim/environment/env.py",
+      " M src/sim/environment/forecast.py",
+      " M src/sim/train.py",
+      " M tests/test_compare_forecast_encoders_rl.py",
+      " M tests/test_event_based_algorithms.py",
+      " M tests/test_forecast_observation.py",
+      " M tests/test_generate_iterative_q_greedy_data.py",
+      " M tests/test_iterative_q_window_protocol.py",
+      " M tests/test_paper_experiment_protocol.py",
+      " M tests/test_smoke_test_paper_controllers.py",
+      " M tests/test_train.py",
+      " M tests/test_train_iterative_action_q.py",
+      "?? experiments/run_e0_physical_validation.py",
+      "?? experiments_results/"
+    ]
+  },
+  "protocol_id": "paper_unified_window_v1_3vessel_2026-07-27",
+  "protocol_path": "experiments\\protocols\\unified_window_v1_paper_protocol.json",
+  "protocol_sha256": "5c37fd2bc33fd5af420a81205b844211d075b28152855b84feeab0399a0c8415",
+  "scenario_hash_matches_protocol": true,
+  "scenario_path": "scenarios\\northern_lights_phase1_3vessels.json",
+  "scenario_sha256": "d2624cc1c619575d99deb49c517ebdb3702f88d8ac918de277170a062dd63c5b",
+  "simulator_source_sha256": "b870e06c5119693cfc7a129bbd3a631100a3d2fae271aadf0ee55020c12adf6e",
+  "tolerances": {
+    "capacity_t": 1e-06,
+    "mass_t": 1e-06,
+    "pressure_bar": 1e-08,
+    "rate_tph": 1e-06
+  },
+  "validation_seed": 8100001
+}

@@ -1,0 +1,97 @@
+{
+  "protocol_id": "paper_unified_window_v1_3vessel_2026-07-27",
+  "manifest_version": 1,
+  "locked_on": "2026-07-27",
+  "model_training_seeds": [
+    0,
+    1,
+    2
+  ],
+  "iterative_q_data": {
+    "G0": {
+      "train_range_inclusive": [
+        1500,
+        1699
+      ],
+      "validation_range_inclusive": [
+        3200,
+        3239
+      ],
+      "roots_per_train_seed": 12,
+      "dataset_seed": 20260723
+    },
+    "G1": {
+      "train_range_inclusive": [
+        1500,
+        1539
+      ],
+      "validation_range_inclusive": [
+        3200,
+        3207
+      ],
+      "roots_per_train_seed": 12,
+      "dataset_seed": 20260724
+    },
+    "G2": {
+      "train_range_inclusive": [
+        1600,
+        1659
+      ],
+      "validation_range_inclusive": [
+        3230,
+        3241
+      ],
+      "roots_per_train_seed": 12,
+      "dataset_seed": 20260725
+    },
+    "G3": {
+      "train_range_inclusive": [
+        2000,
+        2099
+      ],
+      "validation_range_inclusive": [
+        3300,
+        3319
+      ],
+      "roots_per_train_seed": 12,
+      "dataset_seed": 20260726
+    }
+  },
+  "controller_validation": {
+    "range_inclusive": [
+      8100001,
+      8100020
+    ],
+    "count": 20,
+    "allowed_uses": [
+      "checkpoint selection",
+      "gate selection",
+      "shared future-summary lock",
+      "Rolling MILP horizon and time-limit smoke validation"
+    ]
+  },
+  "formal_test": {
+    "range_inclusive": [
+      9000001,
+      9000030
+    ],
+    "count": 30,
+    "paired_across_controllers": true,
+    "paired_across_stress_levels": true,
+    "access_rule": "do not evaluate until all method, checkpoint, gate, budget and reporting choices are locked"
+  },
+  "legacy_development_only": {
+    "range_inclusive": [
+      8000001,
+      8000030
+    ],
+    "reason": "already used by unified-window comparisons and reproducibility evaluations before the paper protocol was frozen",
+    "prohibited_use": "formal test claims"
+  },
+  "split_rules": [
+    "formal test seeds must not be used for training, root generation, hyperparameter selection, checkpoint selection or debugging",
+    "controller validation seeds must not appear in the formal test range",
+    "Low, Medium and High stress evaluations reuse the same formal test seed numbers to preserve pairing",
+    "a protocol revision is required before replacing any locked range"
+  ]
+}

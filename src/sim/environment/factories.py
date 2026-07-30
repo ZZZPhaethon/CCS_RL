@@ -20,6 +20,7 @@ from ..network_scenarios import (
     build_northern_lights_phase1_demo,
 )
 from ..scenario_generation import ScenarioConfig, ScenarioGenerator
+from ..simulator import SimulatorStepCounter
 from .env import CCSEnv, CCSEnvConfig
 
 Coordinate = tuple[float, float]
@@ -46,6 +47,7 @@ def build_phase1_env(
     wave_height_nc_paths: str | Path | list[str | Path] | None = None,
     wave_height_reader=None,
     lstm_prediction_csv: str | Path | None = None,
+    simulator_step_counter: SimulatorStepCounter | None = None,
 ) -> CCSEnv:
     """A ``CCSEnv`` on a registered fixed scenario (default Northern Lights Phase 1).
 
@@ -86,6 +88,7 @@ def build_phase1_env(
         cost_model=cost_model,
         config=env_config,
         routes=routes,
+        simulator_step_counter=simulator_step_counter,
     )
 
 

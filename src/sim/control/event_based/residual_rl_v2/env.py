@@ -22,6 +22,10 @@ from sim.control.event_based.rl.high_level_env import (
     _decision_event_snapshot,
     _replan_event_reason,
 )
+from sim.control.event_based.rl.observation_encoder import (
+    FORECAST_WINDOWS_H,
+    validated_future_summary_windows,
+)
 from sim.control.event_based.rl.reward import HighLevelRewardConfig, high_level_reward
 
 from .executor import (
@@ -46,6 +50,8 @@ class MaskedResidualEnvConfig:
     emitter_fill_event_thresholds: tuple[float, ...] = (0.8, 0.95)
     minimum_operable_speed_factor: float = 0.75
     reward: HighLevelRewardConfig = HighLevelRewardConfig()
+    future_summary_windows_h: tuple[int, ...] = FORECAST_WINDOWS_H
+    max_simulator_hour_steps: int | None = None
 
     def __post_init__(self) -> None:
         """Validate semi-MDP settings.
@@ -64,6 +70,16 @@ class MaskedResidualEnvConfig:
         if self.minimum_operable_speed_factor < 0.0:
             raise ValueError(
                 "minimum_operable_speed_factor must be non-negative."
+            )
+        validated_future_summary_windows(
+            self.future_summary_windows_h
+        )
+        budget = self.max_simulator_hour_steps
+        if budget is not None and (
+            int(budget) != budget or budget <= 0
+        ):
+            raise ValueError(
+                "max_simulator_hour_steps must be a positive integer."
             )
 
 
@@ -94,6 +110,9 @@ class MaskedResidualDispatchEnv:
         self._decision_steps = int(round(steps))
         self.codec = MaskedResidualActionCodec(env.emitter_ids)
         self.executor = MaskedResidualRuleExecutor()
+        self._simulator_usage_at_start = (
+            self.env.simulator_step_usage()
+        )
         self.last_decision_trigger = "initial"
         self.last_decision_elapsed_h = 0.0
         self.counterfactual_env: CCSEnv | None = None
@@ -112,7 +131,10 @@ class MaskedResidualDispatchEnv:
 
         返回事件/风险观测维度。
         """
-        return residual_observation_size(self.env)
+        return residual_observation_size(
+            self.env,
+            self.config.future_summary_windows_h,
+        )
 
     def action_masks(self) -> np.ndarray:
         """Return valid actions at the current decision point.
@@ -122,6 +144,34 @@ class MaskedResidualDispatchEnv:
         if self.env.simulator is None:
             raise RuntimeError("Call reset() before requesting action masks.")
         return residual_action_mask(self.env, self.codec)
+
+    def training_simulator_usage(self):
+        """Return physical-simulator use since this wrapper was created."""
+
+        return (
+            self.env.simulator_step_usage()
+            - self._simulator_usage_at_start
+        )
+
+    def _remaining_paired_native_steps(self) -> int | None:
+        """Return actual steps affordable with matching counterfactual steps."""
+
+        budget = self.config.max_simulator_hour_steps
+        if budget is None:
+            return None
+        remaining_h = max(
+            0.0,
+            float(budget)
+            - self.training_simulator_usage().hour_steps,
+        )
+        paired_step_h = 2.0 * self.env.network.time_step_hours
+        return int((remaining_h + 1e-9) // paired_step_h)
+
+    def simulator_budget_exhausted(self) -> bool:
+        """Return whether another actual/counterfactual pair is affordable."""
+
+        remaining_steps = self._remaining_paired_native_steps()
+        return remaining_steps is not None and remaining_steps <= 0
 
     def reset(self, seed: int | None = None) -> np.ndarray:
         """Reset an episode and expose the initial event.
@@ -186,8 +236,15 @@ class MaskedResidualDispatchEnv:
         native_steps = 0
         event_snapshot = _decision_event_snapshot(self.env, self.config)
         decision_trigger = "maximum_interval"
+        budget_exhausted = False
+        remaining_paired_steps = self._remaining_paired_native_steps()
+        allowed_native_steps = (
+            self._decision_steps
+            if remaining_paired_steps is None
+            else min(self._decision_steps, remaining_paired_steps)
+        )
 
-        for _ in range(self._decision_steps):
+        for _ in range(allowed_native_steps):
             action = self.executor.propose_action(self.env)
             eligible_seen.update(self.executor.last_eligible_vessels)
             overridden_vessels.update(self.executor.last_overridden_vessels)
@@ -229,12 +286,21 @@ class MaskedResidualDispatchEnv:
             overflow_risk_t_hours=overflow_risk_t_hours,
             violation_counts=violations,
             config=self.config.reward,
+            total_cost_eur=actual["total_cost_eur"],
         )
         counterfactual = _advance_rule_counterfactual(
             self.counterfactual_env,
             native_steps=native_steps,
             config=self.config,
         )
+        if (
+            not terminated
+            and not truncated
+            and self.simulator_budget_exhausted()
+        ):
+            budget_exhausted = True
+            truncated = True
+            decision_trigger = "simulator_budget_exhausted"
         incremental_reward = actual_reward - counterfactual["reward"]
         elapsed_hours = self.env.simulator.state.time_h - started_at_h
         self.last_decision_trigger = decision_trigger
@@ -254,6 +320,8 @@ class MaskedResidualDispatchEnv:
             counterfactual["total_cost_eur"]
             - actual["total_cost_eur"]
         )
+        simulator_usage = self.training_simulator_usage()
+        simulator_budget = self.config.max_simulator_hour_steps
         info = {
             "action_label": self.codec.label(index),
             "intervention_selected": index != 0,
@@ -312,6 +380,14 @@ class MaskedResidualDispatchEnv:
             "counterfactual_cumulative_total_cost": (
                 self.counterfactual_env.ledger.total_cost
             ),
+            **simulator_usage.as_dict(),
+            "max_simulator_hour_steps": simulator_budget,
+            "simulator_budget_exhausted": budget_exhausted,
+            "simulator_budget_fraction": (
+                simulator_usage.hour_steps / simulator_budget
+                if simulator_budget is not None
+                else None
+            ),
         }
         return (
             self._observation(),
@@ -331,6 +407,9 @@ class MaskedResidualDispatchEnv:
             decision_trigger=self.last_decision_trigger,
             hours_since_decision=self.last_decision_elapsed_h,
             maximum_interval_h=self.config.decision_interval_h,
+            future_summary_windows_h=(
+                self.config.future_summary_windows_h
+            ),
         )
 
 
@@ -395,6 +474,7 @@ def _advance_rule_counterfactual(
         overflow_risk_t_hours=overflow_risk_t_hours,
         violation_counts=violations,
         config=config.reward,
+        total_cost_eur=delta["total_cost_eur"],
     )
     return {
         **delta,
@@ -403,4 +483,3 @@ def _advance_rule_counterfactual(
         "reward": reward,
         "reward_breakdown": breakdown,
     }
-

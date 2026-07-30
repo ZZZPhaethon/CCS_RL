@@ -23,6 +23,9 @@ from sim.control.event_based.rl.reward import (
     HARD_VIOLATION_CODES,
     HighLevelRewardConfig,
 )
+from sim.control.event_based.rl.observation_encoder import (
+    FORECAST_WINDOWS_H,
+)
 
 from .factory import make_tail_robust_native_env
 
@@ -50,6 +53,13 @@ def evaluate_greedy(
         episode_hours=int(config["episode_hours"]),
         forecast_context_hours=int(
             config["forecast_context_hours"]
+        ),
+        future_summary_windows_h=tuple(
+            int(value)
+            for value in config.get(
+                "future_summary_windows_h",
+                FORECAST_WINDOWS_H,
+            )
         ),
         decision_interval_h=float(config["decision_interval_h"]),
         event_triggered=bool(config["event_triggered"]),

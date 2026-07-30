@@ -37,13 +37,23 @@ from ..entities.terminal import Terminal
 from ..entities.vessel import Vessel
 from ..environment import VESSEL_GO_EMITTER_BASE, VESSEL_GO_TERMINAL, VESSEL_WAIT, WELL_RATE_LEVELS_MTPA
 from ..line_source import variable_rate_bottomhole_pressure_bar
-from ..operations.pressure_limits import mtpa_to_tph, pressure_limited_rate_level_mask, tph_to_mtpa
+from ..operations.pressure_limits import (
+    maximum_feasible_well_rate_tph,
+    mtpa_to_tph,
+    pressure_limited_rate_level_mask,
+    tph_to_mtpa,
+)
 from ..operations.unloading import terminal_unload_queue_snapshot
 from ..routes import route_distance_km, sea_route
 from ..scenario_generation import Scenario
 from ..scenario_generation.disturbance_resolver import terminal_berth_count
 from .objective import control_objective_value, control_objective_weights
-from .replay import ReplayExpectation, ReplayTolerances, replay_native_actions
+from .replay import (
+    ReplayExpectation,
+    ReplayTolerances,
+    action_for_well_control_mode,
+    replay_native_actions,
+)
 
 KNOTS_TO_KMH = 1.852
 
@@ -210,6 +220,7 @@ class FullScenarioCplexMilpResult:
     departures: dict[str, list[int]]
     arrivals: dict[str, list[int]]
     injection_tph: list[float]
+    well_request_tph_by_hour: dict[str, list[float]]
     vessel_actions_by_hour: dict[str, list[int]]
     well_rate_indices_by_hour: dict[str, list[int]]
     native_actions_by_hour: list[dict[str, list[int]]]
@@ -1601,6 +1612,30 @@ def solve_full_scenario_with_cplex(
         for t in hours
         for rate_index in well_rate_options[(well_id, t)]
     }
+    automatic_well_physical_max = (
+        _physical_well_max_by_hour(env, scenario, H)
+        if env.automatic_well_control
+        else {}
+    )
+    automatic_well_request = {
+        (well_id, t): pulp.LpVariable(
+            f"well_request_{well_id}_{t}",
+            lowBound=0.0,
+            upBound=automatic_well_physical_max[(well_id, t)],
+        )
+        for well_id in env.well_ids
+        for t in hours
+    } if env.automatic_well_control else {}
+    automatic_well_regime = {
+        (well_id, t, regime): binary_var(
+            f"well_regime_{well_id}_{t}_{regime}",
+            "injection",
+        )
+        for well_id in env.well_ids
+        if _uses_single_well_dynamic_bhp(env, well_id)
+        for t in hours
+        for regime in ("off", "physical", "pressure")
+    } if env.automatic_well_control else {}
     well_inj = {
         (well_id, t): pulp.LpVariable(f"well_actual_{well_id}_{t}", lowBound=0.0)
         for well_id in env.well_ids
@@ -2001,14 +2036,18 @@ def solve_full_scenario_with_cplex(
         0.0 if economic_objective else objective_weights.overflow_risk_lookahead_h,
     )
 
-    well_request = {
-        (well_id, t): pulp.lpSum(
-            mtpa_to_tph(WELL_RATE_LEVELS_MTPA[rate_index]) * well_choice[(well_id, t, rate_index)]
-            for rate_index in well_rate_options[(well_id, t)]
-        )
-        for well_id in env.well_ids
-        for t in hours
-    }
+    if env.automatic_well_control:
+        well_request = automatic_well_request
+    else:
+        well_request = {
+            (well_id, t): pulp.lpSum(
+                mtpa_to_tph(WELL_RATE_LEVELS_MTPA[rate_index])
+                * well_choice[(well_id, t, rate_index)]
+                for rate_index in well_rate_options[(well_id, t)]
+            )
+            for well_id in env.well_ids
+            for t in hours
+        }
     for well_id in env.well_ids:
         for t in hours:
             prob += pulp.lpSum(
@@ -2016,17 +2055,46 @@ def solve_full_scenario_with_cplex(
                 for rate_index in well_rate_options[(well_id, t)]
             ) == 1
             prob += well_inj[(well_id, t)] <= well_request[(well_id, t)]
-
-    max_hourly_injection_t = max(
-        (
-            sum(
-                max(mtpa_to_tph(WELL_RATE_LEVELS_MTPA[rate_index]) for rate_index in well_rate_options[(well_id, t)])
-                for well_id in env.well_ids
-            )
-            for t in hours
-        ),
-        default=0.0,
+    _add_continuous_automatic_well_request_constraints(
+        prob,
+        env,
+        scenario,
+        automatic_well_request,
+        automatic_well_regime,
+        well_inj,
+        automatic_well_physical_max,
+        H,
     )
+
+    if env.automatic_well_control:
+        max_hourly_injection_t = max(
+            (
+                sum(
+                    automatic_well_physical_max[(well_id, t)]
+                    for well_id in env.well_ids
+                )
+                for t in hours
+            ),
+            default=0.0,
+        )
+    else:
+        max_hourly_injection_t = max(
+            (
+                sum(
+                    max(
+                        mtpa_to_tph(
+                            WELL_RATE_LEVELS_MTPA[rate_index]
+                        )
+                        for rate_index in well_rate_options[
+                            (well_id, t)
+                        ]
+                    )
+                    for well_id in env.well_ids
+                )
+                for t in hours
+            ),
+            default=0.0,
+        )
     max_hourly_supply_t = terminal_capacity_t + sum(
         float(env.network.entities[vessel_id].unloading_rate_tph) for vessel_id in env.vessel_ids
     )
@@ -2113,7 +2181,16 @@ def solve_full_scenario_with_cplex(
                 )
                 <= manifold.max_flow_tph
             )
-    _add_single_well_dynamic_bhp_constraints(prob, env, well_inj, H)
+    _add_single_well_dynamic_bhp_constraints(
+        prob,
+        env,
+        well_inj,
+        H,
+        well_choice=well_choice,
+        well_rate_options=well_rate_options,
+        automatic_well_regime=automatic_well_regime,
+        automatic_well_physical_max=automatic_well_physical_max,
+    )
 
     initial_terminal_t = sum(float(state.entity_inventory_t.get(tid, 0.0)) for tid in env.terminal_ids)
     prob += terminal_stock[0] == initial_terminal_t
@@ -2509,6 +2586,9 @@ def solve_full_scenario_with_cplex(
             source_overflow_active=source_overflow_active,
             terminal_stock=terminal_stock,
             well_inj=well_inj,
+            automatic_well_request=automatic_well_request,
+            automatic_well_regime=automatic_well_regime,
+            automatic_well_physical_max=automatic_well_physical_max,
             injection_limit_choice=injection_limit_choice,
             vent=vent,
         )
@@ -2680,14 +2760,44 @@ def solve_full_scenario_with_cplex(
         prob.setObjective(weighted_objective)
         status = solve_stage("weighted", weighted_objective, time_limit_s, use_warm_start)
     vessel_actions_by_hour = _extract_vessel_actions(env, H, arcs, arc_vars)
-    well_rate_indices_by_hour = _extract_well_rate_indices(env, H, well_rate_options, well_choice)
-    native_actions_by_hour = [
-        {
-            "vessels": [vessel_actions_by_hour[vessel_id][t] for vessel_id in env.vessel_ids],
-            "wells": [well_rate_indices_by_hour[well_id][t] for well_id in env.well_ids],
-        }
-        for t in hours
-    ]
+    well_request_tph_by_hour = {
+        well_id: [
+            _value(well_request[(well_id, t)])
+            for t in hours
+        ]
+        for well_id in env.well_ids
+    }
+    if env.automatic_well_control:
+        well_rate_indices_by_hour = {}
+        native_actions_by_hour = [
+            {
+                "vessels": [
+                    vessel_actions_by_hour[vessel_id][t]
+                    for vessel_id in env.vessel_ids
+                ],
+            }
+            for t in hours
+        ]
+    else:
+        well_rate_indices_by_hour = _extract_well_rate_indices(
+            env,
+            H,
+            well_rate_options,
+            well_choice,
+        )
+        native_actions_by_hour = [
+            {
+                "vessels": [
+                    vessel_actions_by_hour[vessel_id][t]
+                    for vessel_id in env.vessel_ids
+                ],
+                "wells": [
+                    well_rate_indices_by_hour[well_id][t]
+                    for well_id in env.well_ids
+                ],
+            }
+            for t in hours
+        ]
     injection_tph = [
         sum(_value(well_inj[(well_id, t)]) for well_id in env.well_ids)
         for t in hours
@@ -2787,6 +2897,7 @@ def solve_full_scenario_with_cplex(
             *[var.value() for var in source_overflow_active.values()],
             *[var.value() for var in injection_limit_choice.values()],
             *[var.value() for var in well_choice.values()],
+            *[var.value() for var in automatic_well_regime.values()],
             *(
                 [var.value() for var in terminal_cleanup_model.binary_variables]
                 if terminal_cleanup_model is not None
@@ -2858,6 +2969,7 @@ def solve_full_scenario_with_cplex(
             "overflow": list(source_overflow_active.values()),
             "injection": [
                 *well_choice.values(),
+                *automatic_well_regime.values(),
                 *injection_limit_choice.values(),
             ],
             "cleanup": (
@@ -3015,6 +3127,7 @@ def solve_full_scenario_with_cplex(
         departures=departures,
         arrivals=arrivals,
         injection_tph=injection_tph,
+        well_request_tph_by_hour=well_request_tph_by_hour,
         vessel_actions_by_hour=vessel_actions_by_hour,
         well_rate_indices_by_hour=well_rate_indices_by_hour,
         native_actions_by_hour=native_actions_by_hour,
@@ -3119,7 +3232,10 @@ def replay_full_scenario_cplex_plan(
     )
     report = replay_native_actions(
         env,
-        result.native_actions_by_hour,
+        [
+            action_for_well_control_mode(env, action)
+            for action in result.native_actions_by_hour
+        ],
         horizon_h=result.horizon_h,
         expected=expectation,
         tolerances=ReplayTolerances(
@@ -3431,7 +3547,10 @@ def _seed_terminal_cleanup_mip_start(
     replay_env = copy.deepcopy(env)
     replay = replay_native_actions(
         replay_env,
-        native_actions_by_hour,
+        [
+            action_for_well_control_mode(replay_env, action)
+            for action in native_actions_by_hour
+        ],
         horizon_h=horizon_h,
         copy_env=False,
     )
@@ -3493,11 +3612,20 @@ def _apply_native_action_mip_start(
     source_overflow_active=None,
     terminal_stock=None,
     well_inj=None,
+    automatic_well_request=None,
+    automatic_well_regime=None,
+    automatic_well_physical_max=None,
     injection_limit_choice=None,
     vent=None,
     shortfall=None,
     required_storage_t: float | None = None,
 ) -> None:
+    if getattr(env, "automatic_well_control", False):
+        native_actions_by_hour = _automatic_well_warm_start_actions(
+            env,
+            native_actions_by_hour,
+            horizon_h,
+        )
     for var in arc_vars.values():
         var.setInitialValue(0)
     selected_arc_indices, selected_wait_node = (
@@ -3519,6 +3647,39 @@ def _apply_native_action_mip_start(
                 continue
             for candidate in well_rate_options[(well_id, t)]:
                 well_choice[(well_id, t, candidate)].setInitialValue(1 if candidate == rate_index else 0)
+            if automatic_well_request is not None:
+                rate_tph = float(
+                    native_actions_by_hour[t]
+                    .get("well_rates_tph", [0.0] * len(env.well_ids))[
+                        well_index
+                    ]
+                )
+                _set_start_value(
+                    automatic_well_request,
+                    (well_id, t),
+                    rate_tph,
+                )
+                physical_max_tph = float(
+                    (automatic_well_physical_max or {}).get(
+                        (well_id, t),
+                        0.0,
+                    )
+                )
+                selected_regime = (
+                    "off"
+                    if rate_tph <= 1e-9
+                    else (
+                        "physical"
+                        if abs(rate_tph - physical_max_tph) <= 1e-7
+                        else "pressure"
+                    )
+                )
+                for regime in ("off", "physical", "pressure"):
+                    _set_start_value(
+                        automatic_well_regime,
+                        (well_id, t, regime),
+                        1 if regime == selected_regime else 0,
+                    )
 
     if scenario is None:
         return
@@ -3663,6 +3824,41 @@ def _warm_start_well_rate_index(native_actions_by_hour: list[dict[str, list[int]
         return int(native_actions_by_hour[t]["wells"][well_index])
     except (IndexError, KeyError, TypeError, ValueError):
         return 0
+
+
+def _automatic_well_warm_start_actions(
+    env,
+    native_actions_by_hour: list[dict[str, list[int]]],
+    horizon_h: int,
+) -> list[dict[str, list[int]]]:
+    replay_env = copy.deepcopy(env)
+    augmented: list[dict[str, list[int]]] = []
+    for t, raw_action in enumerate(native_actions_by_hour):
+        action = action_for_well_control_mode(replay_env, raw_action)
+        with_wells = {
+            "vessels": list(action["vessels"]),
+            "wells": [0 for _well_id in replay_env.well_ids],
+            "well_rates_tph": replay_env.automatic_well_rates_tph(),
+        }
+        augmented.append(with_wells)
+        if t + 1 >= horizon_h:
+            continue
+        try:
+            replay_env.step(action)
+        except (RuntimeError, ValueError):
+            break
+    augmented.extend(
+        {
+            "vessels": [
+                int(value)
+                for value in raw_action.get("vessels", [])
+            ],
+            "wells": [0 for _well_id in env.well_ids],
+            "well_rates_tph": [0.0 for _well_id in env.well_ids],
+        }
+        for raw_action in native_actions_by_hour[len(augmented):]
+    )
+    return augmented
 
 
 def _native_action_destination(env, vessel_id: str, action: int) -> str | None:
@@ -3965,6 +4161,15 @@ def _native_action_limit_tie_audit(
 
 def _warm_start_well_requests(env, well_rate_options, native_actions_by_hour, t: int) -> dict[str, float]:
     requests: dict[str, float] = {}
+    if env.automatic_well_control:
+        rates_tph = native_actions_by_hour[t].get(
+            "well_rates_tph",
+            [0.0 for _well_id in env.well_ids],
+        )
+        return {
+            well_id: float(rate_tph)
+            for well_id, rate_tph in zip(env.well_ids, rates_tph)
+        }
     for well_index, well_id in enumerate(env.well_ids):
         rate_index = _warm_start_well_rate_index(native_actions_by_hour, well_index, t)
         if rate_index not in well_rate_options[(well_id, t)]:
@@ -4017,10 +4222,7 @@ def _replay_native_action_unloads(
     for t in range(min(horizon_h, len(native_actions_by_hour))):
         raw = native_actions_by_hour[t]
         try:
-            action = {
-                "vessels": [int(value) for value in raw["vessels"]],
-                "wells": [int(value) for value in raw["wells"]],
-            }
+            action = action_for_well_control_mode(replay_env, raw)
         except (KeyError, TypeError, ValueError):
             break
         if not _native_action_is_executable(replay_env, action):
@@ -4058,10 +4260,14 @@ def _replay_native_action_unloads(
 
 
 def _native_action_is_executable(env, action: dict[str, list[int]]) -> bool:
-    for choices, masks in (
+    choices_and_masks = [
         (action["vessels"], env.vessel_action_mask()),
-        (action["wells"], env.well_rate_action_mask()),
-    ):
+    ]
+    if not getattr(env, "automatic_well_control", False):
+        choices_and_masks.append(
+            (action["wells"], env.well_rate_action_mask())
+        )
+    for choices, masks in choices_and_masks:
         if len(choices) != len(masks):
             return False
         if any(choice < 0 or choice >= len(mask) or not mask[choice] for choice, mask in zip(choices, masks)):
@@ -4121,6 +4327,7 @@ def _empty_result() -> FullScenarioCplexMilpResult:
         departures={},
         arrivals={},
         injection_tph=[],
+        well_request_tph_by_hour={},
         vessel_actions_by_hour={},
         well_rate_indices_by_hour={},
         native_actions_by_hour=[],
@@ -4549,6 +4756,12 @@ def _wait_expr(arc_vars, wait_arc: dict[tuple[str, str, int], int], vessel_id: s
 
 
 def _well_rate_options_by_hour(env, scenario: Scenario, horizon_h: int) -> dict[tuple[str, int], list[int]]:
+    if env.automatic_well_control:
+        return {
+            (well_id, t): [0]
+            for well_id in env.well_ids
+            for t in range(horizon_h)
+        }
     start_step = scenario.step_index(_current_start_hour(env))
     options: dict[tuple[str, int], list[int]] = {}
     for t in range(horizon_h):
@@ -4558,7 +4771,17 @@ def _well_rate_options_by_hour(env, scenario: Scenario, horizon_h: int) -> dict[
         for well_id in env.well_ids:
             physical_max = _physical_well_max_tph(env, future_state, well_id)
             if _uses_single_well_dynamic_bhp(env, well_id):
-                mask = tuple(mtpa_to_tph(rate_mtpa) <= physical_max + 1e-9 for rate_mtpa in WELL_RATE_LEVELS_MTPA)
+                well = env.network.entities[well_id]
+                assert isinstance(well, InjectionWell)
+                mask = tuple(
+                    mtpa_to_tph(rate_mtpa) <= physical_max + 1e-9
+                    and (
+                        rate_mtpa <= 1e-12
+                        or mtpa_to_tph(rate_mtpa)
+                        >= well.min_stable_injection_tph - 1e-9
+                    )
+                    for rate_mtpa in WELL_RATE_LEVELS_MTPA
+                )
             else:
                 mask = pressure_limited_rate_level_mask(
                     env.network,
@@ -4574,6 +4797,23 @@ def _well_rate_options_by_hour(env, scenario: Scenario, horizon_h: int) -> dict[
     return options
 
 
+def _physical_well_max_by_hour(
+    env,
+    scenario: Scenario,
+    horizon_h: int,
+) -> dict[tuple[str, int], float]:
+    start_step = scenario.step_index(_current_start_hour(env))
+    return {
+        (well_id, t): _physical_well_max_tph(
+            env,
+            _future_state_for_step(env, scenario, start_step + t),
+            well_id,
+        )
+        for well_id in env.well_ids
+        for t in range(horizon_h)
+    }
+
+
 def _uses_single_well_dynamic_bhp(env, well_id: str) -> bool:
     reservoir_id = env.network._single_downstream_of_type(well_id, Reservoir)
     if reservoir_id is None:
@@ -4586,7 +4826,175 @@ def _uses_single_well_dynamic_bhp(env, well_id: str) -> bool:
     return upstream_wells == [well_id]
 
 
-def _add_single_well_dynamic_bhp_constraints(prob, env, well_inj, horizon_h: int) -> None:
+def _add_continuous_automatic_well_request_constraints(
+    prob,
+    env,
+    scenario,
+    well_request,
+    well_regime,
+    well_inj,
+    physical_max_by_hour,
+    horizon_h: int,
+) -> None:
+    """Make the MILP reproduce continuous maximum-feasible well control."""
+    if not getattr(env, "automatic_well_control", False):
+        return
+
+    state = env.simulator.state
+    start_step = scenario.step_index(_current_start_hour(env))
+    start_h = _current_start_hour(env)
+    dt = float(env.network.time_step_hours)
+    for well_id in env.well_ids:
+        if not _uses_single_well_dynamic_bhp(env, well_id):
+            for t in range(horizon_h):
+                future_state = _future_state_for_step(
+                    env,
+                    scenario,
+                    start_step + t,
+                )
+                interval_start_h = future_state.time_h
+                maximum_rate_tph = maximum_feasible_well_rate_tph(
+                    env.network,
+                    future_state,
+                    well_id,
+                    physical_max_by_hour[(well_id, t)],
+                    evaluation_time_h=(
+                        interval_start_h
+                        + env.network.time_step_hours
+                    ),
+                    interval_start_h=interval_start_h,
+                )
+                prob += well_request[(well_id, t)] == maximum_rate_tph
+            continue
+
+        reservoir_id = env.network._single_downstream_of_type(
+            well_id,
+            Reservoir,
+        )
+        reservoir = env.network.entities[reservoir_id]
+        assert isinstance(reservoir, Reservoir)
+        alpha = _reservoir_pressure_bar_per_tonne(reservoir)
+        initial_inventory_t = float(
+            state.entity_inventory_t.get(reservoir_id, 0.0)
+        )
+        reservoir_pressure_const = (
+            reservoir.initial_pressure_bar + alpha * initial_inventory_t
+        )
+        limit_bar = float(reservoir.well_bottomhole_pressure_limit_bar)
+        well = env.network.entities[well_id]
+        assert isinstance(well, InjectionWell)
+
+        for t in range(horizon_h):
+            physical_max_tph = physical_max_by_hour[(well_id, t)]
+            request = well_request[(well_id, t)]
+            off = well_regime[(well_id, t, "off")]
+            physical = well_regime[(well_id, t, "physical")]
+            pressure = well_regime[(well_id, t, "pressure")]
+            prob += off + physical + pressure == 1
+
+            if (
+                physical_max_tph <= 1e-12
+                or physical_max_tph
+                < well.min_stable_injection_tph - 1e-9
+            ):
+                prob += request == 0
+                prob += off == 1
+                continue
+
+            evaluation_h = start_h + (t + 1) * dt
+            response_const, response_coeffs = (
+                _single_well_line_source_response_terms(
+                    env,
+                    well_id,
+                    horizon_index=t,
+                    evaluation_h=evaluation_h,
+                )
+            )
+            pressure_coeffs = [
+                alpha * dt + response_coeffs[tau]
+                for tau in range(t + 1)
+            ]
+            pressure_before_current = (
+                reservoir_pressure_const
+                + response_const
+                + pulp.lpSum(
+                    pressure_coeffs[tau] * well_inj[(well_id, tau)]
+                    for tau in range(t)
+                )
+            )
+            max_pressure_span = abs(
+                reservoir_pressure_const + response_const - limit_bar
+            )
+            for tau in range(t + 1):
+                max_pressure_span += (
+                    physical_max_by_hour[(well_id, tau)]
+                    * abs(pressure_coeffs[tau])
+                )
+            pressure_big_m = max(1.0, max_pressure_span + 1.0)
+            current_pressure_coefficient = pressure_coeffs[t]
+            pressure_at_request = (
+                pressure_before_current
+                + current_pressure_coefficient * request
+            )
+            pressure_at_physical_max = (
+                pressure_before_current
+                + current_pressure_coefficient * physical_max_tph
+            )
+
+            prob += request <= physical_max_tph * (1 - off)
+            if well.min_stable_injection_tph > 1e-12:
+                prob += request >= (
+                    well.min_stable_injection_tph * (1 - off)
+                )
+            off_threshold_rate = max(
+                0.0,
+                float(well.min_stable_injection_tph),
+            )
+            off_threshold_pressure = (
+                pressure_before_current
+                + current_pressure_coefficient * off_threshold_rate
+            )
+            off_margin = (
+                1e-7
+                if well.min_stable_injection_tph > 1e-12
+                else 0.0
+            )
+            prob += off_threshold_pressure >= (
+                limit_bar
+                + off_margin
+                - pressure_big_m * (1 - off)
+            )
+
+            prob += request >= (
+                physical_max_tph
+                - physical_max_tph * (1 - physical)
+            )
+            prob += pressure_at_physical_max <= (
+                limit_bar + pressure_big_m * (1 - physical)
+            )
+
+            if current_pressure_coefficient <= 1e-12:
+                prob += pressure == 0
+            else:
+                prob += pressure_at_request <= (
+                    limit_bar + pressure_big_m * (1 - pressure)
+                )
+                prob += pressure_at_request >= (
+                    limit_bar - pressure_big_m * (1 - pressure)
+                )
+
+
+def _add_single_well_dynamic_bhp_constraints(
+    prob,
+    env,
+    well_inj,
+    horizon_h: int,
+    *,
+    well_choice=None,
+    well_rate_options=None,
+    automatic_well_regime=None,
+    automatic_well_physical_max=None,
+) -> None:
     """Add decision-dependent BHP constraints for true single-well reservoirs.
 
     Multi-well interference is intentionally left to the existing pressure mask
@@ -4618,7 +5026,54 @@ def _add_single_well_dynamic_bhp_constraints(prob, env, well_inj, horizon_h: int
                 response_coeffs[tau] * well_inj[(well_id, tau)]
                 for tau in range(t + 1)
             )
-            prob += reservoir_pressure_const + alpha * cumulative_injected_expr + line_source_expr <= limit_bar
+            pressure_expr = (
+                reservoir_pressure_const
+                + alpha * cumulative_injected_expr
+                + line_source_expr
+            )
+            automatic_off = (
+                automatic_well_regime.get((well_id, t, "off"))
+                if automatic_well_regime
+                else None
+            )
+            if (
+                automatic_off is None
+                and (well_choice is None or well_rate_options is None)
+            ):
+                prob += pressure_expr <= limit_bar
+                continue
+
+            maximum_pressure_span = abs(
+                reservoir_pressure_const + response_const - limit_bar
+            )
+            for tau in range(t + 1):
+                if automatic_well_regime:
+                    maximum_rate_tph = float(
+                        automatic_well_physical_max[
+                            (well_id, tau)
+                        ]
+                    )
+                else:
+                    maximum_rate_tph = max(
+                        (
+                            mtpa_to_tph(WELL_RATE_LEVELS_MTPA[index])
+                            for index in well_rate_options[(well_id, tau)]
+                        ),
+                        default=0.0,
+                    )
+                maximum_pressure_span += maximum_rate_tph * abs(
+                    alpha * dt + response_coeffs[tau]
+                )
+            pressure_big_m = max(1.0, maximum_pressure_span + 1.0)
+            off_indicator = (
+                automatic_off
+                if automatic_off is not None
+                else well_choice[(well_id, t, 0)]
+            )
+            prob += pressure_expr <= (
+                limit_bar
+                + pressure_big_m * off_indicator
+            )
 
 
 def _reservoir_pressure_bar_per_tonne(reservoir: Reservoir) -> float:

@@ -4,6 +4,7 @@ import pytest
 
 from experiments import iterative_q_data_common as common
 from sim.control.event_based.rl.observation_encoder import (
+    future_summary_observation,
     high_level_observation,
 )
 
@@ -49,7 +50,7 @@ def test_iterative_q_window_policy_state_excludes_v4_future_aggregates():
     names = common.state_feature_names(wrapper)
 
     assert observation["state"].shape == (len(names),)
-    assert not any("mean_24h" in name or "mean_72h" in name for name in names)
+    assert not any("mean_168h" in name for name in names)
 
 
 def test_iterative_q_future_summary_exactly_matches_v4():
@@ -59,9 +60,26 @@ def test_iterative_q_future_summary_exactly_matches_v4():
     summary = common.v4_future_summary(wrapper)
     names = common.v4_future_feature_names(wrapper)
 
-    assert summary.shape == (14,)
-    assert len(names) == 14
-    assert summary == pytest.approx(high_level_observation(wrapper.env)[-14:])
+    assert summary.shape == (7,)
+    assert len(names) == 7
+    assert summary == pytest.approx(high_level_observation(wrapper.env)[-7:])
+    assert not any("valid_fraction" in name for name in names)
+
+
+def test_iterative_q_uses_shared_configurable_future_summary():
+    args = _args(0.5)
+    args.future_summary_windows_h = (168,)
+    wrapper = common.make_event_env(args)
+    wrapper.reset_native_seed(123)
+
+    summary = common.v4_future_summary(wrapper)
+    names = common.v4_future_feature_names(wrapper)
+
+    assert summary.shape == (7,)
+    assert len(names) == 7
+    assert summary == pytest.approx(
+        future_summary_observation(wrapper.env, (168,))
+    )
 
 
 def test_unified_window_protocol_uses_one_fixed_configuration():
@@ -71,6 +89,9 @@ def test_unified_window_protocol_uses_one_fixed_configuration():
     first.reset(seed=123)
     config = first.scenario_generator.normal.config
 
+    assert first.automatic_well_control
+    assert first.well_rate_action_dims == []
+    assert "wells" not in common.greedy_shuttle_policy(first)
     assert config.capture_noise_std == pytest.approx(0.30)
     assert config.capture_high_output_rate_per_week == pytest.approx(0.5)
     assert config.capture_high_output_mean_hours == pytest.approx(48.0)

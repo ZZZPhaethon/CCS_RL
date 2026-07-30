@@ -23,6 +23,9 @@ from sim.control.event_based.residual_rl_v4.factory import (
     make_tail_robust_native_env,
 )
 from sim.control.event_based.rl.reward import HighLevelRewardConfig
+from sim.control.event_based.rl.observation_encoder import (
+    FORECAST_WINDOWS_H,
+)
 from sim.control.native_mpc import RollingNativeMpcController
 from sim.environment.event_residual_gym import EventJointResidualGymEnv
 
@@ -89,6 +92,13 @@ def _residual_env(config: dict):
         scenario=str(config["scenario"]),
         episode_hours=int(config["episode_hours"]),
         forecast_context_hours=int(config["forecast_context_hours"]),
+        future_summary_windows_h=tuple(
+            int(value)
+            for value in config.get(
+                "future_summary_windows_h",
+                FORECAST_WINDOWS_H,
+            )
+        ),
         decision_interval_h=float(config["decision_interval_h"]),
         event_triggered=bool(config["event_triggered"]),
         weather_mode=str(config["weather_mode"]),

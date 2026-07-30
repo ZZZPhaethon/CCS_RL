@@ -10,8 +10,11 @@ from scripts import compare_forecast_encoders_rl as compare
 
 from sim.control.baselines import greedy_shuttle_policy
 from sim.control.event_based.rl.observation_encoder import (
+    FORECAST_WINDOWS_H,
+    FUTURE_SUMMARY_REPRESENTATION_ID,
     future_summary_feature_names,
     future_summary_observation,
+    validated_future_summary_windows,
 )
 from sim.control.event_based.residual_rl_v4.scenario import (
     ReplayableDifficultyScenarioGenerator,
@@ -27,6 +30,7 @@ from sim.environment.vessel_mode import (
     vessel_operation_mode_feature_names,
     vessel_sailing_destination_feature_names,
 )
+from sim.simulator import SimulatorStepCounter
 
 
 DEFAULT_VARIANT = "future_mlp_mode_destination"
@@ -53,6 +57,12 @@ def add_scenario_protocol_arguments(parser) -> None:
         type=int,
         default=168,
     )
+    parser.add_argument(
+        "--future-summary-windows-h",
+        type=int,
+        nargs="*",
+        default=list(FORECAST_WINDOWS_H),
+    )
 
 
 def _compare_args(args):
@@ -74,7 +84,10 @@ def _compare_args(args):
     )
 
 
-def make_native_env(args):
+def make_native_env(
+    args,
+    simulator_step_counter: SimulatorStepCounter | None = None,
+):
     protocol = str(getattr(args, "scenario_protocol", "q_original"))
     if protocol == "q_original":
         env = compare.make_experiment_env(
@@ -110,10 +123,14 @@ def make_native_env(args):
                 operating_cost_weight=1.0,
                 enforce_full_load_dispatch=False,
                 require_empty_terminal_departure=True,
+                well_control_mode="automatic_max",
             ),
+            simulator_step_counter=simulator_step_counter,
         )
     else:  # pragma: no cover - guarded by CLI choices
         raise ValueError(f"unknown scenario protocol: {protocol}")
+    if simulator_step_counter is not None:
+        env.simulator_step_counter = simulator_step_counter
     env.config.reward_scale = float(args.reward_scale)
     return env
 
@@ -135,14 +152,25 @@ def scenario_difficulties(args) -> dict[str, str]:
     }
 
 
-def make_event_env(args) -> EventJointResidualGymEnv:
-    return EventJointResidualGymEnv(
-        make_native_env(args),
+def make_event_env(
+    args,
+    simulator_step_counter: SimulatorStepCounter | None = None,
+) -> EventJointResidualGymEnv:
+    wrapper = EventJointResidualGymEnv(
+        make_native_env(args, simulator_step_counter),
         str(args.variant),
         include_episode_progress=True,
         greedy_control_variate=False,
         hourly_gamma=1.0,
     )
+    wrapper.future_summary_windows_h = validated_future_summary_windows(
+        getattr(
+            args,
+            "future_summary_windows_h",
+            FORECAST_WINDOWS_H,
+        )
+    )
+    return wrapper
 
 
 def metrics(env) -> dict[str, float]:
@@ -159,10 +187,14 @@ def metrics(env) -> dict[str, float]:
     }
 
 
-def greedy_baseline(args, seed: int) -> tuple[np.ndarray, dict[str, float]]:
+def greedy_baseline(
+    args,
+    seed: int,
+    simulator_step_counter: SimulatorStepCounter | None = None,
+) -> tuple[np.ndarray, dict[str, float]]:
     """Run Greedy once and retain its hourly economic rewards."""
 
-    env = make_native_env(args)
+    env = make_native_env(args, simulator_step_counter)
     env.reset(seed=int(seed))
     rewards = []
     while env.t < env.n_steps:
@@ -185,7 +217,7 @@ def event_residual_reward(
 def empty_candidate_arrays(wrapper, max_events: int) -> dict[str, np.ndarray]:
     state_shape = wrapper.observation_space["state"].shape
     try:
-        future_shape = future_summary_observation(wrapper.env).shape
+        future_shape = v4_future_summary(wrapper).shape
     except AttributeError:
         future_shape = (0,)
     action_count = int(wrapper.action_space.n)
@@ -238,11 +270,27 @@ def state_feature_names(wrapper) -> list[str]:
 def v4_future_summary(wrapper) -> np.ndarray:
     """Return the exact future-summary vector exposed to residual PPO v4."""
 
-    return future_summary_observation(wrapper.env)
+    return future_summary_observation(
+        wrapper.env,
+        getattr(
+            wrapper,
+            "future_summary_windows_h",
+            FORECAST_WINDOWS_H,
+        ),
+    )
 
 
 def v4_future_feature_names(wrapper) -> list[str]:
-    return list(future_summary_feature_names(wrapper.env))
+    return list(
+        future_summary_feature_names(
+            wrapper.env,
+            getattr(
+                wrapper,
+                "future_summary_windows_h",
+                FORECAST_WINDOWS_H,
+            ),
+        )
+    )
 
 
 def stack_records(records: list[dict[str, object]]) -> dict[str, np.ndarray]:

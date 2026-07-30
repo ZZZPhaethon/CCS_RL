@@ -91,6 +91,7 @@ def main() -> None:
     if model_configuration.get("q_head") not in {
         "iterative_action_q",
         "iterative_action_q_future_v4_24_72",
+        "iterative_action_q_future_summary",
     }:
         raise ValueError("checkpoint is not an iterative Q model")
 

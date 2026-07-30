@@ -1,9 +1,9 @@
 """Gymnasium adapter so RL libraries can train against :class:`CCSEnv`.
 
 ``CCSGymEnv`` exposes the native env as a standard ``gymnasium.Env`` with a flat
-``MultiDiscrete`` action space: vessel destinations followed by discrete well
-rate-level indices. ``action_masks()`` exposes the flattened vessel and well
-masks in the same dimension order for policies that support discrete masking.
+``MultiDiscrete`` action space. Formal ``automatic_max`` environments contain
+vessel destinations only; legacy ``agent_selected`` environments append
+discrete well rate-level indices. ``action_masks()`` follows the same order.
 
 The episode boundary is reported as ``truncated`` (never ``terminated``), which
 tells the trainer to bootstrap ``V(s_T)`` instead of zeroing the future - the
@@ -43,8 +43,8 @@ def flat_action_from_native(env: CCSEnv, native: dict[str, list]) -> np.ndarray:
     Inverse of :func:`native_action_from_flat`: ``[vessels..., wells...]``.
     """
     vessels = [int(a) for a in native["vessels"]]
-    wells = [int(a) for a in native["wells"]]
-    expected = len(env.vessel_ids) + len(env.well_ids)
+    wells = [int(a) for a in native.get("wells", [])]
+    expected = len(env.vessel_ids) + len(env.well_rate_action_dims)
     flat = vessels + wells
     if len(flat) != expected:
         raise ValueError(f"Expected {expected} flat action entries, got {len(flat)}.")
@@ -55,14 +55,16 @@ def native_action_from_flat(env: CCSEnv, action) -> dict[str, list[int]]:
     """Split a flat MultiDiscrete action into the native env action dict."""
     flat = np.asarray(action, dtype=np.int64).reshape(-1)
     vessel_count = len(env.vessel_ids)
-    well_count = len(env.well_ids)
+    well_count = len(env.well_rate_action_dims)
     expected = vessel_count + well_count
     if len(flat) != expected:
         raise ValueError(f"Expected {expected} flat action entries, got {len(flat)}.")
-    return {
+    native = {
         "vessels": [int(a) for a in flat[:vessel_count]],
-        "wells": [int(a) for a in flat[vessel_count:expected]],
     }
+    if well_count:
+        native["wells"] = [int(a) for a in flat[vessel_count:expected]]
+    return native
 
 
 class CCSGymEnv(gym.Env):

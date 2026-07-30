@@ -8,6 +8,9 @@ from experiments.generate_iterative_q_greedy_data import (
     select_dense_actions,
     select_root_fractions,
 )
+from sim.control.event_based.rl.observation_encoder import (
+    FUTURE_SUMMARY_REPRESENTATION_ID,
+)
 
 
 class _Residual:
@@ -80,9 +83,20 @@ def test_small_dense_dataset_has_paired_actions_and_aligned_returns(tmp_path):
     )
     summary = generate_dataset(args)
     assert summary["candidates"] > 1
+    assert summary["simulator_step_calls"] > args.episode_hours
+    assert summary["simulator_hour_steps"] == summary["simulator_step_calls"]
     with np.load(out_path, allow_pickle=False) as data:
         metadata = json.loads(str(data["metadata_json"]))
         assert metadata["uses_mpc"] is False
+        assert (
+            metadata["future_summary_representation_id"]
+            == FUTURE_SUMMARY_REPRESENTATION_ID
+        )
+        assert metadata["future_summary_windows_h"] == [168]
+        assert (
+            metadata["training_simulator_usage"]["simulator_step_calls"]
+            == summary["simulator_step_calls"]
+        )
         assert len(np.unique(data["root_time_h"])) == 1
         assert len(np.unique(data["actions"][:, 0])) == len(data["actions"])
         expected = 1e-5 * (

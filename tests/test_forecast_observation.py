@@ -111,25 +111,19 @@ def test_last_rl_step_still_has_full_forecast_context():
     assert forecast[-1, 8] == env.scenario.vessel_speed_factor[vessel_id][886]
 
 
-def test_masked_forecast_hides_post_episode_context():
+def test_masked_forecast_uses_post_episode_read_only_context():
     env = _env(hours=720)
     env.reset(seed=7)
     env.simulator.state.time_h = 700.0
     forecast = np.asarray(masked_future_forecast_observation(env))
     assert forecast.shape == (168, 10)
-    assert np.all(forecast[:20, -1] == 1.0)
-    assert np.all(forecast[20:, -1] == 0.0)
-    assert np.all(forecast[20:, :-1] == 0.0)
+    assert np.all(forecast[:, -1] == 1.0)
 
     summary = masked_forecast_summary(forecast, (24, 72, 168))
-    assert summary.shape == (24,)
-    np.testing.assert_allclose(
-        summary[[7, 15, 23]],
-        [20 / 24, 20 / 72, 20 / 168],
-    )
+    assert summary.shape == (21,)
+    assert np.isfinite(summary).all()
     bands = masked_forecast_band_summary(
         forecast, ((0, 24), (24, 72), (72, 168))
     )
-    assert bands.shape == (24,)
+    assert bands.shape == (21,)
     assert np.isfinite(bands).all()
-    np.testing.assert_allclose(bands[[7, 15, 23]], [20 / 24, 0.0, 0.0])

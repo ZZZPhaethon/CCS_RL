@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from experiments import iterative_q_data_common as common
+from sim.simulator import SimulatorStepCounter
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -80,8 +81,14 @@ def select_dense_actions(wrapper, rng, max_two: int, max_three: int) -> np.ndarr
     return np.asarray(selected, dtype=np.int64)
 
 
-def prepare_root(args, seed, target_root_h, greedy_rewards):
-    wrapper = common.make_event_env(args)
+def prepare_root(
+    args,
+    seed,
+    target_root_h,
+    greedy_rewards,
+    simulator_step_counter=None,
+):
+    wrapper = common.make_event_env(args, simulator_step_counter)
     observation, _info = wrapper.reset_native_seed(int(seed))
     rollin_residual = 0.0
     done = False
@@ -171,12 +178,23 @@ def generate_dataset(args):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     records = []
     root_action_counts = []
+    simulator_step_counter = SimulatorStepCounter()
     for seed in args.seeds:
-        greedy_rewards, baseline_metrics = common.greedy_baseline(args, int(seed))
+        greedy_rewards, baseline_metrics = common.greedy_baseline(
+            args,
+            int(seed),
+            simulator_step_counter,
+        )
         candidate_index = 0
         for root_index, root_fraction in select_root_fractions(args, int(seed)):
             target_root_h = int(round(float(root_fraction) * args.episode_hours))
-            root = prepare_root(args, seed, target_root_h, greedy_rewards)
+            root = prepare_root(
+                args,
+                seed,
+                target_root_h,
+                greedy_rewards,
+                simulator_step_counter,
+            )
             rng = np.random.default_rng(
                 np.random.SeedSequence(
                     [int(args.dataset_seed), int(seed), int(root_index)]
@@ -201,7 +219,7 @@ def generate_dataset(args):
                 )
                 candidate_index += 1
     data = common.stack_records(records)
-    schema_wrapper = common.make_event_env(args)
+    schema_wrapper = common.make_event_env(args, simulator_step_counter)
     schema_wrapper.reset_native_seed(int(args.seeds[0]))
     metadata = {
         "kind": "iterative_q_greedy_rollin_data",
@@ -212,6 +230,12 @@ def generate_dataset(args):
         "observation_variant": str(args.variant),
         "state_feature_names": common.state_feature_names(schema_wrapper),
         "future_feature_names": common.v4_future_feature_names(schema_wrapper),
+        "future_summary_representation_id": (
+            common.FUTURE_SUMMARY_REPRESENTATION_ID
+        ),
+        "future_summary_windows_h": list(
+            schema_wrapper.future_summary_windows_h
+        ),
         "joint_actions": schema_wrapper._joint_action_array.tolist(),
         "follow_indices": schema_wrapper.residual_env.follow_indices.tolist(),
         "follow_action_index": int(schema_wrapper.follow_action()),
@@ -227,6 +251,7 @@ def generate_dataset(args):
             if args.roots_per_seed is None
             else args.roots_per_seed
         ),
+        "training_simulator_usage": simulator_step_counter.snapshot().as_dict(),
         "configuration": vars(args),
     }
     data["metadata_json"] = np.asarray(json.dumps(metadata, separators=(",", ":")))
@@ -242,6 +267,7 @@ def generate_dataset(args):
         "worse_candidates": int((delta > 1e-6).sum()),
         "mean_delta_cost_eur": float(delta.mean()),
         "best_delta_cost_eur": float(delta.min()),
+        **simulator_step_counter.snapshot().as_dict(),
     }
     print(json.dumps(summary, indent=2), flush=True)
     return summary

@@ -2,95 +2,153 @@
   <img src="assets/logo.png" alt="Logo" width="400"/>
 </h1>
 <h3 align="center">
-A Physical Simulation, Optimization Control, and Reinforcement Learning Playground for Ship-Based CCUS Chains
+Physics-Constrained Simulation and Learned Dispatch Control for Ship-Based CCS Chains
 </h3>
 <p align="center">
   Languages: English | <a href="README_CN.md">简体中文</a>
 </p>
 
 <p align="center">
-  <a href=""><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue" alt="Hugging Face Spaces"></a>
-  <a href=""><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"></a>
-  <a href=""><img src="https://img.shields.io/badge/arXiv-2512.23273-b31b1b.svg" alt="arXiv"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="MIT"></a>
-  <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white" alt="Google Drive Dataset"></a>
+  <img src="https://img.shields.io/badge/python-%E2%89%A53.10-blue?style=flat-square" alt="Python >=3.10">
+  <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white&style=flat-square" alt="Google Drive Dataset"></a>
 </p>
-
-<h3 align="center">🎉 First version of CCUS operations optimization 🎉</h3>
 
 <p align="center">
   <img src="assets/Overview.png" alt="CCUS teaser" width="95%">
 </p>
-CCS_RLLLM is a modular research codebase for ship-based carbon capture, transport, terminal receiving, pipeline transfer, and injection workflows. The current implementation uses Northern Lights as the primary reference scenario and brings physical-layer simulation, action protocols, rule-based controllers, MILP/MPC, RL environments, disturbance generation, and visualization dashboards into one reproducible experiment framework.
 
-The core chain is:
+CCS_RLLLM is a research codebase for **hourly operational dispatch of ship-based CO₂
+transport and storage**. It combines a physics-constrained simulator of the full CCS chain
+with a family of controllers — heuristics, rolling MILP, PPO variants, and the current main
+method **Iterative Action-Q** — evaluated against each other under one frozen disturbance and
+information protocol.
+
+The physical chain is:
 
 ```text
 Emitter -> Vessel -> Terminal -> Pipeline -> SubseaManifold -> InjectionWell -> Reservoir
 ```
 
-High-level controllers, MILP solvers, RL policies, or experiment scripts submit actions. The physical layer validates those actions, advances vessel movement, updates capture, inventory, unloading, transport, injection, and pressure states, and returns auditable trajectories and KPIs.
+Controllers only decide **vessel dispatch**. Injection is handled by a shared automatic
+well controller that always takes the highest feasible rate, so no method gains an advantage
+by relaxing physics. `src/sim/` is the single source of physical truth: it validates every
+action, advances capture, sailing, loading, unloading, injection and reservoir pressure, and
+returns auditable trajectories, cost ledgers and KPIs.
 
-## Highlights
+---
 
-- **End-to-end CCUS logistics simulation:** Covers emitters, LCO2 vessels, terminals, pipelines, subsea manifolds, injection wells, and reservoirs.
-- **Decoupled action protocol and physics layer:** `sim.actions` defines action representation and resolution, while `sim.control` focuses on control decisions.
-- **Multiple controller families:** Includes idle/greedy baselines, rule-based controllers, static MILP benchmarks, rolling MILP/MPC, and RL policies.
-- **Reproducible scenarios:** `scenarios/` stores Northern Lights Phase 1/Phase 2 JSON scenarios, and `data/capture_rates/` stores capture-rate profiles.
-- **Disturbance and weather modeling:** Includes capture outages, maintenance, wave-height scenarios, and vessel-speed effects.
-- **Training and evaluation loop:** Provides a Gymnasium/SB3 adapter, PPO/BC training scripts, controller comparison experiments, and HTML dashboard outputs.
+## Research question
 
-## Roadmap
+> In a three-vessel CCS transport–storage system with weather, capture and injection-capacity
+> disturbances, can a method that keeps Greedy as its safe default and learns a **small number
+> of high-value interventions** from counterfactual rollouts reduce total cost and CO₂ venting
+> at low online decision cost?
 
-- [x] Physical entities, operation modules, and network step.
-- [x] Northern Lights Phase 1/Phase 2 scenario configuration.
-- [x] Action proposal/resolver protocol layer.
-- [x] Rule-based, MILP, and rolling MILP/MPC controllers.
-- [x] Gymnasium/SB3 RL environment and training entry points.
-- [x] Controller comparison, KPI aggregation, and dashboard generation.
-- [x] Wave-height scenarios, prediction models, and vessel-speed disturbances.
-- [ ] Unified experiment configuration files and CLI entry points.
-- [ ] Package large external datasets and model weights as downloadable release assets.
-- [ ] Move `economics.py` and `metrics.py` into an evaluation package.
-- [ ] Replace personal paths in HPC scripts with environment-variable configuration.
+This is the hypothesis under test, not a settled result. The full argument structure lives in
+[`docs/paper_structure_zh.md`](docs/paper_structure_zh.md); the experiment design is locked in
+[`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md).
 
-## Environment Requirements
+## Method — Iterative Action-Q
 
-- Python `>=3.10`; the current GPU training environment uses Python 3.12.
-- `uv` for dependency resolution, virtual environment creation, and script execution.
-- Core physical-layer dependencies: `searoute>=1.6`, `CoolProp>=6.6`.
-- Optional RL dependencies: `numpy`, `gymnasium`, `stable-baselines3`, `sb3-contrib`.
-- Wave-height GPU training dependencies: `torch`, `torchvision`, `torchaudio`, `pandas`, `scikit-learn`, `matplotlib`, `tqdm`, `jupyterlab`.
-- NVIDIA GPU and a matching CUDA/PyTorch environment are recommended for deep learning training.
+Iterative Action-Q is neither PPO nor plain behaviour cloning. Greedy provides the safe default
+action and the first state distribution; the model then repeatedly collects the states **it
+would itself visit**:
+
+```text
+Greedy states G0        -> train P1
+P1 roll-in states G1    -> train P2 on G0+G1
+P2 roll-in states G2    -> train P3 on G0+G1+G2
+P3 roll-in states G3    -> train P4 on all data
+```
+
+- **Label.** Every candidate action starts from the same decision state and is simulated to the
+  end of the 720 h episode. The target is `1e-5 x (baseline total cost - candidate total cost)`,
+  so a positive target means the candidate genuinely saves money over the whole horizon — not a
+  one-hour reward and not a truncated 168 h return.
+- **Action space.** Each vessel picks one of `WAIT / Terminal / 3 emitters / FOLLOW`; three
+  vessels give up to `6³ = 216` joint actions, with infeasible ones masked out.
+- **Network.** Shared vessel encoder, structured action embeddings, 5 bootstrap heads, 51
+  quantiles per action.
+- **Deployment gate.** The policy overrides Greedy only under agreement and margin thresholds
+  (e.g. ≥4/5 heads agree, predicted gain above ≈€40k), with a capped number of overrides split
+  across fixed intervention windows. Otherwise it executes `FOLLOW`.
+
+Details and the exact production configuration: [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md).
+
+## Unified comparison protocol — `unified_window_v1`
+
+All controllers share the same three-vessel network, 720 h episodes, 1 h physical step, initial
+state sampling, economic parameters, action masks and per-seed disturbance trajectories. The
+protocol is machine-readable and frozen:
+
+- [`experiments/protocols/unified_window_v1_paper_protocol.json`](experiments/protocols/unified_window_v1_paper_protocol.json) — environment, disturbance rates, well rule, forecast protocol, cost formula, training budget.
+- [`experiments/protocols/unified_window_v1_seed_manifest.json`](experiments/protocols/unified_window_v1_seed_manifest.json) — train / validation / test seed ranges.
+
+| Controller | Paper name | Trained | Runtime future information |
+|---|---|---|---|
+| Fixed vessel–emitter split | Fixed-Assignment Heuristic | no | none |
+| Dynamic greedy shuttle | Greedy | no | none |
+| PPO from scratch | Centralized Maskable PPO | yes | shared 24/72 h summary |
+| Event-based v4 architecture | Event-Residual PPO | yes | shared 24/72 h summary |
+| **Current main method** | **Iterative Action-Q** | yes | shared 24/72 h summary |
+| Rolling optimisation | Rolling MILP | no | full hourly 168 h forecast |
+| Offline reference only | Full-horizon MILP (time-limited) | no | perfect foresight |
+
+Key fairness rules: identical forecast **source** for every forecast-capable method (currently a
+perfect-forecast protocol), a matched environment-interaction budget `B_4800` for the three
+learning methods, a common compact trip-cleanup terminal value applied to every method's reported
+cost, and formal test seeds `9,000,001–9,000,030` that stay untouched until all method,
+checkpoint, gate and reporting choices are locked.
+
+## Preliminary results
+
+Development-seed comparison (`8,000,001–8,000,030`, 30 paired seeds, **one training seed per
+learning method**). These are *not* formal results — the locked test seeds have not been run.
+Full write-up: [`docs/preliminary results/unified_window_control_comparison_2026-07-26_zh.md`](docs/preliminary%20results/unified_window_control_comparison_2026-07-26_zh.md).
+
+| Method | Total cost (EUR) | vs Greedy | Vented (t) | Stored (t) | EUR/t | Wins vs Greedy |
+|---|---:|---:|---:|---:|---:|---:|
+| Greedy | 2,059,907 | — | 7,883.1 | 100,959.4 | 21.01 | — |
+| Residual PPO v4 | 1,942,032 | −117,876 | 5,263.1 | 103,421.5 | 18.87 | 13/30 |
+| Iterative Q (state only) | 1,699,864 | −360,043 | 1,704.5 | 108,989.6 | 15.68 | 23/30 |
+| **Iterative Q (24/72 h future)** | **1,633,631** | **−426,276** | **821.1** | **109,242.1** | **14.97** | **25/30** |
+| Hybrid RL (Greedy base) | 3,134,909 | +1,075,002 | 22,990.4 | 87,728.0 | 36.05 | 2/30 |
+
+Paired 95% bootstrap CIs exclude zero for both Iterative Q variants but **not** for Residual PPO
+v4 ([−309,118, +47,944]), so v4 cannot yet be called reliably better than Greedy. Adding the
+24/72 h future summary buys a further −66,233 EUR on average, CI [−119,717, −15,833].
 
 ## Installation
 
-Run all commands from the repository root.
-
-### CPU / Basic Setup
+Run everything from the repository root.
 
 ```powershell
 uv sync
 uv run python -m pip install -e .
 ```
 
-For the RL environment:
+With RL dependencies (`numpy`, `gymnasium`, `stable-baselines3`, `sb3-contrib`):
 
 ```powershell
 uv sync --extra rl
 uv run python -m pip install -e ".[rl]"
 ```
 
-If you do not use `uv`, install with pip:
+Without `uv`:
 
 ```powershell
-pip install -e .
 pip install -e ".[rl]"
 ```
 
-### GPU / Wave-Height Training Environment
+Additional requirements:
 
-The wave-height prediction models are best run in the conda environment:
+- Python `>=3.10` (GPU training environment uses 3.12).
+- Core physical layer: `searoute>=1.6`, `CoolProp>=6.6`.
+- Iterative Action-Q and the event-based stack additionally need `torch`.
+- Rolling MILP / Full-horizon MILP need a CPLEX installation; CBC is far too slow for 720 h
+  multi-seed studies.
+- Wave-height prediction training uses a separate conda environment:
 
 ```powershell
 conda env create -f environment-gpu.yml
@@ -98,117 +156,92 @@ conda activate ccs-rlllm-gpu
 pip install -e ".[rl]"
 ```
 
-## Quick Start
+## Quick start
 
-### Physical-Layer Demo
+### Physical-layer demo and dashboards
 
 ```powershell
 uv run python examples\run_physical_layer_demo.py
-```
-
-### Dashboards
-
-```powershell
 uv run python examples\build_phase1_dashboard.py
 uv run python examples\build_rule_based_dashboards.py
 ```
 
-Generated HTML or image artifacts are written to the script-defined `output/` or visualization directories.
+### Iterative Action-Q pipeline
 
-### Controller Comparison
+The four stages map directly onto CLI entry points. On a cluster, use the launcher instead
+(next section) — it wires the whole dependency chain.
 
 ```powershell
-uv run python experiments\compare_controllers_same_scenarios.py
+# 1. G0 - Greedy roots
+uv run python -m experiments.generate_iterative_q_greedy_data `
+  --out-path output\iq\g0_train.pt --split train `
+  --seeds (1500..1699) --roots-per-seed 12
+
+# 2. Train P1 from scratch on G0
+uv run python scripts\train_iterative_action_q.py `
+  --train-data output\iq\g0_train.pt --validation-data output\iq\g0_val.pt `
+  --out-dir output\iq\p1 --observation-input v4_future_24_72
+
+# 3. G1-G3 - roll the current policy in, keep the states it visits
+uv run python -m experiments.create_iterative_q_lock `
+  --checkpoint output\iq\p1\iterative_action_q.pt --out-path output\iq\p1\lock.json `
+  --protocol-id unified_window_v1 --residual-margin 0.40 --economic-margin-eur 40000
+uv run python -m experiments.generate_iterative_q_policy_data `
+  --lock-config output\iq\p1\lock.json --out-path output\iq\g1_train.pt `
+  --split train --seeds (1500..1539)
+
+# 4. Retrain on cumulative data, then evaluate against Greedy on unseen seeds
+uv run python scripts\train_iterative_action_q.py `
+  --train-data output\iq\g0_train.pt output\iq\g1_train.pt `
+  --validation-data output\iq\g0_val.pt --initial-checkpoint output\iq\p1\iterative_action_q.pt `
+  --out-dir output\iq\p2 --observation-input v4_future_24_72
+uv run python -m experiments.evaluate_iterative_action_q `
+  --checkpoint output\iq\p4\iterative_action_q.pt --out-dir output\iq\p4\eval
 ```
 
-This experiment compares episode controllers under the same disturbance scenarios and writes CSV/report outputs. Static MILP is reported separately as a perfect-foresight benchmark.
+`--observation-input` selects the ablation arm: `state_only`, `v4_future_24_72` (the locked E1
+representation), `forecast_168`, or one of the summary window/band variants. `--forecast-encoder`
+switches between `small_mlp`, `tcn` and `gru`.
 
-### RL Training
+### Unified controller comparison
 
 ```powershell
-uv run python -m sim.train --timesteps 200000
+uv run python -m experiments.compare_unified_window_controls `
+  --iterative-q-checkpoint output\iq\p4\iterative_action_q.pt `
+  --v4-run-dir output\event_v4\run1 `
+  --out-dir output\comparison
 ```
 
-Full PPO/BC training entry point:
+Writes per-seed CSV and a summary JSON with cost components, vent/stored tonnes, override counts
+and wall-clock time.
 
-```powershell
-uv run python scripts\train_ppo_bc.py --weather-obs --bc-episodes 30 --bc-epochs 20 --timesteps 150000
+### Cluster runs
+
+`hpc/launch_iterative_action_q.sh` chains data generation, staged training and evaluation into one
+SLURM dependency graph. Check the configuration without submitting anything:
+
+```bash
+DRY_RUN=1 bash hpc/launch_iterative_action_q.sh
 ```
 
-### Wave-Height Prediction
+Override `PROJECT_DIR`, `RUN_ROOT` and `CONFIG_NAME` for your own paths and run directory; the
+launcher refuses to overwrite an existing run directory and writes all job IDs to
+`RUN_ROOT/job_ids.txt`. Individual `hpc/submit_*.sh` scripts cover single stages (data, training,
+evaluation, ablations, environment checks).
+
+### Other controllers
 
 ```powershell
+# Centralized Maskable PPO with BC warm start
+uv run python scripts\train_ppo_bc.py --scenario northern_lights_phase1_3vessels `
+  --reward-mode economic --bc-episodes 30 --bc-epochs 20 --timesteps 150000
+
+# Forecast-encoder comparison (demos -> merge -> train -> report subcommands)
+uv run python scripts\compare_forecast_encoders_rl.py --help
+
+# Wave-height prediction models
 uv run python -m sim.scenario_generation.wave_height.prediction.train_lstm
-uv run python -m sim.scenario_generation.wave_height.prediction.train_gru
 ```
-
-See `src/sim/scenario_generation/wave_height/prediction/README.md` for details.
-
-## Reinforcement Learning & LLM Experiments
-
-Training and training-data workflows live in `scripts/`. Comparisons, evaluations,
-ablations, and LLM proof-of-concept experiments live in `experiments/`. A full
-write-up of the findings (RL matching greedy, milk-run headroom, LLM planning,
-goal-conditioned generalization) is in
-[`docs/experiments_summary.md`](docs/experiments_summary.md).
-
-### Behaviour cloning + PPO (kickstarting)
-
-Warm-start a MaskablePPO policy from a demonstrator (greedy or a load-balanced
-cluster), then fine-tune with a decaying BC anchor:
-
-```powershell
-uv run python scripts\train_ppo_bc.py --scenario northern_lights_phase1_milkrun_imbalanced `
-  --teacher cluster --carbon-price 80 --bc-episodes 30 --bc-epochs 20 `
-  --kickstart-coef 1.0 --timesteps 150000
-```
-
-Key flags: `--scenario` (any registered scenario), `--teacher {greedy,cluster}`,
-`--carbon-price` (symmetric store credit = vent tax), `--kickstart-coef`,
-`--weather-obs`, `--injection-reward-eur-per-t`.
-
-### Goal-conditioned RL (zero-shot generalization)
-
-Train one policy across randomized capture-imbalance layouts, conditioned on a
-per-vessel emitter assignment, then evaluate on a **held-out** layout:
-
-```powershell
-uv run python scripts\train_goal_conditioned.py --bc-episodes 48 --timesteps 200000 `
-  --kickstart-coef 1.0 --outage-rate 0.5 --outage-hours 12
-```
-
-### LLM planning (local Qwen / Llama via Ollama)
-
-```powershell
-winget install Ollama.Ollama
-ollama pull qwen2.5:7b-instruct
-ollama pull llama3.1:8b
-```
-
-- `experiments\llm_planner.py` — the LLM produces a high-level vessel→emitter
-  assignment executed by a deterministic cluster policy (hierarchical planning).
-- `experiments\llm_router.py` — the LLM picks the destination at each dispatch step.
-- `experiments\eval_llm_goal.py` — LLM vs heuristic as the goal source for the
-  goal-conditioned policy.
-
-```powershell
-uv run python experiments\llm_planner.py --model qwen2.5:7b-instruct `
-  --scenario northern_lights_phase1_milkrun_imbalanced
-```
-
-### Evaluation and ceiling
-
-```powershell
-uv run python experiments\eval_ppo_model.py output\rl_ppo\<model>.zip
-uv run python experiments\eval_milp_ceiling.py --seeds 101 102   # rolling-MILP reference
-```
-
-### Milk-run scenarios
-
-`northern_lights_phase1_milkrun` (2 vessels, 3 spread emitters) and
-`northern_lights_phase1_milkrun_imbalanced` (imbalanced capture) make greedy
-source selection suboptimal, creating routing headroom for learning / LLM
-planning to exploit.
 
 ## Tests
 
@@ -216,106 +249,142 @@ planning to exploit.
 uv run python -m unittest discover -s tests
 ```
 
-If running without an editable install, set the source path explicitly:
+Without an editable install:
 
 ```powershell
 $env:PYTHONPATH="$PWD\src"
 python -m unittest discover -s tests
 ```
 
-## Repository Layout
+## Repository layout
 
 ```text
 CCS_RLLLM/
-|-- data/                 # Capture-rate profiles, external references, experiment data
-|-- docs/                 # Research notes, design docs, and historical ideas
-|-- examples/             # Small demos and dashboard builders
-|-- experiments/          # Comparisons, evaluations, ablations, and research experiments
-|-- hpc/                  # Cluster submission scripts and smoke tests
+|-- data/                 # Capture-rate profiles and external reference data
+|-- docs/                 # Paper plan, method notes, and dated preliminary results
+|-- examples/             # Physical-layer demos and dashboard builders
+|-- experiments/          # Data generation, evaluation, comparison, ablation analysis
+|   `-- protocols/        # Frozen paper protocol and seed manifest
+|-- hpc/                  # SLURM launchers and per-stage submission scripts
 |-- scenarios/            # Reproducible scenario JSON files
-|-- scripts/              # Training and training-data workflow scripts
+|-- scripts/              # Training entry points
 |-- src/sim/              # Main Python package
-|-- tests/                # Unit, structure, and experiment smoke tests
-|-- visualisation html/   # Legacy visualization artifact directory
+|-- tests/                # 58 unit, structure, and experiment smoke tests
 |-- environment-gpu.yml   # GPU training environment
-|-- pyproject.toml        # Python package and dependency configuration
-|-- uv.lock               # uv lock file
-`-- README.md
+`-- pyproject.toml
 ```
 
-## `src/sim` Structure
+### `src/sim` structure
 
 ```text
 src/sim/
 |-- actions/              # ActionProposal, ActionFrame, ActionResolver
-|-- control/              # Baselines, rule-based, MILP, rolling MILP, imitation
-|-- entities/             # Emitter, vessel, terminal, pipeline, well, state
-|-- environment/          # CCSEnv, factories, Gymnasium/SB3 adapter
-|-- operations/           # Capture, loading, unloading, transport, injection
+|-- control/              # Controllers - see below
+|-- entities/             # Emitter, vessel, terminal, pipeline, well, reservoir state
+|-- environment/          # CCSEnv, factories, forecast/past observations, Gym adapters
+|-- operations/           # Capture, loading, unloading, transport, injection, pressure limits
 |-- scenario_generation/  # Disturbance and wave-height scenario generation
-|-- visualization/        # Dashboard payloads, HTML rendering, writer entry points
+|-- visualization/        # Dashboard payloads and HTML rendering
 |-- economics.py          # Cost and revenue model
 |-- line_source.py        # Reservoir/well pressure line-source model
-|-- metrics.py            # Rollouts, KPIs, and evaluation summaries
+|-- metrics.py            # Rollouts, KPIs, evaluation summaries
 |-- network.py            # Physical network graph and single-step settlement
 |-- network_scenarios.py  # Build Northern Lights networks from JSON/data
 |-- routes.py             # Route and distance calculation
 |-- ship_speed.py         # Sea-state effects on vessel speed
-|-- simulator.py          # High-level simulation runner
-`-- train.py              # RL training entry point
+`-- simulator.py          # High-level simulation runner
 ```
+
+### `src/sim/control` — controller families
+
+```text
+control/
+|-- baselines.py                # Idle and greedy shuttle policies
+|-- rule_based.py               # Fixed-assignment and rule controllers
+|-- milp.py / cplex_milp.py     # Static MILP benchmark and CPLEX backend
+|-- rolling_milp.py             # Rolling-horizon MILP with replay-validated warm start
+|-- native_mpc.py               # Multi-candidate native MPC
+|-- iterative_action_q.py       # Main method: the production Q network
+|-- recurrent_distributional_q.py
+|-- imitation.py / demonstrations.py / replay.py
+`-- event_based/                # Algorithm layer, outside the physics layer
+    |-- contracts.py            # DispatchGoal boundary: high-level policy <-> executor
+    |-- evaluation.py           # Physical rollout evaluator for fair comparison
+    |-- hybrid/                 # Rule, native-MPC and rolling-MILP executors
+    |-- rl/                     # Sparse 24 h high-level PPO
+    `-- residual_rl{,_v2,_v3,_v4}/  # Residual intervention PPO, v4 is Event-Residual PPO
+```
+
+`event_based/` decides *which operating goal to pursue*; it must never add capacities, pressure
+equations or clipping rules. Those stay in `entities/`, `operations/` and `network.py` so every
+controller receives identical physics. See [`src/sim/control/event_based/README.md`](src/sim/control/event_based/README.md).
+
+## Documentation map
+
+| Document | Contents |
+|---|---|
+| [`docs/paper_structure_zh.md`](docs/paper_structure_zh.md) | Paper argument chain, section-by-section evidence requirements |
+| [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md) | E0–E5 experiment design, fairness protocol, metrics, statistics |
+| [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md) | Method definition, production configuration, code entry points |
+| [`docs/preliminary results/`](docs/preliminary%20results/) | Dated result records — controller comparison, encoder comparison, future-adapter and reproducibility ablations |
+| [`docs/CCS_RL_Research_Core_Idea.md`](docs/CCS_RL_Research_Core_Idea.md) | Original research framing |
+| [`docs/physical_layer_v1_cn.md`](docs/physical_layer_v1_cn.md) | Physical-layer model specification |
+| [`docs/northern_lights_line_source_pressure_study.md`](docs/northern_lights_line_source_pressure_study.md) | Reservoir pressure line-source study |
+| [`docs/experiments_summary.md`](docs/experiments_summary.md) | Historical record of the earlier RL/LLM phase (scripts since removed) |
+| `src/sim/scenario_generation/wave_height/prediction/README.md` | Wave-height prediction models |
 
 ## Data
 
-Some external data files are large and are not fully tracked in git. Download them and place them back into the corresponding data directories before running related scripts.
+Large external files are not fully tracked in git. Download them and restore them into the
+matching directories before running the related scripts.
 
-- Google Drive data folder: <https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN?usp=sharing>
-- `scenarios/`: reproducible scenario JSON files such as `northern_lights_phase1.json` and `northern_lights_phase2.json`.
-- `data/capture_rates/`: Phase 1/Phase 1+ emitter capture-rate profiles and metadata.
-- `data/网络收集资料/`: curated external references, such as Climate TRACE source mapping and monthly profiles.
+- Google Drive: <https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN?usp=sharing>
+- `scenarios/` — scenario JSON, including `northern_lights_phase1_3vessels.json`, the network used
+  by the paper protocol.
+- `data/capture_rates/` — Phase 1/Phase 1+ emitter capture-rate profiles and metadata.
+- `data/网络收集资料/` — curated external references such as Climate TRACE source mapping.
 
-## Main Workflows
+## Extending the codebase
 
-### Add a Controller
+**Add a controller.** Implement it under `src/sim/control/` (algorithm-layer controllers go in
+`event_based/`), express actions as `ActionProposal` / `ActionFrame`, route them through
+`ActionResolver` into `network.step()`, register it in the comparison experiment, and add a
+behaviour test under `tests/`.
 
-1. Implement the control logic in `src/sim/control/`.
-2. Express actions with `ActionProposal` / `ActionFrame`.
-3. Route actions through `ActionResolver` into `network.step()`.
-4. Register evaluation in `experiments/compare_controllers_same_scenarios.py` or a new experiment script.
-5. Add behavior tests or smoke tests under `tests/`.
+**Add a scenario.** Add the JSON under `scenarios/`, put any new capture profile in
+`data/capture_rates/`, add a loading entry point in `src/sim/network_scenarios.py` or an
+environment factory, and validate it with a demo or comparison run.
 
-### Add a Scenario
+**Add a disturbance.** Generate the episode time series in
+`src/sim/scenario_generation/generator.py`, define runtime resolution in
+`disturbance_resolver.py`, connect it to `CCSEnv` or the relevant operation module, and add
+fixed-seed tests. Changing any `unified_window_v1` disturbance parameter requires a **new protocol
+version** and a rerun of all methods.
 
-1. Add a JSON configuration under `scenarios/`.
-2. If a new capture profile is required, place it under `data/capture_rates/`.
-3. Add a loading entry point in `src/sim/network_scenarios.py` or an environment factory.
-4. Validate with a demo, controller comparison, or dashboard script.
+## Roadmap
 
-### Add a Disturbance
-
-1. Generate the episode time series in `src/sim/scenario_generation/generator.py`.
-2. Define runtime resolution rules in `disturbance_resolver.py`.
-3. Connect the disturbance to `CCSEnv` or the relevant physical operation module.
-4. Add fixed-seed tests to keep experiments reproducible.
-
-## Related Documentation
-
-- [`docs/experiments_summary.md`](docs/experiments_summary.md) — RL + LLM experiment results and conclusions
-- `docs/CCS_RL_Research_Core_Idea.md`
-- `docs/previous ideas/northern_lights_development_plan_cn.md`
-- `docs/previous ideas/northern_lights_mechanism_ladder_L0_L3plus_cn.md`
-- `src/sim/scenario_generation/wave_height/prediction/README.md`
+- [x] Physical entities, operation modules, network step, and pressure limits.
+- [x] Action proposal/resolver protocol layer.
+- [x] Rule-based, static MILP, rolling MILP and native MPC controllers.
+- [x] Gymnasium/SB3 RL environments and PPO/BC training entry points.
+- [x] Event-based algorithm layer with hybrid executors and residual RL v1–v4.
+- [x] Iterative Action-Q training, evaluation and gating.
+- [x] Frozen `unified_window_v1` protocol and seed manifest.
+- [ ] Implement the pending protocol requirements: shared automatic well rule in every controller
+      interface, complete cost/activity diagnostics, and the 1 h simulator-step counter for `B_4800`.
+- [ ] Retrain Centralized Maskable PPO and Event-Residual PPO with objective-aligned rewards.
+- [ ] Run ≥3 independent training seeds and report on the locked test seeds `9,000,001–9,000,030`.
+- [ ] Replace personal paths in HPC scripts with environment-variable configuration.
+- [ ] Package large datasets and model weights as downloadable release assets.
 
 ## 📝 Citation
 
-If you use this repository in a paper or report, please cite:
-
 ```bibtex
 @software{ccs_rlllm,
-  title  = {CCS_RLLLM: Ship-Based CCUS Logistics Simulation and RL Playground},
+  title  = {CCS_RLLLM: Physics-Constrained Simulation and Learned Dispatch Control for Ship-Based CCS},
   author = {CCS_RLLLM contributors},
   year   = {2026},
-  note   = {Research code for physical-layer CCUS simulation, control, and reinforcement learning}
+  note   = {Research code for CCS chain simulation, optimisation control, and reinforcement learning}
 }
 ```
 

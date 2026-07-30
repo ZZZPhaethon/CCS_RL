@@ -14,6 +14,18 @@ from ..environment import CCSEnv
 NativeAction = dict[str, list[int]]
 
 
+def action_for_well_control_mode(
+    env: CCSEnv,
+    action: Mapping,
+) -> NativeAction:
+    """Adapt an internal solver trace to the environment control boundary."""
+
+    adapted = {"vessels": [int(value) for value in action["vessels"]]}
+    if not env.automatic_well_control:
+        adapted["wells"] = [int(value) for value in action["wells"]]
+    return adapted
+
+
 @dataclass(frozen=True)
 class ReplayTolerances:
     mass_t: float = 1e-6
@@ -244,14 +256,23 @@ def _native_action_error(env: CCSEnv, action, step: int) -> str:
     well_actions = action.get("wells")
     if not isinstance(vessel_actions, Sequence) or isinstance(vessel_actions, (str, bytes)):
         return f"action[{step}].vessels: expected sequence"
-    if not isinstance(well_actions, Sequence) or isinstance(well_actions, (str, bytes)):
+    if env.automatic_well_control:
+        if "wells" in action:
+            return f"action[{step}].wells: forbidden in automatic well mode"
+    elif not isinstance(well_actions, Sequence) or isinstance(
+        well_actions,
+        (str, bytes),
+    ):
         return f"action[{step}].wells: expected sequence"
     if len(vessel_actions) != len(env.vessel_ids):
         return (
             f"action[{step}].vessels dimension: expected {len(env.vessel_ids)}, "
             f"actual {len(vessel_actions)}"
         )
-    if len(well_actions) != len(env.well_ids):
+    if (
+        not env.automatic_well_control
+        and len(well_actions) != len(env.well_ids)
+    ):
         return (
             f"action[{step}].wells dimension: expected {len(env.well_ids)}, "
             f"actual {len(well_actions)}"
@@ -265,15 +286,19 @@ def _native_action_error(env: CCSEnv, action, step: int) -> str:
             0 <= int(choice) < len(mask) and mask[int(choice)]
         ):
             return f"action[{step}] is not executable for {vessel_id}: {choice}"
-    for well_id, choice, mask in zip(
-        env.well_ids,
-        well_actions,
-        env.well_rate_action_mask(),
-    ):
-        if not isinstance(choice, Integral) or not (
-            0 <= int(choice) < len(mask) and mask[int(choice)]
+    if not env.automatic_well_control:
+        for well_id, choice, mask in zip(
+            env.well_ids,
+            well_actions,
+            env.well_rate_action_mask(),
         ):
-            return f"action[{step}] is not executable for {well_id}: {choice}"
+            if not isinstance(choice, Integral) or not (
+                0 <= int(choice) < len(mask) and mask[int(choice)]
+            ):
+                return (
+                    f"action[{step}] is not executable "
+                    f"for {well_id}: {choice}"
+                )
     return ""
 
 

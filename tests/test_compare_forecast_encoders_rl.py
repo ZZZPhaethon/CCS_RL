@@ -193,14 +193,14 @@ def test_environment_factory_uses_demo_and_training_context_contract(tmp_path):
     with patch.object(compare, "make_native_env", return_value=sentinel) as make_native_env:
         assert compare.make_experiment_env(args, demonstration=True) is sentinel
         demo_call = make_native_env.call_args.kwargs
-        assert demo_call["episode_hours"] == 889
+        assert demo_call["episode_hours"] == 888
         assert demo_call["scenario_context_hours"] == 0
 
         assert compare.make_experiment_env(args, demonstration=False) is sentinel
         train_call = make_native_env.call_args.kwargs
 
     assert train_call["episode_hours"] == 720
-    assert train_call["scenario_context_hours"] == 169
+    assert train_call["scenario_context_hours"] == 168
     for call in (demo_call, train_call):
         assert call["scenario"] == "northern_lights_phase1_3vessels"
         assert call["weather_mode"] == "block"
@@ -248,7 +248,7 @@ def test_metadata_is_derived_from_environment_helpers_without_schema_drift(tmp_p
     )
     assert metadata["vessel_destination_shape"] == [3, 4]
     assert metadata["warm_start"] is True
-    assert metadata["scenario_context_hours"] == 169
+    assert metadata["scenario_context_hours"] == 168
     assert metadata["emitter_buffer_capacity_t"]["yara_sluiskil"] == 15_000.0
 
 

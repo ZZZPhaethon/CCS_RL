@@ -231,7 +231,7 @@ s_{t+1}=f(s_t,a_t,\xi_t),
 - loading/unloading rate；
 - terminal buffer；
 - well availability、injectivity 和 pressure constraints；
-- 共享的底层井控制器：井可用时按照 terminal inventory、equipment、injectivity 和 pressure constraints 下的最大可行速率自动注入，维护时注入率为零；
+- 共享的底层井控制器：井可用时按照 terminal inventory、equipment、injectivity 和 pressure constraints 下的连续最大可行速率自动注入，维护时注入率为零；
 - 井注入率不属于任何上层控制器的动作空间；
 - legal-action mask。
 
@@ -261,7 +261,11 @@ s_{t+1}=f(s_t,a_t,\xi_t),
 定义：
 
 \[
-J = C_{\mathrm{operating}} + C_{\mathrm{vent}} + C_{\mathrm{other\ locked\ penalties}},
+J =
+C_{\mathrm{operating},\,0:720}
++ C_{\mathrm{vent},\,0:720}
++ C_{\mathrm{cleanup}}(s_{720})
++ C_{\mathrm{other\ locked\ penalties}},
 \]
 
 并分别解释：
@@ -270,9 +274,10 @@ J = C_{\mathrm{operating}} + C_{\mathrm{vent}} + C_{\mathrm{other\ locked\ penal
 - conditioning/reconditioning；
 - loading/unloading；
 - vent penalty；
+- common compact trip cleanup operating cost；
 - 是否存在 storage shortfall penalty。
 
-说明单位成本的分母以及 720 h 结束时在途库存如何处理。
+说明单位成本的分母，以及共同末端处理：720 h 后停止新增 capture、关闭 cleanup 扰动，将剩余 CO₂ 完成封存；该 cleanup cost 同时进入三种学习方法的 terminal return、Rolling/Full-horizon MILP 的 terminal objective 和所有方法的报告总成本。
 
 ## 3.6 Simulator verification
 
@@ -584,6 +589,7 @@ Full-horizon MILP 单独标为 `offline`, `perfect foresight`, `no online fallba
 - Vent；
 - Stored；
 - Operating cost；
+- Terminal cleanup operating cost；
 - paired difference vs Greedy；
 - decision/episode wall time。
 
@@ -628,6 +634,7 @@ Results 按“主结果 → 运行机制 → 因果消融 → 综合 stress 泛�
 - Δ vs Greedy，95% CI；
 - Total cost/stored t；
 - Operating cost；
+- Terminal cleanup operating cost；
 - Vent；
 - Stored；
 - win/loss。
@@ -635,7 +642,7 @@ Results 按“主结果 → 运行机制 → 因果消融 → 综合 stress 泛�
 ### Figure 3：Paired performance and cost mechanism
 
 - Panel a：相对 Greedy 的 paired cost difference 和 CI；
-- Panel b：operating cost 与 vent penalty 分解。
+- Panel b：720 h operating cost、vent penalty 与 common terminal-cleanup operating cost 分解；完整 vessel fuel、conditioning、reconditioning、loading 和 unloading 分项放 Supplementary。
 
 正文解释：
 

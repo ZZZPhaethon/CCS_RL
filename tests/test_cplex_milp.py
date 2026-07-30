@@ -91,6 +91,229 @@ class CplexMilpInterfaceTests(unittest.TestCase):
     def test_module_exposes_full_scenario_solver(self):
         self.assertTrue(hasattr(cplex_milp, "solve_full_scenario_with_cplex"))
 
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_automatic_well_constraint_uses_continuous_static_maximum(self):
+        env = _no_capture_env(
+            cap_hours=1,
+            well_control_mode="automatic_max",
+        )
+        env.reset(seed=1)
+        scenario = env.scenario
+        physical_max = cplex_milp._physical_well_max_by_hour(
+            env,
+            scenario,
+            horizon_h=1,
+        )
+        problem = cplex_milp.pulp.LpProblem(
+            "test_automatic_static_well",
+            cplex_milp.pulp.LpMinimize,
+        )
+        well_request = {
+            ("well", 0): cplex_milp.pulp.LpVariable(
+                "static_request",
+                lowBound=0.0,
+                upBound=physical_max[("well", 0)],
+            )
+        }
+        well_inj = {
+            ("well", 0): cplex_milp.pulp.LpVariable(
+                "static_well_inj",
+                lowBound=0.0,
+            )
+        }
+        cplex_milp._add_continuous_automatic_well_request_constraints(
+            problem,
+            env,
+            scenario,
+            well_request,
+            {},
+            well_inj,
+            physical_max,
+            horizon_h=1,
+        )
+        problem += well_request[("well", 0)]
+
+        status = problem.solve(cplex_milp.pulp.PULP_CBC_CMD(msg=False))
+        requested_tph = well_request[("well", 0)].value()
+
+        self.assertEqual(
+            cplex_milp.pulp.LpStatus[status],
+            "Optimal",
+        )
+        self.assertAlmostEqual(
+            requested_tph,
+            env.automatic_well_rates_tph()[0],
+            delta=1e-4,
+        )
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_automatic_dynamic_well_constraint_matches_continuous_environment_rate(self):
+        env = _no_capture_env(
+            cap_hours=1,
+            well_control_mode="automatic_max",
+        )
+        env.reset(seed=1)
+        reservoir = env.network.entities["reservoir"]
+        object.__setattr__(
+            reservoir,
+            "line_source_parameters",
+            LineSourceParameters(
+                initial_pressure_bar=100.0,
+                permeability_md=100.0,
+                thickness_m=50.0,
+                porosity_fraction=0.2,
+                total_compressibility_1_pa=1e-9,
+                viscosity_pa_s=5e-5,
+                co2_density_kg_m3=700.0,
+                well_radius_m=0.1,
+                skin=0.0,
+            ),
+        )
+        lower_index = 2
+        upper_index = 3
+        lower_pressure = projected_bottomhole_pressure_bar(
+            env.network,
+            env.simulator.state,
+            "well",
+            cplex_milp.mtpa_to_tph(
+                WELL_RATE_LEVELS_MTPA[lower_index]
+            ),
+            evaluation_time_h=1.0,
+            interval_start_h=0.0,
+        )
+        upper_pressure = projected_bottomhole_pressure_bar(
+            env.network,
+            env.simulator.state,
+            "well",
+            cplex_milp.mtpa_to_tph(
+                WELL_RATE_LEVELS_MTPA[upper_index]
+            ),
+            evaluation_time_h=1.0,
+            interval_start_h=0.0,
+        )
+        object.__setattr__(
+            reservoir,
+            "well_bottomhole_pressure_limit_bar",
+            (lower_pressure + upper_pressure) / 2.0,
+        )
+        physical_max = cplex_milp._physical_well_max_by_hour(
+            env,
+            env.scenario,
+            horizon_h=1,
+        )
+        problem = cplex_milp.pulp.LpProblem(
+            "test_automatic_dynamic_well",
+            cplex_milp.pulp.LpMinimize,
+        )
+        well_request = {
+            ("well", 0): cplex_milp.pulp.LpVariable(
+                "dynamic_request",
+                lowBound=0.0,
+                upBound=physical_max[("well", 0)],
+            )
+        }
+        well_regime = {
+            ("well", 0, regime): cplex_milp.pulp.LpVariable(
+                f"dynamic_regime_{regime}",
+                cat="Binary",
+            )
+            for regime in ("off", "physical", "pressure")
+        }
+        well_inj = {
+            ("well", 0): cplex_milp.pulp.LpVariable(
+                "dynamic_well_inj",
+                lowBound=0.0,
+            )
+        }
+        cplex_milp._add_continuous_automatic_well_request_constraints(
+            problem,
+            env,
+            env.scenario,
+            well_request,
+            well_regime,
+            well_inj,
+            physical_max,
+            horizon_h=1,
+        )
+        problem += well_request[("well", 0)]
+
+        status = problem.solve(cplex_milp.pulp.PULP_CBC_CMD(msg=False))
+        requested_tph = well_request[("well", 0)].value()
+
+        self.assertEqual(
+            cplex_milp.pulp.LpStatus[status],
+            "Optimal",
+        )
+        self.assertAlmostEqual(
+            requested_tph,
+            env.automatic_well_rates_tph()[0],
+            delta=1e-4,
+        )
+        self.assertGreater(
+            requested_tph,
+            cplex_milp.mtpa_to_tph(
+                WELL_RATE_LEVELS_MTPA[lower_index]
+            ),
+        )
+        self.assertLess(
+            requested_tph,
+            cplex_milp.mtpa_to_tph(
+                WELL_RATE_LEVELS_MTPA[upper_index]
+            ),
+        )
+
+    @unittest.skipIf(cplex_milp.pulp is None, "pulp not installed")
+    def test_automatic_continuous_request_replays_with_supply_clipping(self):
+        env = _no_capture_env(
+            cap_hours=1,
+            well_control_mode="automatic_max",
+        )
+        env.reset(seed=1)
+        env.simulator.state.entity_inventory_t["terminal"] = 250.0
+        env.cumulative_captured_t = 250.0
+        env.scenario = Scenario(
+            time_step_hours=1.0,
+            n_steps=1,
+            emitter_availability={"source": [0.0]},
+            vessel_speed_factor={"ship": [1.0]},
+            well_available={"well": [True]},
+            injectivity_factor={"well": [1.0]},
+        )
+        env.scenario.apply_to_state(
+            env.simulator.state,
+            time_h=0.0,
+        )
+
+        with patch.object(
+            cplex_milp,
+            "_make_cplex_cmd",
+            return_value=cplex_milp.pulp.PULP_CBC_CMD(msg=False),
+        ):
+            result = cplex_milp.solve_full_scenario_with_cplex(
+                env,
+                horizon_h=1,
+                economics=EconomicParameters(
+                    storage_shortfall_eur_per_t=1_000.0
+                ),
+                economic_objective=True,
+                time_limit_s=10.0,
+            )
+        replay = cplex_milp.replay_full_scenario_cplex_plan(
+            env,
+            result,
+        )
+
+        self.assertTrue(result.is_valid, result.validation_error)
+        self.assertEqual(result.well_rate_indices_by_hour, {})
+        self.assertNotIn("wells", result.native_actions_by_hour[0])
+        self.assertAlmostEqual(
+            result.well_request_tph_by_hour["well"][0],
+            env.automatic_well_rates_tph()[0],
+            delta=1e-6,
+        )
+        self.assertAlmostEqual(result.stored_t, 250.0, delta=1e-6)
+        self.assertTrue(replay.is_exact, replay.mismatches)
+
     def test_cross_source_leg_distance_is_independent_of_vessel_home_route(self):
         env = _cold_env(cap_hours=24)
         env.reset(seed=1)

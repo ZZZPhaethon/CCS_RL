@@ -3,6 +3,38 @@
 本目录是独立实现，不覆盖 `residual_rl_v3`。v4 不使用 ensemble，也不调用
 MPC；运行时仍然只有一个 masked residual PPO 策略。
 
+## 两个训练入口
+
+- `train_tail_robust_ppo.py` 保留原 v4 的 tail curriculum、failure replay、
+  shaped reward、训练默认值和 checkpoint 命名；已有 v4 实验继续使用这个入口。
+- `train_objective_aligned_ppo.py` 是论文 E1 的独立入口。它复用 v4 的 residual
+  action、Greedy default、event trigger、intervention windows、action masks 和
+  risk gate，但从随机初始化使用 objective-aligned reward 训练，不启用 curriculum
+  或 failure replay，也不会覆盖原 v4 checkpoint。
+
+E1 reward 使用实际总成本：
+
+```text
+reward = scale × (Greedy counterfactual total cost − actual total cost)
+```
+
+Greedy 反事实项与当前策略动作无关，因此该 residual reward 与最小化实际总成本
+目标一致。训练预算同时计入实际轨迹和 Greedy 反事实轨迹的所有底层 simulator-hour
+calls。`--max-simulator-hour-steps` 应在正式训练时设为测得的 `B_4800`；若剩余预算
+不足以完成一对实际/反事实推进，训练会提前停止且不会超支。validation/test 的
+simulator calls 不计入训练预算。
+
+```powershell
+python -m sim.control.event_based.residual_rl_v4.train_objective_aligned_ppo `
+  --episode-hours 720 `
+  --forecast-context-hours 168 `
+  --future-summary-windows-h 24 72 `
+  --decision-interval-h 24 `
+  --max-simulator-hour-steps <B_4800> `
+  --seed 0 `
+  --device cpu
+```
+
 ## 设计目标
 
 v3 seed0 在普通场景中表现稳定，但少数困难场景仍有较高放空。v4 的目标不是
@@ -133,7 +165,8 @@ python -m sim.control.event_based.residual_rl_v4.evaluate_ppo `
 - `replay_env.py`：top-failure 回放池和训练 episode 采样；
 - `factory.py`：v4 原生及 Gym 环境工厂；
 - `model_selection.py`：参考约束和尾部风险评分；
-- `train_tail_robust_ppo.py`：正式训练入口；
+- `train_tail_robust_ppo.py`：原 v4 尾部风险训练入口；
+- `train_objective_aligned_ppo.py`：论文 E1 目标对齐训练入口；
 - `evaluate_ppo.py`：锁定测试集评估入口；
 - `evaluate_greedy.py`：在相同物理配置和 seeds 上评估 raw
   `greedy_shuttle_policy`。

@@ -11,19 +11,19 @@ applies the scenario disturbances, and prices the outcome with the
 The interface is gym-style (``reset`` / ``step`` returning
 ``(obs, reward, done, info)``) but intentionally has **no numpy or gymnasium
 dependency** so it stays importable anywhere. Observations are flat ``list[float]``
-and the native action is a dictionary with discrete vessel choices plus
-discrete well rate-level indices.
+and the native action is a dictionary with discrete vessel choices. Legacy
+environments may additionally expose discrete well rate-level indices.
 
 Controls (section 7.2 of the research note):
 - per vessel: ``WAIT`` / ``GO_TERMINAL`` / ``GO_EMITTER[id]``;
-- per well: a discrete injection-rate level index over
-  ``(0.0, 0.5, 1.0, 1.5, 2.0, 2.5)`` Mt/y.
+- in legacy ``agent_selected`` mode only, per well: a discrete injection-rate
+  level index over ``(0.0, 0.5, 1.0, 1.5, 2.0, 2.5)`` Mt/y.
 
 Loading at any emitter berth and unloading at the terminal are issued
 automatically (they are never the interesting decision); the agent chooses which
-emitter or terminal to send vessels to and how hard to inject. A vessel action
-mask exposes which destination choices are physically legal, while
-``well_rate_action_mask()`` exposes the currently feasible well rate levels.
+emitter or terminal to send vessels to. In ``automatic_max`` mode, the
+environment also chooses the highest currently feasible well rate. A vessel
+action mask exposes which destination choices are physically legal.
 """
 
 from __future__ import annotations
@@ -43,9 +43,10 @@ from ..entities.vessel import Vessel
 from ..routes import route_distance_km, sea_route
 from ..scenario_generation import Scenario, ScenarioGenerator
 from ..scenario_generation.disturbance_resolver import well_max_injection_tph
-from ..simulator import PhysicalSimulator
+from ..simulator import PhysicalSimulator, SimulatorStepCounter, SimulatorStepUsage
 from ..operations.pressure_limits import (
     WELL_RATE_LEVELS_MTPA,
+    maximum_feasible_well_rate_tph,
     mtpa_to_tph,
     pressure_limited_rate_level_mask,
 )
@@ -119,6 +120,11 @@ class CCSEnvConfig:
     # execute an arbitrary assignment (from a heuristic or an LLM) and transfer
     # zero-shot to new layouts. Off by default (keeps the observation size).
     include_goal_obs: bool = False
+    # Formal paper experiments use automatic_max: controllers choose vessel
+    # dispatch only and the environment requests the highest currently feasible
+    # well rate. agent_selected preserves the historical hybrid action interface
+    # solely for reproducing earlier experiments.
+    well_control_mode: str = "agent_selected"
 
 
 class CCSEnv:
@@ -133,9 +139,18 @@ class CCSEnv:
         config: CCSEnvConfig | None = None,
         *,
         routes: dict[str, dict] | None = None,
+        simulator_step_counter: SimulatorStepCounter | None = None,
     ) -> None:
         self.network = network
         self.config = config or CCSEnvConfig()
+        if self.config.well_control_mode not in {
+            "agent_selected",
+            "automatic_max",
+        }:
+            raise ValueError(
+                "well_control_mode must be 'agent_selected' or 'automatic_max', "
+                f"got {self.config.well_control_mode!r}."
+            )
         if self.config.weather_observation_layout not in {"global", "leg"}:
             raise ValueError(
                 "weather_observation_layout must be 'global' or 'leg', "
@@ -145,6 +160,7 @@ class CCSEnv:
         self.cost_model = cost_model or CostModel()
         self.locations = locations
         self._routes = routes or self._build_routes(locations)
+        self.simulator_step_counter = simulator_step_counter or SimulatorStepCounter()
         self._leg_distance_cache: dict[tuple[str, str], float] = {}
 
         self.emitter_ids = sorted(network._entities_of_type(Emitter))
@@ -192,14 +208,24 @@ class CCSEnv:
         return [self.vessel_action_count] * len(self.vessel_ids)
 
     def well_rate_bounds(self) -> list[tuple[float, float]]:
+        if self.automatic_well_control:
+            return []
         return [self._well_rate_bound(wid) for wid in self.well_ids]
 
     @property
     def well_rate_action_dims(self) -> list[int]:
+        if self.automatic_well_control:
+            return []
         return [len(WELL_RATE_LEVELS_MTPA)] * len(self.well_ids)
 
     def well_rate_levels_mtpa(self) -> list[float]:
+        if self.automatic_well_control:
+            return []
         return list(WELL_RATE_LEVELS_MTPA)
+
+    @property
+    def automatic_well_control(self) -> bool:
+        return self.config.well_control_mode == "automatic_max"
 
     def action_spec(self) -> dict[str, object]:
         return {
@@ -275,7 +301,11 @@ class CCSEnv:
         state = PhysicalState()
         self.scenario.apply_initial(state)
         self.simulator = PhysicalSimulator(
-            self.network, state, routes=self._routes, locations=self.locations
+            self.network,
+            state,
+            routes=self._routes,
+            locations=self.locations,
+            step_counter=self.simulator_step_counter,
         )
         self.t = 0
         self.ledger = EconomicLedger()
@@ -385,6 +415,13 @@ class CCSEnv:
             return 0.0
         return self.ledger.vented_t / self.cumulative_captured_t
 
+    def simulator_step_usage(self) -> SimulatorStepUsage:
+        """Return cumulative bottom-level simulator use across resets."""
+        return self.simulator_step_counter.snapshot()
+
+    def reset_simulator_step_counter(self) -> None:
+        self.simulator_step_counter.reset()
+
     def _overflow_risk_t(self) -> float:
         """Estimated emitter overflow if logistics do not clear buffers soon."""
         state = self.simulator.state
@@ -414,13 +451,20 @@ class CCSEnv:
         vessel_mask = self.vessel_action_mask()
         well_mask = self.well_rate_action_mask()
         bounds = self.well_rate_bounds()
-        return {
+        info = {
             "action_mask": vessel_mask,
             "vessel_action_mask": vessel_mask,
             "well_rate_action_mask": well_mask,
             "well_rate_levels_mtpa": self.well_rate_levels_mtpa(),
             "well_rate_bounds": bounds,
+            "well_control_mode": self.config.well_control_mode,
+            **self.simulator_step_usage().as_dict(),
         }
+        if self.automatic_well_control:
+            info["automatic_well_rates_tph"] = (
+                self.automatic_well_rates_tph()
+            )
+        return info
 
     def action_mask(self) -> list[list[bool]]:
         return self.vessel_action_mask()
@@ -432,12 +476,44 @@ class CCSEnv:
         return mask
 
     def well_rate_action_mask(self) -> list[list[bool]]:
+        if self.automatic_well_control:
+            return []
         return [self._well_rate_action_mask(well_id) for well_id in self.well_ids]
 
     def highest_feasible_well_rate_index(self, well_id: str) -> int:
         mask = self._well_rate_action_mask(well_id)
         feasible = [index for index, allowed in enumerate(mask) if allowed]
         return feasible[-1] if feasible else OFF_WELL_RATE_INDEX
+
+    def automatic_well_rate_indices(self) -> list[int]:
+        """Return legacy discrete maximum-rate choices."""
+        return [
+            self.highest_feasible_well_rate_index(well_id)
+            for well_id in self.well_ids
+        ]
+
+    def automatic_well_rates_tph(self) -> list[float]:
+        if self.simulator is None:
+            return [0.0 for _well_id in self.well_ids]
+        state = self.simulator.state
+        rates: list[float] = []
+        for well_id in self.well_ids:
+            well = self.network.entities[well_id]
+            assert isinstance(well, InjectionWell)
+            physical_max_tph = well_max_injection_tph(state, well)
+            rates.append(
+                maximum_feasible_well_rate_tph(
+                    self.network,
+                    state,
+                    well_id,
+                    physical_max_tph,
+                    evaluation_time_h=(
+                        state.time_h + self.network.time_step_hours
+                    ),
+                    interval_start_h=state.time_h,
+                )
+            )
+        return rates
 
     def _vessel_mask(self, vessel_id: str) -> list[bool]:
         vstate = self.simulator.vessel_states[vessel_id]
@@ -500,25 +576,45 @@ class CCSEnv:
     # -- action translation ----------------------------------------------
     def _normalize_action(self, action: CCSAction) -> dict[str, list]:
         if not isinstance(action, dict):
-            raise ValueError("Expected action dict with 'vessels' and 'wells' entries.")
-        if "vessels" not in action or "wells" not in action:
-            raise ValueError("Expected action dict with 'vessels' and 'wells' entries.")
+            raise ValueError("Expected an action dictionary.")
+        if "vessels" not in action:
+            raise ValueError("Expected action dict with a 'vessels' entry.")
+        if self.automatic_well_control and "wells" in action:
+            raise ValueError(
+                "well actions are forbidden when well_control_mode='automatic_max'"
+            )
+        if not self.automatic_well_control and "wells" not in action:
+            raise ValueError(
+                "Expected action dict with 'vessels' and 'wells' entries "
+                "when well_control_mode='agent_selected'."
+            )
 
         vessel_actions = list(action["vessels"])
-        well_rate_indices = list(action["wells"])
         if len(vessel_actions) != len(self.vessel_ids):
             raise ValueError(
                 f"Expected {len(self.vessel_ids)} vessel actions, got {len(vessel_actions)}."
             )
-        if len(well_rate_indices) != len(self.well_ids):
-            raise ValueError(
-                f"Expected {len(self.well_ids)} well rate actions, got {len(well_rate_indices)}."
-            )
+        if self.automatic_well_control:
+            well_rates_tph = self.automatic_well_rates_tph()
+        else:
+            well_rate_indices = list(action["wells"])
+            if len(well_rate_indices) != len(self.well_ids):
+                raise ValueError(
+                    f"Expected {len(self.well_ids)} well rate actions, "
+                    f"got {len(well_rate_indices)}."
+                )
 
-        return {
+        normalized = {
             "vessels": [int(choice) for choice in vessel_actions],
-            "wells": [self._normalize_well_rate_index(index) for index in well_rate_indices],
         }
+        if self.automatic_well_control:
+            normalized["well_rates_tph"] = well_rates_tph
+        else:
+            normalized["wells"] = [
+                self._normalize_well_rate_index(index)
+                for index in well_rate_indices
+            ]
+        return normalized
 
     def _normalize_well_rate_index(self, index) -> int:
         if not isinstance(index, Integral) or isinstance(index, bool):
@@ -532,7 +628,6 @@ class CCSEnv:
 
     def _build_proposals(self, action: dict[str, list]) -> list[ActionProposal]:
         vessel_actions = action["vessels"]
-        well_rate_indices = action["wells"]
         proposals: list[ActionProposal] = []
 
         # Always capture at full rate (capture is not an RL control here).
@@ -542,7 +637,25 @@ class CCSEnv:
         departing = self._vessel_dispatch_proposals(vessel_actions, proposals)
         self._auto_loading_proposals(proposals, departing)
         self._auto_unloading_proposals(proposals, departing)
-        self._injection_proposals(well_rate_indices, proposals)
+        if self.automatic_well_control:
+            desired = {
+                well_id: float(rate_tph)
+                for well_id, rate_tph in zip(
+                    self.well_ids,
+                    action["well_rates_tph"],
+                )
+            }
+        else:
+            desired = {
+                well_id: mtpa_to_tph(
+                    WELL_RATE_LEVELS_MTPA[int(rate_index)]
+                )
+                for well_id, rate_index in zip(
+                    self.well_ids,
+                    action["wells"],
+                )
+            }
+        self._injection_proposals(desired, proposals)
         return proposals
 
     def _vessel_dispatch_proposals(self, vessel_actions, proposals) -> set[str]:
@@ -619,12 +732,11 @@ class CCSEnv:
         )
         return queue[0] if queue else None
 
-    def _injection_proposals(self, well_rate_indices, proposals) -> None:
-        desired: dict[str, float] = {}
-        for well_id, rate_index in zip(self.well_ids, well_rate_indices):
-            rate_mtpa = WELL_RATE_LEVELS_MTPA[int(rate_index)]
-            desired[well_id] = mtpa_to_tph(rate_mtpa)
-
+    def _injection_proposals(
+        self,
+        desired: dict[str, float],
+        proposals,
+    ) -> None:
         for pipeline_id in self.network._entities_of_type(Pipeline):
             wells = self._pipeline_wells(pipeline_id)
             total = sum(desired.get(w, 0.0) for w in wells)

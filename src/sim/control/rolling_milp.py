@@ -30,8 +30,9 @@ from ..environment import (
     CCSEnv,
 )
 from ..routes import route_distance_km, sea_route
+from .baselines import greedy_shuttle_policy
 from .milp import KNOTS_TO_KMH
-from .replay import replay_native_actions
+from .replay import action_for_well_control_mode, replay_native_actions
 
 @dataclass(frozen=True)
 class RollingMilpPlan:
@@ -63,6 +64,7 @@ class RollingMilpPlan:
     relative_gap: float | None = None
     warm_start_accepted: bool | None = None
     warm_start_source: str = "native_mpc"
+    warm_start_score: tuple[float, ...] | None = None
     mpc_warm_start_score: tuple[float, ...] | None = None
     shifted_warm_start_score: tuple[float, ...] | None = None
     cplex_root_algorithm: str = "automatic"
@@ -102,24 +104,41 @@ def _plan_native_cplex_actions(
     prune_unreachable_route_arcs: bool = False,
     warm_start_end_unstored_guard: bool = False,
     initial_barrier_root: bool = True,
+    warm_start_mode: str = "native_mpc",
 ) -> RollingMilpPlan:
     """Plan a rolling window with the environment-aligned native CPLEX MILP."""
     from .cplex_milp import replay_full_scenario_cplex_plan
 
-    (
-        warm_start_actions,
-        safe_progress_limit_t,
-        safe_vent_limit_t,
-        safe_end_unstored_limit_t,
-        safe_execution_vent_limit_t,
-        safe_execution_unstored_limit_t,
-    ) = _native_mpc_plan_seed(
-        env,
-        planning_horizon_h,
-        objective_mode=objective_mode,
-        execution_h=execution_h,
-    )
-    warm_start_source = "native_mpc"
+    warm_start_mode = str(warm_start_mode).lower()
+    if warm_start_mode == "greedy":
+        warm_start_actions = greedy_warm_start_actions(
+            env,
+            planning_horizon_h,
+        )
+        safe_progress_limit_t = None
+        safe_vent_limit_t = None
+        safe_end_unstored_limit_t = None
+        safe_execution_vent_limit_t = None
+        safe_execution_unstored_limit_t = None
+    elif warm_start_mode == "native_mpc":
+        (
+            warm_start_actions,
+            safe_progress_limit_t,
+            safe_vent_limit_t,
+            safe_end_unstored_limit_t,
+            safe_execution_vent_limit_t,
+            safe_execution_unstored_limit_t,
+        ) = _native_mpc_plan_seed(
+            env,
+            planning_horizon_h,
+            objective_mode=objective_mode,
+            execution_h=execution_h,
+        )
+    else:
+        raise ValueError(
+            "warm_start_mode must be 'greedy' or 'native_mpc'"
+        )
+    warm_start_source = warm_start_mode
     mpc_score = _native_warm_start_score(
         env,
         warm_start_actions,
@@ -256,7 +275,10 @@ def _plan_native_cplex_actions(
             final_stage.warm_start_accepted if final_stage is not None else None
         ),
         warm_start_source=warm_start_source,
-        mpc_warm_start_score=mpc_score,
+        warm_start_score=mpc_score,
+        mpc_warm_start_score=(
+            mpc_score if warm_start_mode == "native_mpc" else None
+        ),
         shifted_warm_start_score=shifted_score,
         cplex_root_algorithm=cplex_root_algorithm,
         termination_reason=(
@@ -295,7 +317,14 @@ def _shifted_milp_warm_start(
         return None
     try:
         materialized = _materialize_cplex_actions(env, shifted)
-        replay = replay_native_actions(env, materialized, horizon_h=horizon_h)
+        replay = replay_native_actions(
+            env,
+            [
+                action_for_well_control_mode(env, action)
+                for action in materialized
+            ],
+            horizon_h=horizon_h,
+        )
     except (RuntimeError, ValueError, IndexError, KeyError):
         return None
     return materialized if replay.is_executable else None
@@ -316,7 +345,10 @@ def _native_warm_start_score(
     try:
         replay = replay_native_actions(
             replay_env,
-            actions,
+            [
+                action_for_well_control_mode(replay_env, action)
+                for action in actions
+            ],
             horizon_h=horizon_h,
             copy_env=False,
         )
@@ -529,19 +561,20 @@ def _materialize_cplex_actions(
                 queue.popleft()
             vessel_actions.append(int(choice))
 
-        well_actions: list[int] = []
-        for well_id, choice, mask in zip(
-            replay_env.well_ids,
-            planned["wells"],
-            replay_env.well_rate_action_mask(),
-        ):
-            choice = int(choice)
-            well_actions.append(
-                choice if 0 <= choice < len(mask) and mask[choice]
-                else replay_env.highest_feasible_well_rate_index(well_id)
-            )
-
-        action = {"vessels": vessel_actions, "wells": well_actions}
+        action = {"vessels": vessel_actions}
+        if not replay_env.automatic_well_control:
+            well_actions: list[int] = []
+            for well_id, choice, mask in zip(
+                replay_env.well_ids,
+                planned["wells"],
+                replay_env.well_rate_action_mask(),
+            ):
+                choice = int(choice)
+                well_actions.append(
+                    choice if 0 <= choice < len(mask) and mask[choice]
+                    else replay_env.highest_feasible_well_rate_index(well_id)
+                )
+            action["wells"] = well_actions
         actions.append(action)
         replay_env.step(action)
     return actions
@@ -602,6 +635,44 @@ def _native_mpc_warm_start(
     return actions
 
 
+def greedy_warm_start_actions(
+    env: CCSEnv,
+    horizon_h: int,
+) -> list[dict[str, list[int]]]:
+    """Build a replay-valid Greedy trajectory from the current state."""
+
+    if horizon_h <= 0:
+        raise ValueError("horizon_h must be positive")
+    replay_env = copy.deepcopy(env)
+    actions: list[dict[str, list[int]]] = []
+    for _step in range(int(horizon_h)):
+        action = action_for_well_control_mode(
+            replay_env,
+            greedy_shuttle_policy(replay_env),
+        )
+        actions.append(copy.deepcopy(action))
+        _obs, _reward, terminated, truncated, _info = replay_env.step(action)
+        if terminated or truncated:
+            break
+    if len(actions) != int(horizon_h):
+        raise RuntimeError(
+            "Greedy warm start ended before the requested planning horizon"
+        )
+    validation = replay_native_actions(
+        env,
+        actions,
+        horizon_h=int(horizon_h),
+    )
+    if not validation.is_executable:
+        reason = ";".join(
+            (*validation.violations, *validation.mismatches)
+        )
+        raise RuntimeError(
+            f"Greedy warm start is not replay-valid: {reason}"
+        )
+    return actions
+
+
 class RollingMilpController:
     """Re-planning MILP controller, usable as a metrics ``policy(env)``."""
 
@@ -618,7 +689,8 @@ class RollingMilpController:
         terminal_cleanup_value: bool = True,
         terminal_cleanup_mip_start_mode: str = "partial",
         load_min_formulation: str = "choice3",
-        shifted_milp_warm_start: bool = True,
+        shifted_milp_warm_start: bool = False,
+        warm_start_mode: str = "greedy",
         vessel_visit_load_cuts: bool = True,
         vessel_visit_load_cut_stride_h: int = 12,
         source_visit_vent_cuts: bool = True,
@@ -659,6 +731,11 @@ class RollingMilpController:
             )
         self.load_min_formulation = str(load_min_formulation).lower()
         self.shifted_milp_warm_start = bool(shifted_milp_warm_start)
+        self.warm_start_mode = str(warm_start_mode).lower()
+        if self.warm_start_mode not in {"greedy", "native_mpc"}:
+            raise ValueError(
+                "warm_start_mode must be 'greedy' or 'native_mpc'"
+            )
         self.vessel_visit_load_cuts = bool(vessel_visit_load_cuts)
         self.vessel_visit_load_cut_stride_h = int(vessel_visit_load_cut_stride_h)
         self.source_visit_vent_cuts = bool(source_visit_vent_cuts)
@@ -736,17 +813,29 @@ class RollingMilpController:
             raise RuntimeError(f"rolling_milp native trace expired at hour {elapsed}")
         action = self._native_actions_by_hour[elapsed]
         self._validate_native_action(env, action)
-        return {
+        control_action = {
             "vessels": [int(choice) for choice in action["vessels"]],
-            "wells": [int(choice) for choice in action["wells"]],
         }
+        if not env.automatic_well_control:
+            control_action["wells"] = [
+                int(choice) for choice in action["wells"]
+            ]
+        return control_action
 
     def _replan(self, env: CCSEnv, now: float) -> None:
         state = env.simulator.state
         term_init = sum(state.entity_inventory_t.get(t, 0.0) for t in env.terminal_ids)
         source_buffer = sum(state.entity_inventory_t.get(e, 0.0) for e in env.emitter_ids)
         start = time.perf_counter()
-        remaining_h = max(1, min(self.planning_horizon_h, env.n_steps - env.t))
+        scenario_steps = (
+            env.scenario.n_steps
+            if env.scenario is not None
+            else env.n_steps
+        )
+        remaining_h = max(
+            1,
+            min(self.planning_horizon_h, scenario_steps - env.t),
+        )
         previous_plan_actions = None
         previous_plan_elapsed_h = 0
         if (
@@ -816,6 +905,7 @@ class RollingMilpController:
                 self.warm_start_end_unstored_guard
             ),
             initial_barrier_root=self.initial_barrier_root,
+            warm_start_mode=self.warm_start_mode,
         )
         self.last_plan_status = plan.status
         self.status_counts[plan.status] = self.status_counts.get(plan.status, 0) + 1
@@ -823,9 +913,13 @@ class RollingMilpController:
         native_actions = list(getattr(plan, "native_actions_by_hour", []))
         if native_actions:
             execution_h = min(self.replan_every, remaining_h, len(native_actions))
+            replay_actions = [
+                action_for_well_control_mode(env, action)
+                for action in native_actions[:execution_h]
+            ]
             execution_replay = replay_native_actions(
                 env,
-                native_actions[:execution_h],
+                replay_actions,
                 horizon_h=execution_h,
             )
             replay_is_valid = execution_replay.is_executable
@@ -873,6 +967,9 @@ class RollingMilpController:
                 "warm_start_source": self.last_warm_start_source,
                 "cplex_root_algorithm": getattr(
                     plan, "cplex_root_algorithm", "automatic"
+                ),
+                "warm_start_score": getattr(
+                    plan, "warm_start_score", None
                 ),
                 "mpc_warm_start_score": getattr(
                     plan, "mpc_warm_start_score", None
@@ -924,14 +1021,26 @@ class RollingMilpController:
     def _validate_native_action(env: CCSEnv, action: dict[str, list[int]]) -> None:
         vessel_actions = action.get("vessels", [])
         well_actions = action.get("wells", [])
-        if len(vessel_actions) != len(env.vessel_ids) or len(well_actions) != len(env.well_ids):
+        if len(vessel_actions) != len(env.vessel_ids):
+            raise RuntimeError("rolling_milp native trace has the wrong action dimension")
+        if (
+            not env.automatic_well_control
+            and len(well_actions) != len(env.well_ids)
+        ):
             raise RuntimeError("rolling_milp native trace has the wrong action dimension")
         for vessel_id, choice, mask in zip(env.vessel_ids, vessel_actions, env.vessel_action_mask()):
             if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
                 raise RuntimeError(f"rolling_milp action is infeasible for {vessel_id}: {choice}")
-        for well_id, choice, mask in zip(env.well_ids, well_actions, env.well_rate_action_mask()):
-            if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
-                raise RuntimeError(f"rolling_milp action is infeasible for {well_id}: {choice}")
+        if not env.automatic_well_control:
+            for well_id, choice, mask in zip(
+                env.well_ids,
+                well_actions,
+                env.well_rate_action_mask(),
+            ):
+                if not (0 <= int(choice) < len(mask) and mask[int(choice)]):
+                    raise RuntimeError(
+                        f"rolling_milp action is infeasible for {well_id}: {choice}"
+                    )
 
 def _sail_hours_between(
     env: CCSEnv,

@@ -91,7 +91,12 @@ def masked_future_forecast_observation(
     env: CCSEnv,
     horizon_h: int = FORECAST_HORIZON_H,
 ) -> list[list[float]]:
-    """Return finite-episode forecasts with a binary valid-horizon channel."""
+    """Return forecasts masked only beyond the sampled scenario trajectory.
+
+    The physical episode can end before the sampled scenario.  Its continuation
+    is forecast context, so the 720 h execution boundary must not hide the
+    exogenous values available through hour 888.
+    """
 
     if env.simulator is None or env.scenario is None:
         raise RuntimeError("Call env.reset() before requesting forecast observations.")
@@ -99,7 +104,10 @@ def masked_future_forecast_observation(
     if horizon <= 0:
         raise ValueError("horizon_h must be positive")
     now_index = env.scenario.step_index(env.simulator.state.time_h)
-    valid_steps = min(horizon, max(0, int(env.n_steps) - now_index))
+    valid_steps = min(
+        horizon,
+        max(0, int(env.scenario.n_steps) - now_index),
+    )
     values = future_forecast_observation(env, valid_steps) if valid_steps else []
     channel_count = len(forecast_channel_names(env))
     rows = [[*row, 1.0] for row in values]
@@ -137,7 +145,6 @@ def masked_forecast_summary(
             np.where(mask, part[..., 8], np.inf).min(axis=-1),
             0.0,
         )
-        valid_fraction = mask.mean(axis=-1)
         summaries.extend(
             (
                 mean[..., 0],
@@ -147,7 +154,6 @@ def masked_forecast_summary(
                 injectivity,
                 mean[..., 8],
                 weather_min,
-                valid_fraction,
             )
         )
     return np.stack(summaries, axis=-1).astype(np.float32, copy=False)
@@ -210,7 +216,6 @@ def masked_forecast_summary_feature_names(
                 f"{env.well_ids[0]}.injectivity_min_{window_h}h",
                 f"fleet.speed_mean_{window_h}h",
                 f"fleet.speed_min_{window_h}h",
-                f"valid_fraction_{window_h}h",
             )
         )
     return tuple(names)
@@ -233,7 +238,6 @@ def masked_forecast_band_summary_feature_names(
                 f"{env.well_ids[0]}.injectivity_min_{label}",
                 f"fleet.speed_mean_{label}",
                 f"fleet.speed_min_{label}",
-                f"valid_fraction_{label}",
             )
         )
     return tuple(names)
