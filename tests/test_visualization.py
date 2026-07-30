@@ -10,12 +10,15 @@ from sim.control.rule_based import RuleBasedActionGenerator
 from sim.visualization import (
     _connect_route_to_facilities,
     _interpolate_route,
+    build_e1_cinematic_payload,
     build_trajectory,
     build_demo_trajectory,
     build_northern_lights_phase1_trajectory,
     build_northern_lights_phase2_trajectory,
     render_dashboard_html,
+    render_cinematic_dashboard_html,
     write_dashboard,
+    write_e1_cinematic_dashboard,
     write_northern_lights_phase1_dashboard,
     write_northern_lights_phase2_dashboard,
 )
@@ -771,6 +774,110 @@ class VisualizationTests(unittest.TestCase):
         self.assertIn("\"time_h\": 240.0", html)
         self.assertIn("\"stockholm_exergi\"", html)
         self.assertNotIn("\"aurora_phase2_well_1\"", html)
+
+    def test_e1_cinematic_payload_uses_representative_trace(self):
+        trace_csv = (
+            Path(__file__).resolve().parents[1]
+            / "experiments_results"
+            / "E1"
+            / "figures"
+            / "source_data"
+            / "figure_4_hourly_trace.csv"
+        )
+
+        payload = build_e1_cinematic_payload(trace_csv)
+
+        self.assertEqual(len(payload["frames"]), 721)
+        self.assertEqual(payload["duration_hours"], 720.0)
+        self.assertEqual(len(payload["vessels"]), 3)
+        self.assertEqual(len(payload["emitters"]), 3)
+        self.assertEqual(len(payload["components"]["capture_sites"]), 3)
+        self.assertEqual(len(payload["components"]["fleet"]), 3)
+        self.assertEqual(
+            [
+                component["id"]
+                for component in payload["components"]["transport_storage"]
+            ],
+            [
+                "oygarden_terminal",
+                "oygarden_pipeline",
+                "aurora_subsea_manifold",
+                "aurora_well_a7_ah",
+                "aurora_reservoir",
+            ],
+        )
+        self.assertEqual(len(payload["map"]["service_routes"]), 6)
+        self.assertIn(
+            "celsio__yara_sluiskil",
+            payload["map"]["service_routes"],
+        )
+        sailing_state = payload["frames"][200]["vessels"][
+            "northern_pathfinder"
+        ]
+        self.assertEqual(
+            sailing_state["operational_state"],
+            "sailing_to_terminal",
+        )
+        self.assertGreater(sailing_state["progress"], 0.0)
+        self.assertLess(sailing_state["progress"], 1.0)
+        self.assertEqual(payload["frames"][-1]["cumulative_vent_t"], 0.0)
+        self.assertFalse(
+            any(event["type"] == "vent" for event in payload["events"])
+        )
+
+    def test_write_e1_cinematic_dashboard_embeds_trace(self):
+        trace_csv = (
+            Path(__file__).resolve().parents[1]
+            / "experiments_results"
+            / "E1"
+            / "figures"
+            / "source_data"
+            / "figure_4_hourly_trace.csv"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = write_e1_cinematic_dashboard(
+                Path(tmpdir) / "cinematic.html",
+                trace_csv,
+            )
+            rendered = output.read_text(encoding="utf-8")
+
+        self.assertIn("Animated Northern Lights vessel", rendered)
+        self.assertIn("window.__CINEMATIC_DATA__", rendered)
+        self.assertIn('"duration_hours":720.0', rendered)
+        self.assertIn("Zero venting maintained", rendered)
+        self.assertIn("requestAnimationFrame", rendered)
+        self.assertIn('id="componentsPanel"', rendered)
+        self.assertIn("function renderComponents(frame)", rendered)
+        self.assertIn("let selectedComponent = selectedVessel", rendered)
+        self.assertIn("function chartConfigForSelection()", rendered)
+        self.assertIn('id="chartTitle"', rendered)
+        self.assertIn('id="chartLegend"', rendered)
+        self.assertNotIn(
+            'function renderComponents(frame) {\n      componentsBody.innerHTML = "";',
+            rendered,
+        )
+        self.assertIn("function drawLatLonGrid()", rendered)
+        self.assertIn('map.on("moveend zoomend", drawLatLonGrid)', rendered)
+        self.assertIn('id="coordinateReadout"', rendered)
+        self.assertGreater(len(rendered), 250_000)
+
+    def test_render_cinematic_dashboard_escapes_title(self):
+        rendered = render_cinematic_dashboard_html(
+            {
+                "title": "<script>alert(1)</script>",
+                "subtitle": "safe",
+                "duration_hours": 1,
+                "frames": [],
+                "events": [],
+                "vessels": [],
+                "emitters": [],
+                "terminal": {},
+                "map": {},
+            }
+        )
+
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", rendered)
+        self.assertNotIn("<title><script>", rendered)
 
 
 if __name__ == "__main__":
