@@ -7,3 +7,7 @@ clone*.log
 tmp/
 output/
 .worktrees/
+
+# Colab demo outputs (examples/colab_vessel_trajectory_demo.ipynb)
+vessel_tracks.png
+vessel_dashboard_30d.html
