@@ -10,7 +10,10 @@
     build_trajectory,
 )
 from .html import render_dashboard_html
+from .cinematic import render_cinematic_dashboard_html
+from .e1_trace import build_e1_cinematic_payload
 from .writers import (
+    write_e1_cinematic_dashboard,
     write_dashboard,
     write_northern_lights_phase1_dashboard,
     write_northern_lights_phase2_dashboard,
@@ -26,7 +29,10 @@ __all__ = [
     "build_northern_lights_phase1_trajectory",
     "build_northern_lights_phase2_trajectory",
     "build_trajectory",
+    "build_e1_cinematic_payload",
+    "render_cinematic_dashboard_html",
     "render_dashboard_html",
+    "write_e1_cinematic_dashboard",
     "write_dashboard",
     "write_northern_lights_phase1_dashboard",
     "write_northern_lights_phase2_dashboard",
