@@ -5,6 +5,53 @@
   const loadDemoButton = document.querySelector("[data-load-demo]");
   const demoPreview = document.querySelector("[data-demo-preview]");
   const copyButton = document.querySelector("[data-copy-citation]");
+  const lightThemeStyles = document.getElementById("lightThemeStyles");
+  const themeChoices = document.querySelectorAll("[data-theme-choice]");
+  const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+
+  const applyTheme = (theme, persist = true) => {
+    const normalized = theme === "dark" ? "dark" : "light-v2";
+    document.documentElement.dataset.theme = normalized;
+    if (lightThemeStyles) {
+      lightThemeStyles.media = normalized === "dark" ? "not all" : "all";
+    }
+    themeChoices.forEach((button) => {
+      button.setAttribute(
+        "aria-pressed",
+        String(button.dataset.themeChoice === normalized),
+      );
+    });
+    themeColorMeta?.setAttribute(
+      "content",
+      normalized === "dark" ? "#030b11" : "#f6f9f7",
+    );
+    demoPreview
+      ?.querySelector("iframe")
+      ?.contentWindow
+      ?.postMessage({ type: "ccs-rl-theme", theme: normalized }, "*");
+    if (persist) {
+      try {
+        localStorage.setItem("ccs-rl-dashboard-theme", normalized);
+      } catch {
+        // The selected theme still applies for the current page.
+      }
+    }
+  };
+
+  themeChoices.forEach((button) => {
+    button.addEventListener("click", () => {
+      applyTheme(button.dataset.themeChoice);
+    });
+  });
+  applyTheme(document.documentElement.dataset.theme, false);
+  window.addEventListener("storage", (event) => {
+    if (
+      event.key === "ccs-rl-dashboard-theme"
+      && (event.newValue === "light-v2" || event.newValue === "dark")
+    ) {
+      applyTheme(event.newValue, false);
+    }
+  });
 
   const syncHeader = () => {
     header?.classList.toggle("is-scrolled", window.scrollY > 18);
