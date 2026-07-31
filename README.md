@@ -12,6 +12,9 @@
     <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white&style=flat-square" alt="Google Drive dataset"></a>
     <a href="https://colab.research.google.com/github/ZZZPhaethon/CCS_RL/blob/main/examples/colab_vessel_trajectory_demo.ipynb"><img src="https://img.shields.io/badge/Open%20in-Colab-F9AB00?logo=googlecolab&logoColor=white&style=flat-square" alt="Open vessel-trajectory demo in Colab"></a>
     <a href="https://zzzphaethon.github.io/CCS_RL/"><img src="https://img.shields.io/badge/Project-Page-13B8A6?logo=githubpages&logoColor=white&style=flat-square" alt="CCS_RL project page"></a>
+    <a href="https://github.com/ZZZPhaethon/CCS_RL/graphs/contributors">
+  <img src="https://img.shields.io/github/contributors/ZZZPhaethon/CCS_RL?style=flat-square&color=2E8B57" alt="CCS_RL contributors">
+</a>
   </p>
 
   <p>
