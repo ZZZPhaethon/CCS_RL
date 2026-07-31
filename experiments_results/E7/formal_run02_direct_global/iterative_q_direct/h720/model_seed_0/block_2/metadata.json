@@ -1,0 +1,137 @@
+{
+  "checkpoint": "/scratch_root/hx721/CCS_RLLLM_e1_20260728/experiments_results/E1/models/iterative_q/g60_p4_model_seed_0/iterative_action_q.pt",
+  "checkpoint_sha256": "e529eb06038a4842f58eb97a912ad0f72de9000f03d39d9bc8839e8690febedc",
+  "controller": "iterative_q_direct",
+  "device": "cpu",
+  "direct_global_adapter": {
+    "cycle_hours": 720,
+    "episode_progress": "t / H",
+    "physical_state_reset": false,
+    "policy_windows": [
+      [
+        108,
+        155
+      ],
+      [
+        156,
+        203
+      ],
+      [
+        204,
+        251
+      ],
+      [
+        252,
+        299
+      ],
+      [
+        300,
+        347
+      ],
+      [
+        348,
+        395
+      ],
+      [
+        396,
+        443
+      ],
+      [
+        444,
+        491
+      ],
+      [
+        492,
+        539
+      ],
+      [
+        540,
+        587
+      ],
+      [
+        588,
+        635
+      ],
+      [
+        636,
+        680
+      ]
+    ],
+    "weights_changed": false
+  },
+  "direct_policy_windows": [
+    [
+      108,
+      155
+    ],
+    [
+      156,
+      203
+    ],
+    [
+      204,
+      251
+    ],
+    [
+      252,
+      299
+    ],
+    [
+      300,
+      347
+    ],
+    [
+      348,
+      395
+    ],
+    [
+      396,
+      443
+    ],
+    [
+      444,
+      491
+    ],
+    [
+      492,
+      539
+    ],
+    [
+      540,
+      587
+    ],
+    [
+      588,
+      635
+    ],
+    [
+      636,
+      680
+    ]
+  ],
+  "execution_horizon_hours": 720,
+  "experiment": "E7 temporal-horizon generalization",
+  "forecast_context_hours": 168,
+  "host": "rootrunner",
+  "model_seed": 0,
+  "nested_scenario_prefix": true,
+  "observation_schema": {
+    "excluded_state_features": [],
+    "source_state_features": 94,
+    "state_features": 94
+  },
+  "receding_adapter": null,
+  "records": 5,
+  "scenario_hours": 8928,
+  "slurm_array_job_id": "35636",
+  "slurm_array_task_id": "38",
+  "slurm_cpus_per_task": "4",
+  "slurm_job_id": "35639",
+  "test_seeds": [
+    9000041,
+    9000042,
+    9000043,
+    9000044,
+    9000045
+  ]
+}

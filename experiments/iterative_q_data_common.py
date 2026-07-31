@@ -110,8 +110,17 @@ def make_native_env(
             raise ValueError(
                 "forecast_context_hours must be at least 168"
             )
+        minimum_scenario_hours = int(args.episode_hours) + context_hours
+        scenario_episode_hours = int(
+            getattr(args, "scenario_episode_hours", minimum_scenario_hours)
+        )
+        if scenario_episode_hours < minimum_scenario_hours:
+            raise ValueError(
+                "scenario_episode_hours must cover the execution horizon plus "
+                "forecast context"
+            )
         generator = ReplayableDifficultyScenarioGenerator(
-            episode_hours=int(args.episode_hours) + context_hours,
+            episode_hours=scenario_episode_hours,
             weather_process="window",
             hard_probability=probability,
             scenario_protocol=protocol,

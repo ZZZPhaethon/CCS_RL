@@ -1,0 +1,269 @@
+{
+  "protocol": "unified_window_v1",
+  "seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "seed_count": 30,
+  "terminal_cleanup_included": true,
+  "compute_budget": {
+    "rolling_time_limit_seconds_per_replan": 600,
+    "full_time_limit_seconds_per_seed": 18000,
+    "solver_threads_per_process": 4
+  },
+  "provenance": {
+    "primary_result_status": "extended_budget_run03_promoted_on_2026-07-30",
+    "superseded_results_retained": true,
+    "single_factor_time_limit_comparison": false,
+    "source_hashes_differ_from_superseded_run": true
+  },
+  "methods": {
+    "greedy": {
+      "episode_count": 30,
+      "metrics": {
+        "total_cost": {
+          "count": 30,
+          "mean": 2254211.563636566,
+          "standard_deviation": 419091.88010986336,
+          "median": 2230178.087059638,
+          "minimum": 1749991.6922290896,
+          "maximum": 3533761.529562704
+        },
+        "operating_cost": {
+          "count": 30,
+          "mean": 1670469.705851285,
+          "standard_deviation": 89490.11050511866,
+          "median": 1665732.0025704582,
+          "minimum": 1477923.372397434,
+          "maximum": 1821277.1599969582
+        },
+        "total_cost_per_stored_t": {
+          "count": 30,
+          "mean": 22.39684835883335,
+          "standard_deviation": 6.424520724773389,
+          "median": 21.53628358275897,
+          "minimum": 15.121163789479587,
+          "maximum": 43.552891006064264
+        },
+        "stored_t": {
+          "count": 30,
+          "mean": 102984.17556541668,
+          "standard_deviation": 9772.212207079992,
+          "median": 101777.51795203038,
+          "minimum": 81137.24365784733,
+          "maximum": 124463.61990029803
+        },
+        "vented_t": {
+          "count": 30,
+          "mean": 7296.773222316017,
+          "standard_deviation": 5925.333078462556,
+          "median": 6376.789618780695,
+          "minimum": 0.0,
+          "maximum": 25697.976964565867
+        },
+        "terminal_cleanup_operating_cost": {
+          "count": 30,
+          "mean": 219274.1246433097,
+          "standard_deviation": 41688.67529148362,
+          "median": 217458.40793566883,
+          "minimum": 123800.62038750286,
+          "maximum": 329963.2737352864
+        },
+        "wall_clock_seconds": {
+          "count": 30,
+          "mean": 1.0654798993840813,
+          "standard_deviation": 0.32654562710753116,
+          "median": 1.0405783369205892,
+          "minimum": 0.38356243213638663,
+          "maximum": 1.6774545097723603
+        }
+      }
+    },
+    "rolling_milp": {
+      "episode_count": 30,
+      "metrics": {
+        "total_cost": {
+          "count": 30,
+          "mean": 2089728.4612077808,
+          "standard_deviation": 289555.43478900957,
+          "median": 2026693.664290322,
+          "minimum": 1704683.0519553637,
+          "maximum": 2743967.0885134107
+        },
+        "operating_cost": {
+          "count": 30,
+          "mean": 1716673.632507502,
+          "standard_deviation": 88710.4797099247,
+          "median": 1724611.41522258,
+          "minimum": 1523990.2178885653,
+          "maximum": 1849472.0997621664
+        },
+        "total_cost_per_stored_t": {
+          "count": 30,
+          "mean": 19.989454902370174,
+          "standard_deviation": 4.0444768818936865,
+          "median": 18.58509419187277,
+          "minimum": 14.9263166980721,
+          "maximum": 28.517912905872006
+        },
+        "stored_t": {
+          "count": 30,
+          "mean": 105909.61385948276,
+          "standard_deviation": 8556.667222085012,
+          "median": 104756.23561814571,
+          "minimum": 89834.39317069865,
+          "maximum": 124463.61990029803
+        },
+        "vented_t": {
+          "count": 30,
+          "mean": 4663.185358753486,
+          "standard_deviation": 4082.6892386714694,
+          "median": 3146.8309288766436,
+          "minimum": 0.0,
+          "maximum": 13665.115766254208
+        },
+        "terminal_cleanup_operating_cost": {
+          "count": 30,
+          "mean": 223280.764778077,
+          "standard_deviation": 44686.980844550424,
+          "median": 210682.9410305776,
+          "minimum": 162917.30576559118,
+          "maximum": 347042.9315763592
+        },
+        "wall_clock_seconds": {
+          "count": 30,
+          "mean": 12312.734374695505,
+          "standard_deviation": 1763.8143280068462,
+          "median": 12263.061084777117,
+          "minimum": 6818.884148661047,
+          "maximum": 14967.60237235576
+        }
+      }
+    },
+    "full_milp": {
+      "episode_count": 30,
+      "metrics": {
+        "total_cost": {
+          "count": 30,
+          "mean": 2254197.725636566,
+          "standard_deviation": 419094.66406766156,
+          "median": 2230178.087059638,
+          "minimum": 1749991.6922290896,
+          "maximum": 3533761.529562704
+        },
+        "operating_cost": {
+          "count": 30,
+          "mean": 1670455.8678512848,
+          "standard_deviation": 89493.11443857908,
+          "median": 1665732.0025704582,
+          "minimum": 1477923.372397434,
+          "maximum": 1821277.1599969582
+        },
+        "total_cost_per_stored_t": {
+          "count": 30,
+          "mean": 22.396712398024118,
+          "standard_deviation": 6.424543703288722,
+          "median": 21.534244170620447,
+          "minimum": 15.121163789479587,
+          "maximum": 43.552891006064264
+        },
+        "stored_t": {
+          "count": 30,
+          "mean": 102984.17556541668,
+          "standard_deviation": 9772.212207079992,
+          "median": 101777.51795203038,
+          "minimum": 81137.24365784733,
+          "maximum": 124463.61990029803
+        },
+        "vented_t": {
+          "count": 30,
+          "mean": 7296.773222316017,
+          "standard_deviation": 5925.333078462556,
+          "median": 6376.789618780695,
+          "minimum": 0.0,
+          "maximum": 25697.976964565867
+        },
+        "terminal_cleanup_operating_cost": {
+          "count": 30,
+          "mean": 219329.47664330972,
+          "standard_deviation": 41636.20216477171,
+          "median": 217458.40793566883,
+          "minimum": 123800.62038750286,
+          "maximum": 329963.2737352864
+        },
+        "wall_clock_seconds": {
+          "count": 30,
+          "mean": 18108.822947030963,
+          "standard_deviation": 3.0513382550179333,
+          "median": 18107.709276682,
+          "minimum": 18104.11043331586,
+          "maximum": 18115.475339640398
+        }
+      }
+    }
+  },
+  "paired_comparisons": {
+    "rolling_milp_vs_greedy": {
+      "method_minus_greedy_total_cost": {
+        "count": 30,
+        "mean": -164483.10242878558,
+        "standard_deviation": 405527.4493545137,
+        "median": -11831.489999840036,
+        "minimum": -1610666.7057230407,
+        "maximum": 456386.48283478664,
+        "bootstrap_95_percent_ci_for_mean": [
+          -319394.35152752505,
+          -32239.15553565734
+        ]
+      },
+      "cost_improvement_vs_greedy_percent": {
+        "count": 30,
+        "mean": 5.519456340437409,
+        "standard_deviation": 14.567306563923047,
+        "median": 0.5071875374979797,
+        "minimum": -21.65433505153271,
+        "maximum": 45.57938310914709,
+        "bootstrap_95_percent_ci_for_mean": [
+          0.5904706813711661,
+          10.91445770077838
+        ]
+      },
+      "lower_cost_seed_count": 16,
+      "equal_cost_seed_count": 5,
+      "higher_cost_seed_count": 9
+    },
+    "full_milp_vs_greedy": {
+      "method_minus_greedy_total_cost": {
+        "count": 30,
+        "mean": -13.838000000004346,
+        "standard_deviation": 75.7938475075887,
+        "median": 0.0,
+        "minimum": -415.1400000001304,
+        "maximum": 0.0,
+        "bootstrap_95_percent_ci_for_mean": [
+          -41.51400000001304,
+          0.0
+        ]
+      },
+      "cost_improvement_vs_greedy_percent": {
+        "count": 30,
+        "mean": 0.0006368422427351534,
+        "standard_deviation": 0.00348812861918224,
+        "median": 0.0,
+        "minimum": 0.0,
+        "maximum": 0.0191052672820546,
+        "bootstrap_95_percent_ci_for_mean": [
+          0.0,
+          0.0019105267282054602
+        ]
+      },
+      "lower_cost_seed_count": 1,
+      "equal_cost_seed_count": 29,
+      "higher_cost_seed_count": 0
+    }
+  },
+  "interpretation": {
+    "rolling_milp_vs_greedy": "valid online paired comparison",
+    "full_milp_vs_greedy": "descriptive only: Full MILP has perfect future information and all 30 solves produced time-limited feasible incumbents, not proven optima"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "job_id": "35623",
+  "array_job_id": "35586",
+  "array_task_id": "25",
+  "host": "rootrunner",
+  "seed": 9000056,
+  "purpose": "time_budget_ablation_E1_rolling_milp_h168_r24_cplex222_1200s",
+  "cplex_bin": "/scratch_root/hx721/software/CPLEX_Studio2220/cplex/bin/x86-64_linux/cplex",
+  "planning_horizon_hours": 168,
+  "replan_interval_hours": 24,
+  "solver_threads": 4,
+  "solver_time_limit_seconds_per_replan": 1200,
+  "run_status": "completed",
+  "solver_status_counts": {
+    "Integer Feasible": 15,
+    "Optimal": 15
+  },
+  "optimal_replan_count": 15,
+  "all_replans_optimal": false
+}

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import torch
 
 from scripts.train_iterative_action_q import (
     _combined_dataset,
@@ -21,6 +22,7 @@ def parse_args(argv=None):
     parser.add_argument("--train-data", nargs="+", required=True)
     parser.add_argument("--stage-names", nargs="+", required=True)
     parser.add_argument("--out-path", required=True)
+    parser.add_argument("--normalization-checkpoint")
     parser.add_argument(
         "--observation-input", default="shared_future_summary"
     )
@@ -71,9 +73,17 @@ def run(args):
     for _data, metadata in rows[1:]:
         if int(metadata["follow_action_index"]) != follow_index:
             raise ValueError("follow action index differs across stages")
-    normalization = dataset_normalization(
-        rows, observation_input=args.observation_input
-    )
+    if args.normalization_checkpoint:
+        checkpoint = torch.load(
+            args.normalization_checkpoint,
+            map_location="cpu",
+            weights_only=False,
+        )
+        normalization = checkpoint["normalization"]
+    else:
+        normalization = dataset_normalization(
+            rows, observation_input=args.observation_input
+        )
     _combined, datasets = _combined_dataset(
         rows,
         follow_index,
@@ -110,6 +120,7 @@ def run(args):
         "kind": "iterative_q_sampling_data_audit",
         "formal_test_access": False,
         "observation_input": args.observation_input,
+        "normalization_checkpoint": args.normalization_checkpoint,
         "stages": stage_quality,
         "c_dedup_balanced_sampling": c_audit,
         "d_dedup_advantage_sampling": d_audit,

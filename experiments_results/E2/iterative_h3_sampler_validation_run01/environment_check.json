@@ -1,0 +1,83 @@
+{
+  "kind": "iterative_h3_sampler_environment_check",
+  "protocol_id": "iterative_h3_sampler_validation_2026-07-30",
+  "formal_test_access": false,
+  "controller_validation_seed_count": 20,
+  "collection_gate": {
+    "required_heads": 3,
+    "ensemble_heads": 5,
+    "residual_margin": 0.4,
+    "economic_margin_eur_metadata_only": 40000,
+    "one_override_per_window": true,
+    "max_overrides": 12,
+    "windows_h": [
+      [
+        108,
+        155
+      ],
+      [
+        156,
+        203
+      ],
+      [
+        204,
+        251
+      ],
+      [
+        252,
+        299
+      ],
+      [
+        300,
+        347
+      ],
+      [
+        348,
+        395
+      ],
+      [
+        396,
+        443
+      ],
+      [
+        444,
+        491
+      ],
+      [
+        492,
+        539
+      ],
+      [
+        540,
+        587
+      ],
+      [
+        588,
+        635
+      ],
+      [
+        636,
+        680
+      ]
+    ]
+  },
+  "checkpoints": {
+    "model_seed_0": {
+      "path": "output/iterative_q_budget_search/runs/g60_p4/p1/iterative_action_q.pt",
+      "heads": 5,
+      "observation_input": "shared_future_summary"
+    },
+    "model_seed_1": {
+      "path": "experiments_results/E1/training_iterative_action_q_g60_p4_full_model_seeds_1_2_20260729/model_seed_1/p1/iterative_action_q.pt",
+      "heads": 5,
+      "observation_input": "shared_future_summary"
+    },
+    "model_seed_2": {
+      "path": "experiments_results/E1/training_iterative_action_q_g60_p4_full_model_seeds_1_2_20260729/model_seed_2/p1/iterative_action_q.pt",
+      "heads": 5,
+      "observation_input": "shared_future_summary"
+    }
+  },
+  "torch_version": "2.10.0+cu128",
+  "cuda_available_on_check_node": false
+}

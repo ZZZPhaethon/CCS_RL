@@ -1,0 +1,2318 @@
+{
+  "protocol": "unified_window_v1",
+  "purpose": "time_budget_ablation_E1_rolling_milp_h168_r24_cplex222_1200s",
+  "configuration": {
+    "out_dir": "/scratch_root/hx721/CCS_RLLLM_milp_validation_20260728/experiments_results/E1/ablation_rolling_milp_h168_r24_t1200s_cplex222_seeds_9000031-9000060_run01/seed_9000032",
+    "seed": 9000032,
+    "controllers": [
+      "rolling_milp"
+    ],
+    "online_episode_hours": 720,
+    "forecast_context_hours": 168,
+    "rolling_replan_hours": 24,
+    "rolling_planning_horizon_hours": 168,
+    "rolling_time_limit_seconds": 1200.0,
+    "rolling_warm_start_mode": "greedy",
+    "full_milp_horizon_hours": 48,
+    "full_milp_time_limit_seconds": 30.0,
+    "mip_gap_relative": null,
+    "solver_threads": 4,
+    "purpose": "time_budget_ablation_E1_rolling_milp_h168_r24_cplex222_1200s",
+    "overwrite": false
+  },
+  "rows": [
+    {
+      "horizon_hours": 720.0,
+      "storage_target_rate": 0.9,
+      "elapsed_hours": 720.0,
+      "captured_t": 118765.80374023803,
+      "stored_t": 91297.18802602345,
+      "vented_t": 8635.72038947582,
+      "in_transit_t": 24965.48485857223,
+      "in_transit_growth_t": 18832.895324738623,
+      "emitter_inventory_t": 12026.584791841191,
+      "vessel_inventory_t": 12938.90006673104,
+      "terminal_inventory_t": 0.0,
+      "loss_rate": 0.07271217907440494,
+      "storage_rate": 0.7687161215673382,
+      "annual_storage_gap_t": 15592.035340190778,
+      "vessel_fuel": 495262.02000000456,
+      "conditioning": 804982.1985218372,
+      "reconditioning": 37431.84709066964,
+      "loading": 3142.209924536968,
+      "unloading": 2747.250000000003,
+      "operating_cost": 1546536.350327589,
+      "vent_penalty": 690857.6311580654,
+      "storage_shortfall_penalty": 0.0,
+      "total_cost": 2237393.9814856546,
+      "net": -2034423.156695114,
+      "cost_per_stored_t": 16.939583614412776,
+      "total_cost_per_stored_t": 24.506712965221947,
+      "vessel_sailing_hours": 1193.000000000011,
+      "vessel_waiting_hours": 725.826374916575,
+      "vessel_loading_hours": 128.67362508341395,
+      "vessel_unloading_hours": 112.50000000000016,
+      "loaded_t": 102938.90006673103,
+      "unloaded_t": 90000.0,
+      "throttle_hours": 390,
+      "well_switch_count": 19,
+      "berth_wait_vessel_hours": 12,
+      "pressure_risk_hours": 0,
+      "min_pressure_margin_fraction": 0.8993304706226241,
+      "longest_venting_streak_hours": 167,
+      "total_reward": -2034.4231566951075,
+      "controller": "rolling_milp",
+      "seed": 9000032,
+      "wall_clock_seconds": 26913.733327718917,
+      "controller_decision_calls": 720,
+      "simulator_step_calls": 41730,
+      "simulator_simulated_hours": 41730.0,
+      "simulator_hour_steps": 41730.0,
+      "episode_operating_cost": 1343565.5255370485,
+      "episode_total_cost": 2034423.156695114,
+      "terminal_cleanup_operating_cost": 202970.82479054065,
+      "terminal_cleanup_included": true,
+      "evaluation_role": "online_controller",
+      "online_comparable": true,
+      "run_status": "completed",
+      "error_type": "",
+      "error_message": "",
+      "solver_replan_count": 30,
+      "solver_status_counts": "{\"Integer Feasible\": 22, \"Optimal\": 8}",
+      "solver_failure_count": 0,
+      "solver_timeout_count": 22,
+      "solver_solve_wall_seconds": 26764.979744561482,
+      "solver_time_limit_seconds_per_replan": 1200.0,
+      "solver_threads": 4,
+      "solver_executable": "/scratch_root/hx721/software/CPLEX_Studio2220/cplex/bin/x86-64_linux/cplex",
+      "warm_start_mode": "greedy",
+      "shifted_warm_start": false,
+      "fallback_used": false,
+      "executed_action_count": 720
+    }
+  ],
+  "diagnostics": {
+    "rolling_milp_replans": [
+      {
+        "state_hour": 0.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1201.896671407856,
+        "replan_wall_s": 1205.1178279970773,
+        "best_bound": 392494.4401,
+        "relative_gap": 0.14086313206167295,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 459753.375,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 32359,
+          "initialized_variables": 24295,
+          "missing_variable_count": 8064,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 57160,
+          "evaluated_constraints": 42508,
+          "partial_constraint_count": 14652,
+          "violated_constraint_count": 3,
+          "max_constraint_violation": 4.280478333384963e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56954",
+              "sense": "==",
+              "residual": -4.280478333384963e-05,
+              "violation": 4.280478333384963e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C56955",
+              "sense": "==",
+              "residual": 3.81834988729679e-05,
+              "violation": 3.81834988729679e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            },
+            {
+              "constraint": "_C56956",
+              "sense": "==",
+              "residual": -2.0664297153416555e-06,
+              "violation": 2.0664297153416555e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "barrier",
+        "warm_start_score": [
+          459753.37503930856,
+          25155.449906687714
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 242748.4579490462,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 456847.39503947715
+      },
+      {
+        "state_hour": 24.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1201.8147778278217,
+        "replan_wall_s": 1205.1801418447867,
+        "best_bound": 383172.07094,
+        "relative_gap": 0.08272790562132927,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 421051.1189,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31527,
+          "initialized_variables": 23879,
+          "missing_variable_count": 7648,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56240,
+          "evaluated_constraints": 42342,
+          "partial_constraint_count": 13898,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 2.7682005566020962e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56036",
+              "sense": "==",
+              "residual": 2.7682005566020962e-05,
+              "violation": 2.7682005566020962e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C56034",
+              "sense": "==",
+              "residual": 2.3913274162623566e-05,
+              "violation": 2.3913274162623566e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          421051.11886252614,
+          22848.255246706656
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 236193.0924736855,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 417729.99886096816
+      },
+      {
+        "state_hour": 48.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1201.8479935987853,
+        "replan_wall_s": 1205.3456449247897,
+        "best_bound": 396403.57627,
+        "relative_gap": 0.1489230372190777,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 466182.1547,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 32295,
+          "initialized_variables": 24263,
+          "missing_variable_count": 8032,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 57104,
+          "evaluated_constraints": 42510,
+          "partial_constraint_count": 14594,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 3.689529057737673e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56898",
+              "sense": "==",
+              "residual": 3.689529057737673e-05,
+              "violation": 3.689529057737673e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C56900",
+              "sense": "==",
+              "residual": -2.661884809640469e-05,
+              "violation": 2.661884809640469e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          466182.1547421522,
+          19853.951813889696
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 228898.29024014864,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 465767.0147418139
+      },
+      {
+        "state_hour": 72.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1201.9094459451735,
+        "replan_wall_s": 1205.4552604528144,
+        "best_bound": 414122.66614,
+        "relative_gap": 0.17934014067339288,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 504621.5694,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 32359,
+          "initialized_variables": 24295,
+          "missing_variable_count": 8064,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 57176,
+          "evaluated_constraints": 42524,
+          "partial_constraint_count": 14652,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 3.15568959194934e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56970",
+              "sense": "==",
+              "residual": -3.15568959194934e-05,
+              "violation": 3.15568959194934e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C56972",
+              "sense": "==",
+              "residual": 7.254971933434717e-06,
+              "violation": 7.254971933434717e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          504621.5693785774,
+          21629.10188147104
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 257992.6501154842,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 504621.56937931455
+      },
+      {
+        "state_hour": 96.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0084161069244,
+        "replan_wall_s": 1205.5047145448625,
+        "best_bound": 440510.36336,
+        "relative_gap": 0.14295426633624134,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 514817.2775,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 32359,
+          "initialized_variables": 24295,
+          "missing_variable_count": 8064,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 57176,
+          "evaluated_constraints": 42524,
+          "partial_constraint_count": 14652,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 4.230671311233891e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56972",
+              "sense": "==",
+              "residual": -4.230671311233891e-05,
+              "violation": 4.230671311233891e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C56970",
+              "sense": "==",
+              "residual": 1.716871884127613e-05,
+              "violation": 1.716871884127613e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          514817.2774922267,
+          25648.788971662736
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 212709.21844575345,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 513986.9974929759
+      },
+      {
+        "state_hour": 120.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1201.9962283680215,
+        "replan_wall_s": 1205.4529528357089,
+        "best_bound": 460610.05583,
+        "relative_gap": 0.06935895299055825,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 516525.7499,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31783,
+          "initialized_variables": 24007,
+          "missing_variable_count": 7776,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56528,
+          "evaluated_constraints": 42398,
+          "partial_constraint_count": 14130,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 4.719335447589401e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56324",
+              "sense": "==",
+              "residual": -4.719335447589401e-05,
+              "violation": 4.719335447589401e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C56322",
+              "sense": "==",
+              "residual": -2.9371639357123058e-05,
+              "violation": 2.9371639357123058e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          516525.74989446625,
+          29696.544749661956
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 245507.595530141,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 494938.46989679034
+      },
+      {
+        "state_hour": 144.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.014365425799,
+        "replan_wall_s": 1205.485296275001,
+        "best_bound": 485293.88069,
+        "relative_gap": 0.0814761018860593,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 528341.0499,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31271,
+          "initialized_variables": 23751,
+          "missing_variable_count": 7520,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55952,
+          "evaluated_constraints": 42286,
+          "partial_constraint_count": 13666,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 3.483837099338416e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55746",
+              "sense": "==",
+              "residual": -3.483837099338416e-05,
+              "violation": 3.483837099338416e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C55747",
+              "sense": "==",
+              "residual": 1.3379294614423998e-06,
+              "violation": 1.3379294614423998e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          528341.0499014726,
+          28653.326408964203
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 221726.83978365848,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 528341.0499024387
+      },
+      {
+        "state_hour": 168.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0009763771668,
+        "replan_wall_s": 1205.7019058191217,
+        "best_bound": 506491.64852,
+        "relative_gap": 0.11798925141203227,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 626818.3393,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 30983,
+          "initialized_variables": 23607,
+          "missing_variable_count": 7376,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55628,
+          "evaluated_constraints": 42223,
+          "partial_constraint_count": 13405,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 2.9378261388046667e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55423",
+              "sense": "==",
+              "residual": -2.9378261388046667e-05,
+              "violation": 2.9378261388046667e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            },
+            {
+              "constraint": "_C55424",
+              "sense": "==",
+              "residual": -7.408140163533972e-06,
+              "violation": 7.408140163533972e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          626818.3392751438,
+          29643.3971367864
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 278100.9866329013,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 574246.5716328907
+      },
+      {
+        "state_hour": 192.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1201.93701284891,
+        "replan_wall_s": 1205.6908744140528,
+        "best_bound": 493952.88292,
+        "relative_gap": 0.17264823618978717,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 630066.5862,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31015,
+          "initialized_variables": 23623,
+          "missing_variable_count": 7392,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55664,
+          "evaluated_constraints": 42230,
+          "partial_constraint_count": 13434,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 3.900292176695075e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55459",
+              "sense": "==",
+              "residual": 3.900292176695075e-05,
+              "violation": 3.900292176695075e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            },
+            {
+              "constraint": "_C55460",
+              "sense": "==",
+              "residual": 2.1825117528351257e-05,
+              "violation": 2.1825117528351257e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          630066.5862390529,
+          32995.579283166
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 328097.17996474105,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 597028.8630862319
+      },
+      {
+        "state_hour": 216.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.3634545230307,
+        "replan_wall_s": 1205.8618972678669,
+        "best_bound": 557163.00486,
+        "relative_gap": 0.08993208275430596,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 668434.4376000001,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 29543,
+          "initialized_variables": 22887,
+          "missing_variable_count": 6656,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 54008,
+          "evaluated_constraints": 41908,
+          "partial_constraint_count": 12100,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 7.055909009068273e-06,
+          "top_violations": [
+            {
+              "constraint": "_C53804",
+              "sense": "==",
+              "residual": -7.055909009068273e-06,
+              "violation": 7.055909009068273e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C53802",
+              "sense": "==",
+              "residual": -4.360188086138805e-06,
+              "violation": 4.360188086138805e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          668434.4376306075,
+          30526.141087215186
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 275481.9412340132,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 612221.3455741247
+      },
+      {
+        "state_hour": 240.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0845312792808,
+        "replan_wall_s": 1206.0564925628714,
+        "best_bound": 540604.92145,
+        "relative_gap": 0.25951391406808816,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 747088.3695,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31655,
+          "initialized_variables": 23943,
+          "missing_variable_count": 7712,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56384,
+          "evaluated_constraints": 42370,
+          "partial_constraint_count": 14014,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 3.810130692727398e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56180",
+              "sense": "==",
+              "residual": 3.810130692727398e-05,
+              "violation": 3.810130692727398e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C56178",
+              "sense": "==",
+              "residual": 1.7984729765885277e-05,
+              "violation": 1.7984729765885277e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          747088.3695232803,
+          26708.788109854613
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 318786.5512083914,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 730067.6295215478
+      },
+      {
+        "state_hour": 264.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0693667139858,
+        "replan_wall_s": 1206.0999887511134,
+        "best_bound": 526978.44223,
+        "relative_gap": 0.05448943965546251,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 743502.3311000001,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31399,
+          "initialized_variables": 23815,
+          "missing_variable_count": 7584,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56096,
+          "evaluated_constraints": 42314,
+          "partial_constraint_count": 13782,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 4.146870151089388e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55890",
+              "sense": "==",
+              "residual": 4.146870151089388e-05,
+              "violation": 4.146870151089388e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C55892",
+              "sense": "==",
+              "residual": -2.1333327822503634e-05,
+              "violation": 2.1333327822503634e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          743502.331133921,
+          23927.218386979323
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 295952.6252014885,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 557348.0237364803
+      },
+      {
+        "state_hour": 288.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1201.9790826728567,
+        "replan_wall_s": 1205.9454358010553,
+        "best_bound": 548094.04226,
+        "relative_gap": 0.1759756154427673,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 665558.1291,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31399,
+          "initialized_variables": 23815,
+          "missing_variable_count": 7584,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56096,
+          "evaluated_constraints": 42314,
+          "partial_constraint_count": 13782,
+          "violated_constraint_count": 1,
+          "max_constraint_violation": 4.474303568713367e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55892",
+              "sense": "==",
+              "residual": 4.474303568713367e-05,
+              "violation": 4.474303568713367e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          665558.1291311863,
+          27796.284973777547
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 232611.96863289957,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 665142.9891295069
+      },
+      {
+        "state_hour": 312.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0260737030767,
+        "replan_wall_s": 1206.189467994962,
+        "best_bound": 571475.37005,
+        "relative_gap": 0.18869081236976126,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 704386.6614,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 29959,
+          "initialized_variables": 23095,
+          "missing_variable_count": 6864,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 54444,
+          "evaluated_constraints": 41967,
+          "partial_constraint_count": 12477,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 3.095398278674111e-05,
+          "top_violations": [
+            {
+              "constraint": "_C54238",
+              "sense": "==",
+              "residual": -3.095398278674111e-05,
+              "violation": 3.095398278674111e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C54240",
+              "sense": "==",
+              "residual": -1.9426142898737453e-05,
+              "violation": 1.9426142898737453e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          704386.661412535,
+          31971.937516399918
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 283179.1027505082,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 704386.6614147786
+      },
+      {
+        "state_hour": 336.0,
+        "planning_horizon_h": 168,
+        "status": "Optimal",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 5.550236206967384,
+        "replan_wall_s": 9.9305579662323,
+        "best_bound": 701227.0057979887,
+        "relative_gap": 0.0,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 701227.0058,
+        "termination_reason": "Integer optimal solution",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31175,
+          "initialized_variables": 23703,
+          "missing_variable_count": 7472,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55812,
+          "evaluated_constraints": 42233,
+          "partial_constraint_count": 13579,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 0.00044597471605811734,
+          "top_violations": [
+            {
+              "constraint": "_C55608",
+              "sense": "==",
+              "residual": 0.00044597471605811734,
+              "violation": 0.00044597471605811734,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C55606",
+              "sense": "==",
+              "residual": 4.153919599048095e-05,
+              "violation": 4.153919599048095e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          701227.0058132687,
+          35798.86768803955
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 299874.5109637991,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 701227.0057979887
+      },
+      {
+        "state_hour": 360.0,
+        "planning_horizon_h": 168,
+        "status": "Optimal",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 5.101361925248057,
+        "replan_wall_s": 9.470628801267594,
+        "best_bound": 652213.3498807801,
+        "relative_gap": 0.0,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 652213.3499,
+        "termination_reason": "Integer optimal solution",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 30055,
+          "initialized_variables": 23143,
+          "missing_variable_count": 6912,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 54552,
+          "evaluated_constraints": 41988,
+          "partial_constraint_count": 12564,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 3.448895768087823e-05,
+          "top_violations": [
+            {
+              "constraint": "_C54348",
+              "sense": "==",
+              "residual": -3.448895768087823e-05,
+              "violation": 3.448895768087823e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C54346",
+              "sense": "==",
+              "residual": -2.072713505185675e-05,
+              "violation": 2.072713505185675e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          652213.3498792736,
+          33062.1783954349
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 318960.148514249,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 652213.3498807801
+      },
+      {
+        "state_hour": 384.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0732751251198,
+        "replan_wall_s": 1206.7070850050077,
+        "best_bound": 634940.786,
+        "relative_gap": 0.03235784667290004,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 662035.3315999999,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 30791,
+          "initialized_variables": 23511,
+          "missing_variable_count": 7280,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55380,
+          "evaluated_constraints": 42149,
+          "partial_constraint_count": 13231,
+          "violated_constraint_count": 1,
+          "max_constraint_violation": 1.911264735099394e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55176",
+              "sense": "==",
+              "residual": 1.911264735099394e-05,
+              "violation": 1.911264735099394e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          662035.3316086405,
+          36091.70665225569
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 285471.073178782,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 656173.1357163868
+      },
+      {
+        "state_hour": 408.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.1726802629419,
+        "replan_wall_s": 1207.6657031606883,
+        "best_bound": 550137.23933,
+        "relative_gap": 0.2710784666841618,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 765936.4347,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 32327,
+          "initialized_variables": 24279,
+          "missing_variable_count": 8048,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 57108,
+          "evaluated_constraints": 42485,
+          "partial_constraint_count": 14623,
+          "violated_constraint_count": 1,
+          "max_constraint_violation": 1.7740172552294098e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56904",
+              "sense": "==",
+              "residual": -1.7740172552294098e-05,
+              "violation": 1.7740172552294098e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          765936.4347412735,
+          37527.3498468531
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 314592.7189479919,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 754727.6547414442
+      },
+      {
+        "state_hour": 432.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.281741575338,
+        "replan_wall_s": 1208.2458021449856,
+        "best_bound": 560841.1172,
+        "relative_gap": 0.34131083177390575,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 852280.6214999999,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31655,
+          "initialized_variables": 23943,
+          "missing_variable_count": 7712,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56352,
+          "evaluated_constraints": 42338,
+          "partial_constraint_count": 14014,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 6.171183486003429e-06,
+          "top_violations": [
+            {
+              "constraint": "_C56148",
+              "sense": "==",
+              "residual": -6.171183486003429e-06,
+              "violation": 6.171183486003429e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C56147",
+              "sense": "==",
+              "residual": 2.4943408334365813e-06,
+              "violation": 2.4943408334365813e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          852280.6214573138,
+          36125.812844981556
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 335317.8821635551,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 851450.3414567946
+      },
+      {
+        "state_hour": 456.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.118502268102,
+        "replan_wall_s": 1208.152434189804,
+        "best_bound": 571134.54281,
+        "relative_gap": 0.3734770388387233,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 912424.233,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 32359,
+          "initialized_variables": 24295,
+          "missing_variable_count": 8064,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 57144,
+          "evaluated_constraints": 42492,
+          "partial_constraint_count": 14652,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 0.000267387895291904,
+          "top_violations": [
+            {
+              "constraint": "_C56940",
+              "sense": "==",
+              "residual": -0.000267387895291904,
+              "violation": 0.000267387895291904,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C56939",
+              "sense": "==",
+              "residual": 1.5130391375350882e-06,
+              "violation": 1.5130391375350882e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          912424.2329890314,
+          34575.294220167096
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 343149.3543542467,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 911593.9529995632
+      },
+      {
+        "state_hour": 480.0,
+        "planning_horizon_h": 168,
+        "status": "Optimal",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 282.603464466054,
+        "replan_wall_s": 288.62198116397485,
+        "best_bound": 945668.6632869674,
+        "relative_gap": 0.0,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 948159.5033000001,
+        "termination_reason": "Integer optimal solution",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31399,
+          "initialized_variables": 23815,
+          "missing_variable_count": 7584,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56096,
+          "evaluated_constraints": 42314,
+          "partial_constraint_count": 13782,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 5.082780262455344e-06,
+          "top_violations": [
+            {
+              "constraint": "_C55892",
+              "sense": "==",
+              "residual": -5.082780262455344e-06,
+              "violation": 5.082780262455344e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C55891",
+              "sense": "==",
+              "residual": -2.9537984573835274e-06,
+              "violation": 2.9537984573835274e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          948159.5032889841,
+          30318.626941029328
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 361390.5405245242,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 945668.6632869674
+      },
+      {
+        "state_hour": 504.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1201.9520502239466,
+        "replan_wall_s": 1207.9919385318644,
+        "best_bound": 602100.35122,
+        "relative_gap": 0.4303810020172591,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 1061589.4858,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 32167,
+          "initialized_variables": 24199,
+          "missing_variable_count": 7968,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56960,
+          "evaluated_constraints": 42482,
+          "partial_constraint_count": 14478,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 4.8751547637948534e-05,
+          "top_violations": [
+            {
+              "constraint": "_C56755",
+              "sense": "==",
+              "residual": 4.8751547637948534e-05,
+              "violation": 4.8751547637948534e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            },
+            {
+              "constraint": "_C56756",
+              "sense": "==",
+              "residual": 3.958224624511786e-05,
+              "violation": 3.958224624511786e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          1061589.4857831276,
+          27741.77330883256
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 325236.24690213107,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 1057022.945780055
+      },
+      {
+        "state_hour": 528.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0609528180212,
+        "replan_wall_s": 1208.1187659511343,
+        "best_bound": 689713.8859600001,
+        "relative_gap": 0.3940468786965682,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 1140720.6167,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31143,
+          "initialized_variables": 23687,
+          "missing_variable_count": 7456,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55808,
+          "evaluated_constraints": 42258,
+          "partial_constraint_count": 13550,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 4.928795533487573e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55604",
+              "sense": "==",
+              "residual": 4.928795533487573e-05,
+              "violation": 4.928795533487573e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C55603",
+              "sense": "==",
+              "residual": 4.8767917178338394e-05,
+              "violation": 4.8767917178338394e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          1140720.6167156263,
+          28192.57491838248
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 256752.6075922805,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 1138229.7767134118
+      },
+      {
+        "state_hour": 552.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0058532450348,
+        "replan_wall_s": 1208.3069454990327,
+        "best_bound": 804795.32713,
+        "relative_gap": 0.307931397896466,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 1201154.4640000002,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31911,
+          "initialized_variables": 24071,
+          "missing_variable_count": 7840,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 56672,
+          "evaluated_constraints": 42426,
+          "partial_constraint_count": 14246,
+          "violated_constraint_count": 1,
+          "max_constraint_violation": 8.158808668667916e-06,
+          "top_violations": [
+            {
+              "constraint": "_C56467",
+              "sense": "==",
+              "residual": 8.158808668667916e-06,
+              "violation": 8.158808668667916e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          1201154.4640152561,
+          24965.48485857223
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 282498.9236259359,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 1162883.7440158888
+      },
+      {
+        "state_hour": 576.0,
+        "planning_horizon_h": 168,
+        "status": "Optimal",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 4.165069459937513,
+        "replan_wall_s": 10.528322877828032,
+        "best_bound": 1061337.4381195426,
+        "relative_gap": 0.0,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 1061337.4381,
+        "termination_reason": "Integer optimal solution",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31143,
+          "initialized_variables": 23687,
+          "missing_variable_count": 7456,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55808,
+          "evaluated_constraints": 42258,
+          "partial_constraint_count": 13550,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 4.0511135921406094e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55603",
+              "sense": "==",
+              "residual": -4.0511135921406094e-05,
+              "violation": 4.0511135921406094e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            },
+            {
+              "constraint": "_C55602",
+              "sense": "==",
+              "residual": -2.2684816940454766e-06,
+              "violation": 2.2684816940454766e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          1061337.438118254,
+          25847.63420534147
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 182496.39244939448,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 1061337.4381195426
+      },
+      {
+        "state_hour": 600.0,
+        "planning_horizon_h": 168,
+        "status": "Optimal",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 4.99650967400521,
+        "replan_wall_s": 11.289111217018217,
+        "best_bound": 1030809.0751344697,
+        "relative_gap": 0.0,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 1030809.0750999999,
+        "termination_reason": "Integer optimal solution",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 30247,
+          "initialized_variables": 23239,
+          "missing_variable_count": 7008,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 54800,
+          "evaluated_constraints": 42062,
+          "partial_constraint_count": 12738,
+          "violated_constraint_count": 3,
+          "max_constraint_violation": 4.4491341895991354e-05,
+          "top_violations": [
+            {
+              "constraint": "_C54596",
+              "sense": "==",
+              "residual": 4.4491341895991354e-05,
+              "violation": 4.4491341895991354e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C54594",
+              "sense": "==",
+              "residual": -3.939172620448517e-05,
+              "violation": 3.939172620448517e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C54595",
+              "sense": "==",
+              "residual": 2.6965087272401433e-05,
+              "violation": 2.6965087272401433e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          1030809.0751352,
+          25385.61400442744
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 221520.93806753334,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 1030809.0751344697
+      },
+      {
+        "state_hour": 624.0,
+        "planning_horizon_h": 168,
+        "status": "Optimal",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 4.35296962922439,
+        "replan_wall_s": 10.897620209027082,
+        "best_bound": 1008174.5398212526,
+        "relative_gap": 0.0,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 1008174.5398,
+        "termination_reason": "Integer optimal solution",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 30983,
+          "initialized_variables": 23607,
+          "missing_variable_count": 7376,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55628,
+          "evaluated_constraints": 42223,
+          "partial_constraint_count": 13405,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 9.895352377498057e-06,
+          "top_violations": [
+            {
+              "constraint": "_C55422",
+              "sense": "==",
+              "residual": 9.895352377498057e-06,
+              "violation": 9.895352377498057e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C55423",
+              "sense": "==",
+              "residual": -1.3888248417970317e-06,
+              "violation": 1.3888248417970317e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          1008174.5398213558,
+          22992.97647396526
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 197438.80826522838,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 1008174.5398212526
+      },
+      {
+        "state_hour": 648.0,
+        "planning_horizon_h": 168,
+        "status": "Integer Feasible",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 1202.0171145019121,
+        "replan_wall_s": 1209.1181398108602,
+        "best_bound": 696342.25905,
+        "relative_gap": 0.21258669383094073,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 884341.4933,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 31271,
+          "initialized_variables": 23751,
+          "missing_variable_count": 7520,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55952,
+          "evaluated_constraints": 42286,
+          "partial_constraint_count": 13666,
+          "violated_constraint_count": 2,
+          "max_constraint_violation": 3.8330487768689636e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55748",
+              "sense": "==",
+              "residual": -3.8330487768689636e-05,
+              "violation": 3.8330487768689636e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C55746",
+              "sense": "==",
+              "residual": 2.9065634862490697e-05,
+              "violation": 2.9065634862490697e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          884341.4933357713,
+          25869.320422243858
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 190245.43729172953,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 884341.4933357678
+      },
+      {
+        "state_hour": 672.0,
+        "planning_horizon_h": 168,
+        "status": "Optimal",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 6.293047747109085,
+        "replan_wall_s": 13.804073868785053,
+        "best_bound": 847416.2860636677,
+        "relative_gap": 0.0,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 847416.2861,
+        "termination_reason": "Integer optimal solution",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 30343,
+          "initialized_variables": 23287,
+          "missing_variable_count": 7056,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 54908,
+          "evaluated_constraints": 42083,
+          "partial_constraint_count": 12825,
+          "violated_constraint_count": 1,
+          "max_constraint_violation": 1.2912964848510455e-05,
+          "top_violations": [
+            {
+              "constraint": "_C54702",
+              "sense": "==",
+              "residual": -1.2912964848510455e-05,
+              "violation": 1.2912964848510455e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          847416.2860630743,
+          22485.75450027338
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 230163.48867015736,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 847416.2860636677
+      },
+      {
+        "state_hour": 696.0,
+        "planning_horizon_h": 168,
+        "status": "Optimal",
+        "solver_is_valid": true,
+        "execution_replay_is_valid": true,
+        "execution_replay_mismatches": "",
+        "model_replay_is_exact": true,
+        "model_replay_mismatches": "",
+        "solve_wall_s": 7.286518633831292,
+        "replan_wall_s": 15.289284990169108,
+        "best_bound": 753048.3729133558,
+        "relative_gap": 0.0,
+        "first_incumbent_time_s": 0.0,
+        "first_incumbent_objective": 753048.3729,
+        "termination_reason": "Integer optimal solution",
+        "requested_mip_gap_rel": null,
+        "solver_threads": 4,
+        "warm_start_accepted": true,
+        "mip_start_audit": {
+          "total_variables": 30759,
+          "initialized_variables": 23495,
+          "missing_variable_count": 7264,
+          "bound_violation_count": 0,
+          "integrality_violation_count": 0,
+          "total_constraints": 55376,
+          "evaluated_constraints": 42174,
+          "partial_constraint_count": 13202,
+          "violated_constraint_count": 3,
+          "max_constraint_violation": 4.077698667970253e-05,
+          "top_violations": [
+            {
+              "constraint": "_C55170",
+              "sense": "==",
+              "residual": 4.077698667970253e-05,
+              "violation": 4.077698667970253e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_brevik",
+                "tail_topup_northern_pathfinder_brevik",
+                "tail_shipped_northern_phoenix_brevik",
+                "tail_topup_northern_phoenix_brevik",
+                "tail_shipped_northern_pioneer_brevik",
+                "tail_topup_northern_pioneer_brevik",
+                "source_stock_brevik_168"
+              ]
+            },
+            {
+              "constraint": "_C55172",
+              "sense": "==",
+              "residual": 1.865781632659491e-05,
+              "violation": 1.865781632659491e-05,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_yara_sluiskil",
+                "tail_topup_northern_pathfinder_yara_sluiskil",
+                "tail_shipped_northern_phoenix_yara_sluiskil",
+                "tail_topup_northern_phoenix_yara_sluiskil",
+                "tail_shipped_northern_pioneer_yara_sluiskil",
+                "tail_topup_northern_pioneer_yara_sluiskil",
+                "source_stock_yara_sluiskil_168"
+              ]
+            },
+            {
+              "constraint": "_C55171",
+              "sense": "==",
+              "residual": 3.2145829891305766e-06,
+              "violation": 3.2145829891305766e-06,
+              "variable_names": [
+                "tail_shipped_northern_pathfinder_celsio",
+                "tail_topup_northern_pathfinder_celsio",
+                "tail_shipped_northern_phoenix_celsio",
+                "tail_topup_northern_phoenix_celsio",
+                "tail_shipped_northern_pioneer_celsio",
+                "tail_topup_northern_pioneer_celsio",
+                "source_stock_celsio_168"
+              ]
+            }
+          ]
+        },
+        "warm_start_source": "greedy",
+        "cplex_root_algorithm": "automatic",
+        "warm_start_score": [
+          753048.3729154177,
+          19866.33412027442
+        ],
+        "mpc_warm_start_score": null,
+        "shifted_warm_start_score": null,
+        "terminal_cleanup_cost": 255656.3250726024,
+        "terminal_cleanup_headroom_risk": 0.0,
+        "augmented_objective_value": 753048.3729133558
+      }
+    ]
+  }
+}

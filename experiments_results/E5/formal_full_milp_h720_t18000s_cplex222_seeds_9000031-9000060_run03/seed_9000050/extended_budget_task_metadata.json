@@ -1,0 +1,13 @@
+{
+  "job_id": "34470",
+  "array_job_id": "34376",
+  "array_task_id": "19",
+  "host": "rootrunner",
+  "mode": "full",
+  "seed": 9000050,
+  "purpose": "extended_budget_sensitivity_E5_full_milp_cplex222_18000s",
+  "cplex_bin": "/scratch_root/hx721/software/CPLEX_Studio2220/cplex/bin/x86-64_linux/cplex",
+  "solver_threads": 4,
+  "solver_time_limit_seconds": 18000,
+  "run_status": "completed"
+}

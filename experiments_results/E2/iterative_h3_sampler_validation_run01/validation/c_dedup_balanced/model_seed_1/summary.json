@@ -1,0 +1,195 @@
+{
+  "kind": "iterative_action_q_policy_evaluation",
+  "checkpoint": "experiments_results/E2/iterative_h3_sampler_validation_run01/branches/c_dedup_balanced/model_seed_1/p2/iterative_action_q.pt",
+  "eval_seeds": [
+    8100001,
+    8100002,
+    8100003,
+    8100004,
+    8100005,
+    8100006,
+    8100007,
+    8100008,
+    8100009,
+    8100010,
+    8100011,
+    8100012,
+    8100013,
+    8100014,
+    8100015,
+    8100016,
+    8100017,
+    8100018,
+    8100019,
+    8100020
+  ],
+  "scenario_protocol": "unified_window_v1",
+  "stress_level": "medium",
+  "forecast_context_hours": 168,
+  "validation_only": true,
+  "seed_manifest": "experiments/protocols/unified_window_v1_seed_manifest.json",
+  "gates": [
+    {
+      "name": "h4_m040_w12_c12",
+      "required_heads": 4,
+      "margin": 0.4,
+      "max_overrides": 12,
+      "min_hour": null,
+      "max_hour": null,
+      "windows": [
+        [
+          108.0,
+          155.0
+        ],
+        [
+          156.0,
+          203.0
+        ],
+        [
+          204.0,
+          251.0
+        ],
+        [
+          252.0,
+          299.0
+        ],
+        [
+          300.0,
+          347.0
+        ],
+        [
+          348.0,
+          395.0
+        ],
+        [
+          396.0,
+          443.0
+        ],
+        [
+          444.0,
+          491.0
+        ],
+        [
+          492.0,
+          539.0
+        ],
+        [
+          540.0,
+          587.0
+        ],
+        [
+          588.0,
+          635.0
+        ],
+        [
+          636.0,
+          680.0
+        ]
+      ],
+      "uncertainty_beta": 0.0
+    },
+    {
+      "name": "h3_m040_w12_c12",
+      "required_heads": 3,
+      "margin": 0.4,
+      "max_overrides": 12,
+      "min_hour": null,
+      "max_hour": null,
+      "windows": [
+        [
+          108.0,
+          155.0
+        ],
+        [
+          156.0,
+          203.0
+        ],
+        [
+          204.0,
+          251.0
+        ],
+        [
+          252.0,
+          299.0
+        ],
+        [
+          300.0,
+          347.0
+        ],
+        [
+          348.0,
+          395.0
+        ],
+        [
+          396.0,
+          443.0
+        ],
+        [
+          444.0,
+          491.0
+        ],
+        [
+          492.0,
+          539.0
+        ],
+        [
+          540.0,
+          587.0
+        ],
+        [
+          588.0,
+          635.0
+        ],
+        [
+          636.0,
+          680.0
+        ]
+      ],
+      "uncertainty_beta": 0.0
+    }
+  ],
+  "summary": {
+    "h3_m040_w12_c12": {
+      "episodes": 20,
+      "mean_total_cost_eur": 1915432.1037551393,
+      "mean_greedy_total_cost_eur": 2074008.3646553264,
+      "mean_delta_total_cost_eur": -158576.260900187,
+      "median_delta_total_cost_eur": -113385.55170429847,
+      "mean_delta_95pct_ci_eur": [
+        -282301.1316219005,
+        -37594.870536499635
+      ],
+      "wins": 16,
+      "ties": 0,
+      "losses": 4,
+      "mean_vented_t": 1609.9666184300793,
+      "mean_stored_t": 108328.49361126956,
+      "mean_unit_cost_eur_per_t": 17.777332366740275,
+      "mean_override_events": 11.85,
+      "mean_proposed_override_events": 369.05,
+      "early_departures": 15,
+      "emitter_to_emitter_legs": 53
+    },
+    "h4_m040_w12_c12": {
+      "episodes": 20,
+      "mean_total_cost_eur": 1866255.786567238,
+      "mean_greedy_total_cost_eur": 2074008.3646553264,
+      "mean_delta_total_cost_eur": -207752.57808808814,
+      "median_delta_total_cost_eur": -156894.74963116448,
+      "mean_delta_95pct_ci_eur": [
+        -317783.9525944355,
+        -107987.15064636579
+      ],
+      "wins": 17,
+      "ties": 0,
+      "losses": 3,
+      "mean_vented_t": 1001.7658124254431,
+      "mean_stored_t": 108958.58993516062,
+      "mean_unit_cost_eur_per_t": 17.19387444601668,
+      "mean_override_events": 11.55,
+      "mean_proposed_override_events": 369.65,
+      "early_departures": 19,
+      "emitter_to_emitter_legs": 51
+    }
+  }
+}

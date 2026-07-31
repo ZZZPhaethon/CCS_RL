@@ -1,0 +1,23 @@
+{
+  "finished_at_utc": "2026-07-28T14:47:04.325220+00:00",
+  "forecast_context_hours": 168,
+  "formal_paper_result": false,
+  "horizons_h": [
+    12,
+    24,
+    48,
+    72,
+    96,
+    168
+  ],
+  "objective_mode": "economic",
+  "online_episode_hours": 720,
+  "purpose": "milp_horizon_scaling_implementation_diagnostic",
+  "sampled_scenario_hours": 888,
+  "seed": 8100001,
+  "solver_threads": 4,
+  "started_at_utc": "2026-07-28T14:33:34.312206+00:00",
+  "terminal_cleanup_value": true,
+  "time_limit_seconds_per_horizon": 300.0,
+  "warm_start_mode": "greedy"
+}
