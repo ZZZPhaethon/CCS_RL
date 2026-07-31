@@ -290,7 +290,7 @@
     },
     "promoted_result_provenance": {
       "promotion_date": "2026-07-30",
-      "rolling_result_root": "experiments_results/E1/formal_rolling_milp_h168_r24_t600s_cplex222_seeds_9000031-9000060_run03",
+      "rolling_result_root": "experiments_results/E1/algorithms/formal_rolling_milp_h168_r24_t600s_cplex222_seeds_9000031-9000060_run03",
       "full_result_root": "experiments_results/E5/formal_full_milp_h720_t18000s_cplex222_seeds_9000031-9000060_run03",
       "configuration_lock": "experiments_results/milp_extended_600s_18000s_9000031_9000060_run03_lock",
       "rolling_array_job_id": 34375,
@@ -366,7 +366,7 @@
       1,
       2
     ],
-    "formal_test_results": "experiments_results/E1/formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01"
+    "formal_test_results": "experiments_results/E1/algorithms/formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01"
   },
   "iterative_q_selected_configuration": {
     "model_name": "G60-P4",

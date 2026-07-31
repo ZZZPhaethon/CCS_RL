@@ -1,0 +1,12 @@
+{
+  "kind": "e1_formal_iterative_q_result_manifest",
+  "method": "Iterative Action-Q G60-P4 (no hour)",
+  "model_seed": 1,
+  "evaluation_csv": "experiments_results/E1/algorithms/formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01/model_seed_1/evaluation.csv",
+  "checkpoint": "experiments_results/E1/models/iterative_q/g60_p4_model_seed_1/iterative_action_q.pt",
+  "hashes": {
+    "checkpoint": "f4cfbeab74b072d22dcb3801890f95c3660d4b77293f52542d31879cc894ccbc",
+    "evaluation_csv": "5e1d1edd466641cc823ccd5c266bdda3e9c107e1c71916c78ec83dffc3fb7852",
+    "summary_json": "8e6e10766ece83fdea10c463a6d3b78c544261f1b1b325f3dd0595c6fce0dfe0"
+  }
+}

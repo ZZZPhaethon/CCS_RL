@@ -16,8 +16,8 @@ conda activate mas-ccus
 
 PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_e1_20260728}"
 SOURCE_ROOT="${SOURCE_ROOT:-experiments_results/E1/matched_learning_algorithms_20260728}"
-HIGH_LEVEL_RESULT_ROOT="${HIGH_LEVEL_RESULT_ROOT:-experiments_results/E1/formal_ppo_high_level_seeds_9000031-9000060_run01}"
-EVENT_RESIDUAL_RESULT_ROOT="${EVENT_RESIDUAL_RESULT_ROOT:-experiments_results/E1/formal_ppo_event_residual_seeds_9000031-9000060_run01}"
+HIGH_LEVEL_RESULT_ROOT="${HIGH_LEVEL_RESULT_ROOT:-experiments_results/E1/algorithms/formal_ppo_high_level_seeds_9000031-9000060_run01}"
+EVENT_RESIDUAL_RESULT_ROOT="${EVENT_RESIDUAL_RESULT_ROOT:-experiments_results/E1/algorithms/formal_ppo_event_residual_seeds_9000031-9000060_run01}"
 SMOKE_SEED=8100001
 
 cd "$PROJECT_DIR"

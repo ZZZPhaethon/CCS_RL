@@ -17,7 +17,7 @@ conda activate mas-ccus
 
 PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_e1_20260728}"
 SOURCE_ROOT="${SOURCE_ROOT:-experiments_results/E1/hourly_ppo_gpu_20260728/centralized_maskable_ppo}"
-RESULT_ROOT="${RESULT_ROOT:-experiments_results/E1/formal_ppo_hourly_seeds_9000031-9000060_run02}"
+RESULT_ROOT="${RESULT_ROOT:-experiments_results/E1/algorithms/formal_ppo_hourly_seeds_9000031-9000060_run02}"
 FORMAL_SEEDS=(
   9000031 9000032 9000033 9000034 9000035
   9000036 9000037 9000038 9000039 9000040

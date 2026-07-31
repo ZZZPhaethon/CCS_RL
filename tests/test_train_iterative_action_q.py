@@ -7,6 +7,7 @@ import torch
 from scripts.train_iterative_action_q import (
     GroupedDenseActionDataset,
     dataset_normalization,
+    exclude_state_features,
     parse_args,
     root_sampling_weights,
     run,
@@ -334,6 +335,22 @@ def test_dataset_normalization_is_self_contained(tmp_path):
     assert normalization["return_scale"] >= 1.0
 
 
+def test_exclude_state_features_projects_arrays_and_metadata(tmp_path):
+    path = tmp_path / "train.npz"
+    _dataset(path, "train", [10, 11])
+    from scripts.train_iterative_action_q import _load_collection
+
+    rows = _load_collection([str(path)])
+    original_names = list(rows[0][1]["state_feature_names"])
+    exclude_state_features(rows, ["global.fill"])
+
+    data, metadata = rows[0]
+    assert data["states"].shape[-1] == len(original_names) - 1
+    assert metadata["source_state_feature_names"] == original_names
+    assert metadata["state_feature_names"] == original_names[1:]
+    assert metadata["excluded_state_feature_names"] == ["global.fill"]
+
+
 def test_selected_action_quantiles_shape():
     q = torch.randn(2, 3, 4, 5)
     actions = torch.tensor([[0, 2], [1, -1]])
@@ -380,6 +397,55 @@ def test_training_from_greedy_data_requires_no_legacy_checkpoint(tmp_path):
     assert summary["loaded_pretrained_tensors"] == 0
     assert checkpoint["configuration"]["q_head"] == "iterative_action_q"
     assert checkpoint["configuration"]["observation_input"] == "state_only"
+
+
+def test_training_can_exclude_state_features(tmp_path):
+    train_path = tmp_path / "train.npz"
+    validation_path = tmp_path / "validation.npz"
+    out_dir = tmp_path / "out"
+    _dataset(train_path, "train", [10, 11])
+    _dataset(validation_path, "validation", [20, 21])
+    args = parse_args(
+        [
+            "--train-data",
+            str(train_path),
+            "--validation-data",
+            str(validation_path),
+            "--out-dir",
+            str(out_dir),
+            "--exclude-state-features",
+            "global.fill",
+            "--epochs",
+            "1",
+            "--patience",
+            "1",
+            "--batch-size",
+            "2",
+            "--heads",
+            "2",
+            "--quantiles",
+            "3",
+            "--action-embedding-size",
+            "4",
+            "--action-feature-size",
+            "8",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    run(args)
+    checkpoint = torch.load(
+        out_dir / "iterative_action_q.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+
+    assert checkpoint["configuration"]["exclude_state_features"] == ["global.fill"]
+    assert checkpoint["metadata"]["excluded_state_feature_names"] == ["global.fill"]
+    assert checkpoint["metadata"]["source_state_feature_names"] == _feature_names()
+    assert checkpoint["metadata"]["state_feature_names"] == _feature_names()[1:]
+    assert checkpoint["normalization"]["state_mean"].shape == (6,)
 
 
 def test_future_training_uses_v4_summary_input(tmp_path):

@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
+from time import perf_counter
 from types import SimpleNamespace
 
 import numpy as np
@@ -58,6 +59,16 @@ def parse_args(argv=None):
         "--future-ablation",
         choices=("none", "mean"),
         default="none",
+    )
+    parser.add_argument(
+        "--state-mean-ablation",
+        nargs="*",
+        default=[],
+        metavar="FEATURE",
+        help=(
+            "Replace selected state features with their checkpoint training means "
+            "before Q inference."
+        ),
     )
     parser.add_argument("--device", default="auto")
     parser.add_argument(
@@ -201,12 +212,12 @@ def _make_native(args, variant):
     return native
 
 
-def make_event_env(args, variant):
+def make_event_env(args, variant, *, greedy_control_variate=True):
     return EventJointResidualGymEnv(
         _make_native(args, variant),
         variant,
         include_episode_progress=True,
-        greedy_control_variate=True,
+        greedy_control_variate=greedy_control_variate,
         hourly_gamma=1.0,
     )
 
@@ -394,13 +405,55 @@ def _load_model(args, device):
     else:
         raise ValueError("checkpoint is not an iterative Q model")
     model.load_state_dict(checkpoint["model_state_dict"])
+    model.state_feature_names = tuple(metadata["state_feature_names"])
+    model.source_state_feature_names = tuple(
+        metadata.get("source_state_feature_names", metadata["state_feature_names"])
+    )
     model.eval()
     return model, metadata
 
 
-def _tensor_observation(observation, device):
+def _tensor_observation(observation, device, model):
     state = torch.as_tensor(observation["state"], dtype=torch.float32, device=device)
+    source_names = tuple(model.source_state_feature_names)
+    model_names = tuple(model.state_feature_names)
+    if state.shape[-1] == len(source_names):
+        indices = [source_names.index(name) for name in model_names]
+        state = state.index_select(
+            -1,
+            torch.as_tensor(indices, dtype=torch.long, device=device),
+        )
+    elif state.shape[-1] != len(model_names):
+        raise ValueError(
+            "observation state width does not match checkpoint source or model schema"
+        )
     return state[None, None]
+
+
+def state_mean_ablation_spec(model, metadata, feature_names):
+    model_names = list(metadata["state_feature_names"])
+    source_names = list(
+        metadata.get("source_state_feature_names", metadata["state_feature_names"])
+    )
+    missing = [name for name in feature_names if name not in model_names]
+    if missing:
+        raise ValueError(f"unknown state-mean ablation features: {missing}")
+    state_mean = model.state_mean.detach().cpu().numpy()
+    return tuple(
+        (source_names.index(name), float(state_mean[model_names.index(name)]))
+        for name in dict.fromkeys(feature_names)
+    )
+
+
+def apply_state_mean_ablation(observation, ablation_spec):
+    if not ablation_spec:
+        return observation
+    updated = dict(observation)
+    state = np.asarray(observation["state"], dtype=np.float32).copy()
+    for index, value in ablation_spec:
+        state[int(index)] = float(value)
+    updated["state"] = state
+    return updated
 
 
 def expected_q_for_observation(
@@ -410,7 +463,7 @@ def expected_q_for_observation(
     device,
     future_ablation="none",
 ) -> np.ndarray:
-    states = _tensor_observation(observation, device)
+    states = _tensor_observation(observation, device, model)
     with torch.no_grad():
         if isinstance(
             model,
@@ -478,8 +531,14 @@ def evaluate_gate(
     event_env_factory = event_env_factory or (
         lambda: make_event_env(args, variant)
     )
+    ablation_spec = state_mean_ablation_spec(
+        model,
+        metadata,
+        args.state_mean_ablation,
+    )
     for seed in args.eval_seeds:
         wrapper = event_env_factory()
+        started_at = perf_counter()
         observation, _info = wrapper.reset_native_seed(int(seed))
         done = False
         event_count = 0
@@ -490,9 +549,13 @@ def evaluate_gate(
         agreement_sum = 0
         used_windows = set()
         while not done:
+            policy_observation = apply_state_mean_ablation(
+                observation,
+                ablation_spec,
+            )
             expected_q = expected_q_for_observation(
                 model,
-                observation,
+                policy_observation,
                 wrapper.env,
                 device,
                 args.future_ablation,
@@ -550,6 +613,7 @@ def evaluate_gate(
         row = {
             "gate": gate["name"],
             "seed": int(seed),
+            "wall_clock_seconds": perf_counter() - started_at,
             "event_count": event_count,
             "override_events": override_events,
             "proposed_override_events": proposed_override_events,
@@ -600,6 +664,9 @@ def _summary(rows):
             "mean_proposed_override_events": float(
                 np.mean([row["proposed_override_events"] for row in selected])
             ),
+            "mean_wall_clock_seconds": float(
+                np.mean([row["wall_clock_seconds"] for row in selected])
+            ),
             "early_departures": int(sum(row["early_departures"] for row in selected)),
             "emitter_to_emitter_legs": int(
                 sum(row["emitter_to_emitter_legs"] for row in selected)
@@ -636,6 +703,7 @@ def run(args):
         "scenario_protocol": str(args.scenario_protocol),
         "stress_level": str(args.stress_level),
         "forecast_context_hours": int(args.forecast_context_hours),
+        "state_mean_ablation": list(args.state_mean_ablation),
         "validation_only": bool(args.validation_only),
         "seed_manifest": (
             str(args.seed_manifest) if args.validation_only else None

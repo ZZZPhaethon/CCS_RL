@@ -1,0 +1,12 @@
+purpose=Greedy-only one-shot hour_of_week deletion at matched physical-simulator budget
+source_root=experiments_results/E2/training_one_shot_matched_run01
+train_data=experiments_results/E2/training_one_shot_matched_run01/g0/train_merged_matched.npz
+validation_data=experiments_results/E2/training_one_shot_matched_run01/g0/validation_merged.npz
+source_budget=experiments_results/E2/training_one_shot_matched_run01/budget.json
+excluded_state_features=hour_of_week
+initial_checkpoint=none
+policy_iteration=none
+roll_in_policy=Greedy only
+model_seeds=0 1 2
+formal_eval_seeds=9000031-9000060
+formal_test_previously_accessed=true

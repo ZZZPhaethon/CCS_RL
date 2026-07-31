@@ -1,0 +1,9 @@
+{
+  "job_id": "34028",
+  "array_job_id": "34000",
+  "array_task_id": "27",
+  "host": "rootrunner",
+  "seed": 9000058,
+  "purpose": "formal_test_E1_greedy_9000031_9000060",
+  "run_status": "completed"
+}

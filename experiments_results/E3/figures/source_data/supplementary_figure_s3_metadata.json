@@ -18,5 +18,9 @@
     "pdf",
     "png"
   ],
-  "png_dpi": 300
+  "png_dpi": 300,
+  "state_feature_exclusions": [
+    "hour_of_week"
+  ],
+  "state_feature_count": 93
 }

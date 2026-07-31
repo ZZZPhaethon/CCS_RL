@@ -1,0 +1,300 @@
+{
+  "comparison": "Rolling MILP H168-R24 T300/T600/T1200",
+  "paired_seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "comparability": {
+    "t600_vs_t1200_single_factor_time_limit_comparison": true,
+    "t300_vs_later_single_factor_time_limit_comparison": false,
+    "t300_caveat": "The superseded T300 run used different runner and solver source hashes. Its table entries are descriptive only."
+  },
+  "methods": {
+    "300": {
+      "time_limit_seconds_per_replan": 300,
+      "role": "superseded archived non-single-factor baseline",
+      "seed_count": 30,
+      "replan_count": 900,
+      "solver_status_counts": {
+        "Integer Feasible": 603,
+        "Optimal": 297
+      },
+      "optimal_replan_rate": 0.33,
+      "all_replans_optimal_seed_count": 0,
+      "solver_valid_replan_count": 900,
+      "execution_replay_valid_replan_count": 900,
+      "model_replay_inexact_count": 4,
+      "relative_gap": {
+        "count": 900,
+        "mean": 0.1264070049363881,
+        "median": 0.10213965035081102,
+        "minimum": 0.0,
+        "maximum": 0.515595546619747,
+        "p95": 0.3955792653180058
+      },
+      "metrics": {
+        "total_cost": {
+          "count": 30,
+          "mean": 2213972.1178254345,
+          "median": 2119595.760202455,
+          "minimum": 1749991.6922290896,
+          "maximum": 3533346.3895627037,
+          "p95": 2864186.3344908985
+        },
+        "operating_cost": {
+          "count": 30,
+          "mean": 1688198.1781993958,
+          "median": 1683177.8199404373,
+          "minimum": 1477508.232397434,
+          "maximum": 1848802.1254191913,
+          "p95": 1841561.6287651383
+        },
+        "terminal_cleanup_operating_cost": {
+          "count": 30,
+          "mean": 226005.51814118127,
+          "median": 220905.98451373464,
+          "minimum": 123800.62038750286,
+          "maximum": 347042.9315763592,
+          "p95": 313704.2369631616
+        },
+        "stored_t": {
+          "count": 30,
+          "mean": 103676.77144680274,
+          "median": 103105.32167720736,
+          "minimum": 81137.13133870196,
+          "maximum": 124463.61990029803,
+          "p95": 115526.52223524274
+        },
+        "vented_t": {
+          "count": 30,
+          "mean": 6572.174245325485,
+          "median": 6155.682924387924,
+          "minimum": 0.0,
+          "maximum": 25697.976964565867,
+          "p95": 15562.236969223315
+        },
+        "captured_t": {
+          "count": 30,
+          "mean": 126282.56570334815,
+          "median": 126041.41352413295,
+          "minimum": 116933.45658342756,
+          "maximum": 134043.80710806392,
+          "p95": 132300.58987805698
+        },
+        "wall_clock_seconds": {
+          "count": 30,
+          "mean": 6566.731264165432,
+          "median": 6630.465004952857,
+          "minimum": 3820.8682733168826,
+          "maximum": 8231.327367382124,
+          "p95": 7795.9550314521875
+        },
+        "solver_solve_wall_seconds": {
+          "count": 30,
+          "mean": 6304.749939767023,
+          "median": 6371.740483925212,
+          "minimum": 3521.4315212881193,
+          "maximum": 8090.291110686958,
+          "p95": 7573.888990726042
+        }
+      }
+    },
+    "600": {
+      "time_limit_seconds_per_replan": 600,
+      "role": "formal primary result",
+      "seed_count": 30,
+      "replan_count": 900,
+      "solver_status_counts": {
+        "Integer Feasible": 571,
+        "Optimal": 329
+      },
+      "optimal_replan_rate": 0.3655555555555556,
+      "all_replans_optimal_seed_count": 0,
+      "solver_valid_replan_count": 900,
+      "execution_replay_valid_replan_count": 900,
+      "model_replay_inexact_count": 7,
+      "relative_gap": {
+        "count": 900,
+        "mean": 0.1028244483496303,
+        "median": 0.08359458092448903,
+        "minimum": 0.0,
+        "maximum": 0.5138867711762203,
+        "p95": 0.3580080163998896
+      },
+      "metrics": {
+        "total_cost": {
+          "count": 30,
+          "mean": 2089728.4612077808,
+          "median": 2026693.664290322,
+          "minimum": 1704683.0519553637,
+          "maximum": 2743967.0885134107,
+          "p95": 2609899.295493914
+        },
+        "operating_cost": {
+          "count": 30,
+          "mean": 1716673.632507502,
+          "median": 1724611.41522258,
+          "minimum": 1523990.2178885653,
+          "maximum": 1849472.0997621664,
+          "p95": 1841727.2345453845
+        },
+        "terminal_cleanup_operating_cost": {
+          "count": 30,
+          "mean": 223280.764778077,
+          "median": 210682.9410305776,
+          "minimum": 162917.30576559118,
+          "maximum": 347042.9315763592,
+          "p95": 313704.2369631616
+        },
+        "stored_t": {
+          "count": 30,
+          "mean": 105909.61385948276,
+          "median": 104756.23561814571,
+          "minimum": 89834.39317069865,
+          "maximum": 124463.61990029803,
+          "p95": 119711.51968995325
+        },
+        "vented_t": {
+          "count": 30,
+          "mean": 4663.185358753486,
+          "median": 3146.8309288766436,
+          "minimum": 0.0,
+          "maximum": 13665.115766254208,
+          "p95": 12283.958305900434
+        },
+        "captured_t": {
+          "count": 30,
+          "mean": 126282.56570334815,
+          "median": 126041.41352413295,
+          "minimum": 116933.45658342756,
+          "maximum": 134043.80710806392,
+          "p95": 132300.58987805698
+        },
+        "wall_clock_seconds": {
+          "count": 30,
+          "mean": 12312.734374695505,
+          "median": 12263.061084777117,
+          "minimum": 6818.884148661047,
+          "maximum": 14967.60237235576,
+          "p95": 14869.391305602738
+        },
+        "solver_solve_wall_seconds": {
+          "count": 30,
+          "mean": 12050.878320892543,
+          "median": 12049.174432387576,
+          "minimum": 6522.235226503108,
+          "maximum": 14821.824447794817,
+          "p95": 14639.89957445783
+        }
+      }
+    },
+    "1200": {
+      "time_limit_seconds_per_replan": 1200,
+      "role": "time-budget ablation",
+      "seed_count": 30,
+      "replan_count": 900,
+      "solver_status_counts": {
+        "Integer Feasible": 568,
+        "Optimal": 332
+      },
+      "optimal_replan_rate": 0.3688888888888889,
+      "all_replans_optimal_seed_count": 0,
+      "solver_valid_replan_count": 900,
+      "execution_replay_valid_replan_count": 900,
+      "model_replay_inexact_count": 7,
+      "relative_gap": {
+        "count": 900,
+        "mean": 0.0997863832574741,
+        "median": 0.08168703754796244,
+        "minimum": 0.0,
+        "maximum": 0.4670532468531751,
+        "p95": 0.34109940713556586
+      },
+      "metrics": {
+        "total_cost": {
+          "count": 30,
+          "mean": 2096009.3241958371,
+          "median": 1987405.3455261672,
+          "minimum": 1676774.6102392895,
+          "maximum": 2743967.0885134107,
+          "p95": 2612573.148690935
+        },
+        "operating_cost": {
+          "count": 30,
+          "mean": 1712365.8267315004,
+          "median": 1711445.1536140542,
+          "minimum": 1527762.8390066964,
+          "maximum": 1849472.0997621664,
+          "p95": 1833277.476628545
+        },
+        "terminal_cleanup_operating_cost": {
+          "count": 30,
+          "mean": 219940.1692558129,
+          "median": 208519.3656285036,
+          "minimum": 151240.48488443164,
+          "maximum": 347042.9315763592,
+          "p95": 325835.67565542914
+        },
+        "stored_t": {
+          "count": 30,
+          "mean": 105554.13203860956,
+          "median": 105762.67391212305,
+          "minimum": 91297.18802602345,
+          "maximum": 124463.61990029803,
+          "p95": 117189.9005605841
+        },
+        "vented_t": {
+          "count": 30,
+          "mean": 4795.54371830421,
+          "median": 3396.2528263213408,
+          "minimum": 0.0,
+          "maximum": 14061.297056037165,
+          "p95": 11589.286170997737
+        },
+        "captured_t": {
+          "count": 30,
+          "mean": 126282.56570334815,
+          "median": 126041.41352413295,
+          "minimum": 116933.45658342756,
+          "maximum": 134043.80710806392,
+          "p95": 132300.58987805698
+        },
+        "wall_clock_seconds": {
+          "count": 30,
+          "mean": 24230.915266860604,
+          "median": 24714.774697657907,
+          "minimum": 12715.237261953764,
+          "maximum": 31699.47737675812,
+          "p95": 29414.911165877827
+        },
+        "solver_solve_wall_seconds": {
+          "count": 30,
+          "mean": 23972.409433846096,
+          "median": 24426.60281522083,
+          "minimum": 12428.58405414503,
+          "maximum": 31545.671851096675,
+          "p95": 29180.651050453842
+        }
+      }
+    }
+  },
+  "paired_total_cost_outcomes_against_formal_t600": {
+    "t300_vs_t600": {
+      "wins": 5,
+      "ties": 13,
+      "losses": 12
+    },
+    "t1200_vs_t600": {
+      "wins": 9,
+      "ties": 11,
+      "losses": 10
+    }
+  },
+  "validation": {
+    "method_count": 3,
+    "seed_count_per_method": 30,
+    "total_episode_rows": 90,
+    "total_replans": 2700,
+    "source_manifest_rows": 90
+  }
+}

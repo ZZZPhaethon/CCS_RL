@@ -25,6 +25,7 @@ DEFAULT_INPUT = (
     REPO_ROOT
     / "experiments_results"
     / "E1"
+    / "algorithms"
     / "formal_comparison"
     / "e1_formal_per_episode.csv"
 )

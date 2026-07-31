@@ -1,0 +1,19 @@
+{
+  "model_seed": 0,
+  "episodes": 30,
+  "test_seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "exact_seed_coverage": true,
+  "checkpoint_sha256": "962373fc027107000979ba26209e1b2be781d992dc4abc45038a5f2f3285c3dc",
+  "evaluation_csv_sha256": "1d391f8216bf1bf95204621a4814d2258ba11191640642d50f48296ce0d54f07",
+  "summary_json_sha256": "e1e5665589cab96ad690a820644ca34fb90e55ae494fdce77c111b1eb747facd",
+  "source_state_features": 94,
+  "state_features": 93,
+  "excluded_state_features": [
+    "hour_of_week"
+  ],
+  "detailed_episode_cost_fields": true,
+  "formal_test_previously_accessed": true
+}

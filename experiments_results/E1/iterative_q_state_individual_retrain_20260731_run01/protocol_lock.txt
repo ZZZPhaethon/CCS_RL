@@ -1,0 +1,11 @@
+purpose=individual fixed-root retraining ablations for iterative Q state features
+conditions=drop_in_transit_fill,drop_episode_progress
+drop_in_transit_fill=hour_of_week,in_transit_fill
+drop_episode_progress=hour_of_week,episode_progress
+baseline=drop_hour_of_week from 20260730 fixed-root retraining
+joint_ablation=drop_all_three from 20260730 fixed-root retraining
+data_root=output/iterative_q_budget_search/runs/g60_p4
+root_policy_chain=original G60-P4 G0-G3; roots held fixed
+model_seeds=0 1 2
+formal_eval_seeds=9000031-9000060
+formal_test_previously_accessed=true

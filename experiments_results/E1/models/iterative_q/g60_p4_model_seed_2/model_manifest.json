@@ -1,0 +1,110 @@
+{
+  "kind": "e1_iterative_q_model_manifest",
+  "method": "Iterative Action-Q",
+  "model_name": "G60-P4-no-hour",
+  "model_seed": 2,
+  "final_stage": "P4",
+  "checkpoint": "experiments_results/E1/models/iterative_q/g60_p4_model_seed_2/iterative_action_q.pt",
+  "checkpoint_size_bytes": 17345669,
+  "checkpoint_sha256": "6e8f7dba48ce08b1a299327ca8c95f7b72c67bdb0164b05806464cfe6e28d50f",
+  "source_checkpoint": "experiments_results/archive/E1_pre_hour_removed_cleanup_20260730/iterative_q_state_recursive_ablation_20260730_run01/drop_hour_of_week/model_seed_2/p4/iterative_action_q.pt",
+  "source_training_summary": "experiments_results/E1/models/iterative_q/g60_p4_model_seed_2/source_training_summary.json",
+  "source_budget": "experiments_results/E1/models/iterative_q/g60_p4_model_seed_2/budget.json",
+  "training": {
+    "observation_input": "shared_future_summary",
+    "source_state_features": 94,
+    "state_features": 93,
+    "excluded_state_features": [
+      "hour_of_week"
+    ],
+    "forecast_context_hours": 168,
+    "policy_iteration_stages": [
+      "P1",
+      "P2",
+      "P3",
+      "P4"
+    ],
+    "g1_g3_regenerated_for_this_model_seed": true,
+    "realized_training_roots": 3597,
+    "training_simulator_step_calls": 9519361,
+    "all_data_simulator_step_calls": 11541195
+  },
+  "deployment_gate": {
+    "required_heads": 4,
+    "q_margin_reward_units": 0.4,
+    "q_margin_eur": 40000,
+    "maximum_interventions": 12,
+    "policy_windows_h": [
+      [
+        108,
+        155
+      ],
+      [
+        156,
+        203
+      ],
+      [
+        204,
+        251
+      ],
+      [
+        252,
+        299
+      ],
+      [
+        300,
+        347
+      ],
+      [
+        348,
+        395
+      ],
+      [
+        396,
+        443
+      ],
+      [
+        444,
+        491
+      ],
+      [
+        492,
+        539
+      ],
+      [
+        540,
+        587
+      ],
+      [
+        588,
+        635
+      ],
+      [
+        636,
+        680
+      ]
+    ]
+  },
+  "formal_test": {
+    "directory": "experiments_results/E1/algorithms/formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01/model_seed_2",
+    "seed_range_inclusive": [
+      9000031,
+      9000060
+    ],
+    "episodes": 30,
+    "mean_total_cost_eur": 1859389.7709227367,
+    "mean_delta_vs_greedy_eur": -394821.79271382996,
+    "wins": 27,
+    "ties": 0,
+    "losses": 3,
+    "mean_vented_t": 918.8285624884676,
+    "mean_stored_t": 110842.8727995733,
+    "mean_override_events": 11.0
+  },
+  "adoption": {
+    "status": "current",
+    "adopted_on": "2026-07-30",
+    "test_accessed_before_adoption": true,
+    "note": "Promoted by user decision after reviewing the paired 30-seed hour_of_week ablation."
+  }
+}

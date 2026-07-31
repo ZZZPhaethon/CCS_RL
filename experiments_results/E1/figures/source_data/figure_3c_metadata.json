@@ -13,7 +13,7 @@
     "mean_terminal_cleanup_eur_per_captured_t": "Terminal cleanup"
   },
   "rolling_milp_time_limit_seconds_per_replan": 600,
-  "input_csv": "experiments_results\\E1\\formal_comparison\\e1_formal_per_episode.csv",
+  "input_csv": "experiments_results\\E1\\algorithms\\formal_comparison\\e1_formal_per_episode.csv",
   "output_formats": [
     "pdf",
     "png"

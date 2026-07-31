@@ -6,6 +6,7 @@ import pytest
 
 import experiments.evaluate_iterative_action_q as evaluation
 from experiments.evaluate_iterative_action_q import (
+    apply_state_mean_ablation,
     parse_args,
     parse_gate,
     select_safe_action,
@@ -87,6 +88,54 @@ def test_policy_eval_parser_has_no_recurrent_or_eta_options():
                 "--reset-recurrent-state",
             ]
         )
+
+
+def test_policy_eval_parser_accepts_state_mean_ablation():
+    args = parse_args(
+        [
+            "--checkpoint",
+            "model.pt",
+            "--out-dir",
+            "out",
+            "--state-mean-ablation",
+            "hour_of_week",
+            "episode_progress",
+        ]
+    )
+    assert args.state_mean_ablation == ["hour_of_week", "episode_progress"]
+
+
+def test_apply_state_mean_ablation_copies_and_replaces_selected_values():
+    observation = {
+        "state": np.asarray([0.1, 0.2, 0.3], dtype=np.float32),
+        "forecast": np.ones((2, 2), dtype=np.float32),
+    }
+
+    updated = apply_state_mean_ablation(observation, ((0, 0.5), (2, 0.7)))
+
+    assert updated is not observation
+    assert updated["state"] == pytest.approx([0.5, 0.2, 0.7])
+    assert observation["state"] == pytest.approx([0.1, 0.2, 0.3])
+    assert updated["forecast"] is observation["forecast"]
+
+
+def test_tensor_observation_projects_full_state_to_checkpoint_schema():
+    model = SimpleNamespace(
+        source_state_feature_names=("hour_of_week", "fill", "episode_progress"),
+        state_feature_names=("fill",),
+    )
+    observation = {
+        "state": np.asarray([0.25, 0.75, 0.5], dtype=np.float32),
+    }
+
+    tensor = evaluation._tensor_observation(
+        observation,
+        evaluation.torch.device("cpu"),
+        model,
+    )
+
+    assert tensor.shape == (1, 1, 1)
+    assert tensor.item() == pytest.approx(0.75)
 
 
 def test_validation_only_parser_rejects_formal_test_seed():

@@ -1,0 +1,51 @@
+{
+  "formal_test_seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "terminal_cleanup_component_breakdown": false,
+  "terminal_cleanup_policy": "retain one scalar operating-cost total",
+  "algorithms": {
+    "fixed_assignment": {
+      "model_seeds": 1,
+      "records": 30,
+      "detailed_episode_cost_rows": 30
+    },
+    "greedy": {
+      "model_seeds": 1,
+      "records": 30,
+      "detailed_episode_cost_rows": 30
+    },
+    "rolling_milp": {
+      "model_seeds": 1,
+      "records": 30,
+      "detailed_episode_cost_rows": 30
+    },
+    "ppo_hourly": {
+      "model_seeds": 3,
+      "records": 90,
+      "detailed_episode_cost_rows": 90
+    },
+    "ppo_high_level": {
+      "model_seeds": 3,
+      "records": 90,
+      "detailed_episode_cost_rows": 90
+    },
+    "ppo_event_residual": {
+      "model_seeds": 3,
+      "records": 90,
+      "detailed_episode_cost_rows": 90
+    },
+    "iterative_action_q": {
+      "model_seeds": 3,
+      "records": 90,
+      "detailed_episode_cost_rows": 90
+    }
+  },
+  "total_records": 450,
+  "rows_missing_detailed_episode_costs": 0,
+  "cost_identity_failures": 0,
+  "ppo_shared_field_mismatches_vs_previous_results": 0,
+  "iterative_action_q_seed_0_shared_numeric_mismatches_vs_previous": 0,
+  "iterative_action_q_seed_0_metadata_note": "The gate label changed to the rerun output name; numeric results did not change."
+}

@@ -19,6 +19,8 @@ conda activate mas-ccus
 PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_iterq_validation_search_20260728}"
 SOURCE_RUN_ROOT="${SOURCE_RUN_ROOT:-output/iterative_q_budget_search/runs/g60_p4}"
 E3_ROOT="${E3_ROOT:-experiments_results/E3/training_future_information_run01}"
+DATA_ROOT="${DATA_ROOT:-$E3_ROOT}"
+EXCLUDE_STATE_FEATURES="${EXCLUDE_STATE_FEATURES:-}"
 VARIANT_INDEX=$((SLURM_ARRAY_TASK_ID / 3))
 MODEL_SEED=$((SLURM_ARRAY_TASK_ID % 3))
 if [[ "$VARIANT_INDEX" == "0" ]]; then
@@ -52,18 +54,24 @@ train_stage() {
       train_data+=("$SOURCE_RUN_ROOT/g${stage_index}/train_merged.npz")
       validation_data+=("$SOURCE_RUN_ROOT/g${stage_index}/validation_merged.npz")
     else
-      train_data+=("$E3_ROOT/augmented_data/g${stage_index}/train_forecast168.npz")
-      validation_data+=("$E3_ROOT/augmented_data/g${stage_index}/validation_forecast168.npz")
+      train_data+=("$DATA_ROOT/augmented_data/g${stage_index}/train_forecast168.npz")
+      validation_data+=("$DATA_ROOT/augmented_data/g${stage_index}/validation_forecast168.npz")
     fi
   done
   local initial_args=()
+  local exclusion_args=()
   if [[ -n "$initial_checkpoint" ]]; then
     initial_args+=(--initial-checkpoint "$initial_checkpoint")
+  fi
+  if [[ -n "$EXCLUDE_STATE_FEATURES" ]]; then
+    read -r -a excluded_features <<< "$EXCLUDE_STATE_FEATURES"
+    exclusion_args+=(--exclude-state-features "${excluded_features[@]}")
   fi
   python -u scripts/train_iterative_action_q.py \
     --train-data "${train_data[@]}" \
     --validation-data "${validation_data[@]}" \
     "${initial_args[@]}" \
+    "${exclusion_args[@]}" \
     --out-dir "$OUT_ROOT/$output_stage" \
     --observation-input "$OBSERVATION_INPUT" \
     --forecast-encoder small_mlp \

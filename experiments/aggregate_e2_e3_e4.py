@@ -523,11 +523,15 @@ def aggregate_e3(results_root: Path) -> None:
         figure_dir
         / "source_data"
         / "supplementary_figure_s3_metadata.json",
-        _metadata(
-            "Supplementary Figure S3",
-            "Test whether structured or full-sequence future information "
-            "changes paired cost relative to State-only.",
-        ),
+        {
+            **_metadata(
+                "Supplementary Figure S3",
+                "Test whether structured or full-sequence future information "
+                "changes paired cost relative to State-only.",
+            ),
+            "state_feature_exclusions": ["hour_of_week"],
+            "state_feature_count": 93,
+        },
     )
 
 
@@ -651,11 +655,15 @@ def aggregate_e4(results_root: Path) -> None:
     )
     _write_json(
         figure_dir / "source_data" / "figure_5_metadata.json",
-        _metadata(
-            "Figure 5",
-            "Evaluate degradation of the frozen E1 model and Greedy from "
-            "Low through High composite disturbance stress.",
-        ),
+        {
+            **_metadata(
+                "Figure 5",
+                "Evaluate degradation of the frozen E1 model and Greedy from "
+                "Low through High composite disturbance stress.",
+            ),
+            "iterative_q_state_feature_exclusions": ["hour_of_week"],
+            "iterative_q_state_feature_count": 93,
+        },
     )
 
 

@@ -1,0 +1,27 @@
+{
+  "method": "Iterative Action-Q",
+  "model": "G60-P4-no-hour",
+  "excluded_state_features": [
+    "hour_of_week"
+  ],
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "test_seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "records": 90,
+  "mean_total_cost_eur": 1864718.4746599607,
+  "between_model_seed_sample_sd_total_cost_eur": 20220.292827899848,
+  "mean_greedy_total_cost_eur": 2254211.563636566,
+  "mean_delta_vs_greedy_eur": -389493.0889766058,
+  "mean_vented_t": 949.4621594196798,
+  "mean_stored_t": 111120.75828653098,
+  "mean_unit_cost_eur_per_t": 16.83557143163787,
+  "wins": 81,
+  "ties": 0,
+  "losses": 9
+}

@@ -344,7 +344,7 @@ The configuration and job lock is stored in the sibling directory
 `../milp_extended_600s_18000s_9000031_9000060_run03_lock/`.
 
 The complete per-seed source artifacts, including action trajectories, remain in
-`../E1/formal_rolling_milp_h168_r24_t600s_cplex222_seeds_9000031-9000060_run03/` and
+`../E1/algorithms/formal_rolling_milp_h168_r24_t600s_cplex222_seeds_9000031-9000060_run03/` and
 `../E5/formal_full_milp_h720_t18000s_cplex222_seeds_9000031-9000060_run03/`.
 
 The superseded 300 s/7,200 s artifacts are retained for provenance. Their

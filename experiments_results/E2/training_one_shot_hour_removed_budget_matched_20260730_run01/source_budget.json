@@ -1,0 +1,15 @@
+{
+  "kind": "E2_one_shot_matched_budget",
+  "train_data": "experiments_results/E2/training_one_shot_matched_run01/g0/train_merged_matched.npz",
+  "train_seed_range_inclusive": [
+    1500,
+    1800
+  ],
+  "train_seed_count": 301,
+  "train_roots": 3611,
+  "train_candidates": 22364,
+  "train_simulator_step_calls": 9511567,
+  "target_simulator_step_calls": 9526297,
+  "relative_error_pct": -0.15462461437009575,
+  "max_relative_error_pct": 0.5
+}

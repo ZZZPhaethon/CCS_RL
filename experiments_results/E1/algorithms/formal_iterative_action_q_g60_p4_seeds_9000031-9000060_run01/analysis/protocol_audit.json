@@ -1,0 +1,51 @@
+{
+  "scenario_protocol": "unified_window_v1",
+  "stress_level": "medium",
+  "forecast_context_hours": 168,
+  "formal_seeds": [
+    9000031,
+    9000032,
+    9000033,
+    9000034,
+    9000035,
+    9000036,
+    9000037,
+    9000038,
+    9000039,
+    9000040,
+    9000041,
+    9000042,
+    9000043,
+    9000044,
+    9000045,
+    9000046,
+    9000047,
+    9000048,
+    9000049,
+    9000050,
+    9000051,
+    9000052,
+    9000053,
+    9000054,
+    9000055,
+    9000056,
+    9000057,
+    9000058,
+    9000059,
+    9000060
+  ],
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "paired_across_model_seeds": true,
+  "formal_test_previously_accessed": true,
+  "observation_schema": {
+    "source_state_features": 94,
+    "state_features": 93,
+    "excluded_state_features": [
+      "hour_of_week"
+    ]
+  }
+}

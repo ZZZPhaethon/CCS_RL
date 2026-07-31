@@ -1,0 +1,13 @@
+{
+  "best_validation_model_path": "experiments_results/E1/matched_learning_algorithms_20260728/event_residual_ppo/model_seed_0/event_residual_e1_best_validation",
+  "final_model_path": "experiments_results/E1/matched_learning_algorithms_20260728/event_residual_ppo/model_seed_0/event_residual_e1_final",
+  "max_simulator_hour_steps": 9505319,
+  "planned_timesteps": 10000128,
+  "requested_timesteps": 10000000,
+  "simulator_budget_exhausted": true,
+  "simulator_budget_fraction": 0.9999998947957454,
+  "simulator_hour_steps": 9505318.0,
+  "simulator_simulated_hours": 9505318.0,
+  "simulator_step_calls": 9505318,
+  "state": "simulator_budget_exhausted"
+}

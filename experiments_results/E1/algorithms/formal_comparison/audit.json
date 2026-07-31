@@ -1,0 +1,144 @@
+{
+  "dataset_name": "E1 formal comparison dataset",
+  "version": "2026-07-30-hour-removed-iterative-q",
+  "cleanup_component_breakdown": false,
+  "cleanup_policy": "retain one scalar terminal cleanup operating cost",
+  "row_counts": {
+    "e1_formal_per_episode_csv": 450,
+    "e1_formal_per_model_seed_csv": 15,
+    "e1_formal_per_algorithm_csv": 7
+  },
+  "expected_rows": 450,
+  "actual_rows": 450,
+  "primary_key_duplicates": 0,
+  "required_core_rows_with_missing_values": 0,
+  "cost_identity_failures": 0,
+  "greedy_pairing_failures": 0,
+  "seed_coverage": {
+    "fixed_assignment": {
+      "model_seeds": [
+        null
+      ],
+      "rows": 30,
+      "exact_test_seed_coverage_by_model": {
+        "not_applicable": true
+      }
+    },
+    "greedy": {
+      "model_seeds": [
+        null
+      ],
+      "rows": 30,
+      "exact_test_seed_coverage_by_model": {
+        "not_applicable": true
+      }
+    },
+    "ppo_hourly": {
+      "model_seeds": [
+        0,
+        1,
+        2
+      ],
+      "rows": 90,
+      "exact_test_seed_coverage_by_model": {
+        "0": true,
+        "1": true,
+        "2": true
+      }
+    },
+    "ppo_high_level": {
+      "model_seeds": [
+        0,
+        1,
+        2
+      ],
+      "rows": 90,
+      "exact_test_seed_coverage_by_model": {
+        "0": true,
+        "1": true,
+        "2": true
+      }
+    },
+    "ppo_event_residual": {
+      "model_seeds": [
+        0,
+        1,
+        2
+      ],
+      "rows": 90,
+      "exact_test_seed_coverage_by_model": {
+        "0": true,
+        "1": true,
+        "2": true
+      }
+    },
+    "iterative_action_q_g60_p4": {
+      "model_seeds": [
+        0,
+        1,
+        2
+      ],
+      "rows": 90,
+      "exact_test_seed_coverage_by_model": {
+        "0": true,
+        "1": true,
+        "2": true
+      }
+    },
+    "rolling_milp": {
+      "model_seeds": [
+        null
+      ],
+      "rows": 30,
+      "exact_test_seed_coverage_by_model": {
+        "not_applicable": true
+      }
+    }
+  },
+  "optional_missing_value_counts": {
+    "model_seed": 90,
+    "captured_t": 90,
+    "storage_rate": 90,
+    "loss_rate": 90,
+    "hard_violations": 270,
+    "override_events": 360,
+    "proposed_override_events": 360,
+    "selected_interventions": 360,
+    "effective_intervention_rate": 360,
+    "solver_replan_count": 420,
+    "solver_failure_count": 420,
+    "solver_timeout_count": 420,
+    "fallback_used": 420,
+    "wall_clock_seconds": 180
+  },
+  "summary_reconciliation_failures": 0,
+  "source_directories": {
+    "fixed_assignment": "algorithms/formal_fixed_assignment_seeds_9000031-9000060_run01",
+    "greedy": "algorithms/formal_greedy_seeds_9000031-9000060_run01",
+    "ppo_hourly": "algorithms/formal_ppo_hourly_seeds_9000031-9000060_run02",
+    "ppo_high_level": "algorithms/formal_ppo_high_level_seeds_9000031-9000060_run01",
+    "ppo_event_residual": "algorithms/formal_ppo_event_residual_seeds_9000031-9000060_run01",
+    "iterative_action_q_g60_p4": "algorithms/formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01",
+    "rolling_milp": "algorithms/formal_rolling_milp_h168_r24_t600s_cplex222_seeds_9000031-9000060_run03"
+  },
+  "output_sha256": {
+    "e1_formal_per_episode.csv": "4d02de76e0231a4fe43b823a4860bcf861592ad055322f841d72251c53f682a9",
+    "e1_formal_per_model_seed.csv": "61613d8bade5a08ca4f86f57edb1790045489c7c2d62e56ff0f24cd164fda570",
+    "e1_formal_per_algorithm.csv": "0cd68f73f8ac5452f4b960d324139244bdfb9aadf78ad296392249abdb6708d2",
+    "schema.json": "769fa5bd9b3cb1b42c19113a251d210025c768a2e6e5770633e9b3ab68219de5"
+  },
+  "milp_result_promotion": {
+    "status": "600s_run03_promoted_as_primary",
+    "superseded_result_retained": true,
+    "single_factor_time_limit_comparison": false,
+    "source_hashes_differ_from_superseded_run": true
+  },
+  "iterative_q_adoption": {
+    "model": "G60-P4-no-hour",
+    "excluded_state_features": [
+      "hour_of_week"
+    ],
+    "adopted_on": "2026-07-30",
+    "formal_test_previously_accessed": true
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "experiment": "iterative_q_state_individual_retrain_20260731_run01",
+  "question": "Are in_transit_fill and episode_progress required during iterative Q training?",
+  "design": {
+    "type": "fixed-root 2x2 training ablation",
+    "always_removed": [
+      "hour_of_week"
+    ],
+    "factors": [
+      "in_transit_fill",
+      "episode_progress"
+    ],
+    "model_seeds": [
+      0,
+      1,
+      2
+    ],
+    "evaluation_seeds": [
+      9000031,
+      9000060
+    ],
+    "evaluation_seed_count": 30,
+    "episode_hours": 720,
+    "scenario_protocol": "unified_window_v1",
+    "bootstrap": {
+      "method": "crossed model-seed and scenario bootstrap",
+      "replicates": 30000,
+      "random_seed": 20260731
+    }
+  },
+  "conditions": {
+    "keep_both": {
+      "mean_total_cost_eur": 1891908.648924,
+      "delta_vs_keep_both_eur": 0.0,
+      "delta_percent": 0.0,
+      "ci_95_eur": [
+        0.0,
+        0.0
+      ]
+    },
+    "drop_in_transit_fill": {
+      "mean_total_cost_eur": 1871560.690407,
+      "delta_vs_keep_both_eur": -20347.958517,
+      "delta_percent": -1.075525,
+      "ci_95_eur": [
+        -102584.277119,
+        68454.966905
+      ],
+      "model_seed_deltas_eur": [
+        -86956.711406,
+        -48145.299644,
+        74058.135499
+      ]
+    },
+    "drop_episode_progress": {
+      "mean_total_cost_eur": 1891811.413722,
+      "delta_vs_keep_both_eur": -97.235202,
+      "delta_percent": -0.005140,
+      "ci_95_eur": [
+        -69258.326968,
+        64587.583971
+      ],
+      "model_seed_deltas_eur": [
+        -59181.510210,
+        21673.571962,
+        37216.232644
+      ]
+    },
+    "drop_both": {
+      "mean_total_cost_eur": 1894563.952938,
+      "delta_vs_keep_both_eur": 2655.304014,
+      "delta_percent": 0.140351,
+      "ci_95_eur": [
+        -66010.827561,
+        76992.300099
+      ],
+      "model_seed_deltas_eur": [
+        -44224.764950,
+        -25112.880502,
+        77303.557494
+      ]
+    }
+  },
+  "factorial_effects_eur": {
+    "remove_in_transit_fill": {
+      "mean": -8797.709651,
+      "ci_95": [
+        -64734.698398,
+        50927.049776
+      ]
+    },
+    "remove_episode_progress": {
+      "mean": 11453.013665,
+      "ci_95": [
+        -19889.616912,
+        44688.135980
+      ]
+    },
+    "interaction": {
+      "mean": 23100.497733,
+      "ci_95": [
+        -65952.866940,
+        117211.282073
+      ]
+    }
+  },
+  "conclusion": "Neither feature is required by the current fixed-root 720-hour iterative Q protocol; every deletion effect has a 95% interval spanning zero. Removing both changes mean total cost by only +0.14%.",
+  "caveat": "A prior self-consistent recursive-root joint deletion showed a directional +2.61% cost increase, but its 95% interval also crossed zero. This fixed-root experiment isolates representation effects and does not establish invariance under every policy-induced data distribution."
+}

@@ -1,2 +1,0 @@
-model_seed_1_formal_job=34433
-model_seed_2_formal_job=34434

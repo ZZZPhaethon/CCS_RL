@@ -1,0 +1,13 @@
+{
+  "best_validation_model_path": "/scratch_root/hx721/CCS_RLLLM_e1_20260728/experiments_results/E1/hourly_ppo_gpu_20260728/centralized_maskable_ppo/model_seed_0/ppo_hourly_best_validation",
+  "effective_vectorized_budget_stop": 9505312,
+  "max_simulator_hour_steps": 9505319,
+  "model_path": "/scratch_root/hx721/CCS_RLLLM_e1_20260728/experiments_results/E1/hourly_ppo_gpu_20260728/centralized_maskable_ppo/model_seed_0/ppo_hourly_final",
+  "simulator_budget_exhausted": false,
+  "simulator_budget_fraction": 0.9999992635702178,
+  "simulator_budget_stop_reached": true,
+  "simulator_hour_steps": 9505312.0,
+  "simulator_simulated_hours": 9505312.0,
+  "simulator_step_calls": 9505312,
+  "state": "simulator_budget_stop_reached"
+}

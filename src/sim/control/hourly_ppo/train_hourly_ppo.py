@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -118,6 +119,7 @@ def evaluate_seed(
 ) -> dict[str, int | float]:
     """Evaluate a deterministic hourly policy on one fixed physical seed."""
 
+    started_at = perf_counter()
     env.reset(seed=int(seed))
     decisions = 0
     while env.t < env.n_steps:
@@ -153,6 +155,7 @@ def evaluate_seed(
     )
     return {
         "seed": int(seed),
+        "wall_clock_seconds": perf_counter() - started_at,
         "decisions": decisions,
         "simulated_hours": float(env.simulator.state.time_h),
         "episode_vessel_fuel_eur": float(env.ledger.vessel_fuel),
