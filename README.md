@@ -509,6 +509,15 @@ Issues and pull requests are welcome. When adding a controller:
 5. add fixed-seed behavioural tests;
 6. create a new protocol version if the physical or disturbance assumptions change.
 
+## 🤝 Contributors
+
+Thanks to everyone who has contributed to CCS_RL.
+
+<a href="https://github.com/ZZZPhaethon/CCS_RL/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ZZZPhaethon/CCS_RL"
+       alt="CCS_RL contributors" />
+</a>
+
 ## 📝 Citation
 
 If this repository supports your research, please cite the software:
