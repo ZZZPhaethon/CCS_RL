@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light-v2">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#06131d">
+  <meta name="theme-color" content="#f6f9f7">
   <meta name="description" content="CCS_RL couples a physics-constrained ship-based CCS simulator with heuristic, optimisation and learned dispatch controllers under one frozen evaluation protocol.">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="keywords" content="CCS, carbon capture and storage, CO2 shipping, reinforcement learning, dispatch optimisation, maritime decarbonisation, Rolling MILP">
@@ -20,10 +20,25 @@
   <meta name="twitter:description" content="Auditable simulation and learned dispatch control for maritime carbon transport and storage.">
   <meta name="twitter:image" content="https://zzzphaethon.github.io/CCS_RL/project-assets/og.png">
   <title>CCS_RL — Physics-Constrained Dispatch for Ship-Based CCS</title>
+  <script>
+    try {
+      const savedTheme = localStorage.getItem("ccs-rl-dashboard-theme");
+      if (savedTheme === "light-v2" || savedTheme === "dark") {
+        document.documentElement.dataset.theme = savedTheme;
+      }
+    } catch (_error) {
+      // Keep the default light theme when storage is unavailable.
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="project-assets/site.css">
+  <link id="lightThemeStyles" rel="stylesheet" href="project-assets/site-v2.css">
+  <script>
+    document.getElementById("lightThemeStyles").media =
+      document.documentElement.dataset.theme === "dark" ? "not all" : "all";
+  </script>
   <script src="project-assets/site.js" defer></script>
   <script type="application/ld+json">
     {
@@ -65,9 +80,15 @@
         <a href="#demo">Demo</a>
         <a href="#reproduce">Reproduce</a>
       </div>
-      <a class="nav-code" href="https://github.com/ZZZPhaethon/CCS_RL" target="_blank" rel="noreferrer">
-        View code <span aria-hidden="true">↗</span>
-      </a>
+      <div class="nav-actions">
+        <div class="site-theme-switcher" role="group" aria-label="Visual theme">
+          <button class="site-theme-choice" type="button" data-theme-choice="light-v2" aria-pressed="true">Light</button>
+          <button class="site-theme-choice" type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+        </div>
+        <a class="nav-code" href="https://github.com/ZZZPhaethon/CCS_RL" target="_blank" rel="noreferrer">
+          View code <span aria-hidden="true">↗</span>
+        </a>
+      </div>
     </nav>
   </header>
 

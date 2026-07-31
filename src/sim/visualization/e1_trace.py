@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import itertools
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ def build_e1_cinematic_payload(
     """Adapt an E1 hourly trace CSV to the cinematic dashboard contract."""
     source_path = Path(trace_csv)
     rows = _read_trace_rows(source_path)
+    trace_capacities_t = _read_trace_capacities(source_path)
     controller = str(rows[0]["controller"])
     test_seed = int(rows[0]["test_seed"])
     hours = [float(row["hour"]) for row in rows]
@@ -43,8 +45,6 @@ def build_e1_cinematic_payload(
 
     network, _state = build_northern_lights_phase2_demo()
     with NORTHERN_LIGHTS_PHASE2_DATA_PATH.open(encoding="utf-8") as handle:
-        import json
-
         locations = _locations_from_phase2_data(json.load(handle))
 
     emitter_ids = _entity_ids_from_suffix(
@@ -89,7 +89,11 @@ def build_e1_cinematic_payload(
         {
             "id": emitter_id,
             "label": str(locations[emitter_id]["label"]),
-            "capacity_t": float(network.entities[emitter_id].buffer_capacity_t),
+            "capacity_t": _capacity_for(
+                emitter_id,
+                trace_capacities_t,
+                network.entities[emitter_id].buffer_capacity_t,
+            ),
             "color": E1_EMITTER_COLORS[index % len(E1_EMITTER_COLORS)],
             "lat": float(locations[emitter_id]["lat"]),
             "lon": float(locations[emitter_id]["lon"]),
@@ -100,7 +104,11 @@ def build_e1_cinematic_payload(
         {
             "id": vessel_id,
             "label": _friendly_vessel_name(vessel_id),
-            "capacity_t": float(network.entities[vessel_id].capacity_t),
+            "capacity_t": _capacity_for(
+                vessel_id,
+                trace_capacities_t,
+                network.entities[vessel_id].capacity_t,
+            ),
             "color": E1_VESSEL_COLORS[index % len(E1_VESSEL_COLORS)],
         }
         for index, vessel_id in enumerate(vessel_ids)
@@ -109,7 +117,11 @@ def build_e1_cinematic_payload(
     terminal_metadata = {
         "id": terminal_id,
         "label": str(locations[terminal_id]["label"]),
-        "capacity_t": float(terminal_entity.storage_capacity_t),
+        "capacity_t": _capacity_for(
+            terminal_id,
+            trace_capacities_t,
+            terminal_entity.storage_capacity_t,
+        ),
         "lat": float(locations[terminal_id]["lat"]),
         "lon": float(locations[terminal_id]["lon"]),
     }
@@ -234,6 +246,39 @@ def _read_trace_rows(path: Path) -> list[dict[str, str]]:
             "E1 cinematic input must contain exactly one non-empty test seed."
         )
     return rows
+
+
+def _read_trace_capacities(path: Path) -> dict[str, float]:
+    """Read experiment-specific capacities from a trace companion metadata file."""
+    metadata_stem = path.stem.replace("_hourly_trace", "_metadata")
+    metadata_path = path.with_name(f"{metadata_stem}.json")
+    if not metadata_path.exists():
+        return {}
+    with metadata_path.open(encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    raw_capacities = metadata.get("inventory_capacities_t", {})
+    if not isinstance(raw_capacities, dict):
+        raise ValueError(
+            f"E1 metadata inventory_capacities_t must be an object: {metadata_path}"
+        )
+    capacities: dict[str, float] = {}
+    for entity_id, raw_capacity in raw_capacities.items():
+        capacity = float(raw_capacity)
+        if not math.isfinite(capacity) or capacity <= 0:
+            raise ValueError(
+                f"Invalid inventory capacity for {entity_id!r}: {raw_capacity!r}"
+            )
+        capacities[str(entity_id)] = capacity
+    return capacities
+
+
+def _capacity_for(
+    entity_id: str,
+    trace_capacities_t: dict[str, float],
+    fallback: float,
+) -> float:
+    """Prefer the capacity used to create the trace over scenario defaults."""
+    return float(trace_capacities_t.get(entity_id, fallback))
 
 
 def _validate_hours(hours: list[float]) -> None:

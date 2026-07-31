@@ -791,6 +791,18 @@ class VisualizationTests(unittest.TestCase):
         self.assertEqual(payload["duration_hours"], 720.0)
         self.assertEqual(len(payload["vessels"]), 3)
         self.assertEqual(len(payload["emitters"]), 3)
+        emitter_capacities = {
+            emitter["id"]: emitter["capacity_t"]
+            for emitter in payload["emitters"]
+        }
+        self.assertEqual(emitter_capacities["yara_sluiskil"], 15_000.0)
+        self.assertEqual(payload["terminal"]["capacity_t"], 9_150.0)
+        self.assertLess(
+            payload["frames"][664]["emitters"]["yara_sluiskil"][
+                "fill_fraction"
+            ],
+            1.0,
+        )
         self.assertEqual(len(payload["components"]["capture_sites"]), 3)
         self.assertEqual(len(payload["components"]["fleet"]), 3)
         self.assertEqual(

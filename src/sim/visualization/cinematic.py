@@ -6,7 +6,7 @@ from typing import Any
 
 
 def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
-    """Render a standalone dark cinematic dashboard for an E1 trajectory."""
+    """Render a standalone theme-switchable cinematic dashboard."""
     title = html.escape(str(payload.get("title", "CCS Operations")))
     subtitle = html.escape(str(payload.get("subtitle", "")))
     data_json = json.dumps(
@@ -16,12 +16,22 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
     ).replace("</", "<\\/")
 
     template = """<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light-v2">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
   <title>__TITLE__</title>
+  <script>
+    try {
+      const savedTheme = localStorage.getItem("ccs-rl-dashboard-theme");
+      if (savedTheme === "light-v2" || savedTheme === "dark") {
+        document.documentElement.dataset.theme = savedTheme;
+      }
+    } catch (_error) {
+      // Local storage can be unavailable in privacy-restricted file views.
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -525,6 +535,34 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
     .chart-legend-item { display: flex; align-items: center; gap: 5px; }
     .chart-swatch { width: 15px; height: 2px; background: var(--series-color); }
     #systemChart { display: block; width: 100%; height: 100%; min-height: 0; cursor: crosshair; }
+    .theme-switcher {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      margin-bottom: 6px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .04);
+    }
+    .theme-choice {
+      min-width: 50px;
+      padding: 4px 9px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+    }
+    .theme-choice:hover { color: var(--ink); }
+    .theme-choice[aria-pressed="true"] {
+      background: rgba(100, 199, 196, .15);
+      color: var(--cyan);
+      box-shadow: inset 0 0 0 1px rgba(100, 199, 196, .22);
+    }
     @media (max-width: 980px) {
       body { overflow: auto; }
       .app { height: auto; min-height: 100vh; grid-template-rows: auto 620px 240px; }
@@ -551,6 +589,160 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
       .ship-glyph, .progress-fill { transition: none; }
     }
   </style>
+  <style id="lightThemeStyles">
+    /*
+     * CCS_RL Physical Layer Dashboard — Light V2
+     * The original cinematic rules remain above; this layer changes only presentation.
+     */
+    :root {
+      color-scheme: light;
+      --night: #f3f7f5;
+      --night-raised: #ffffff;
+      --glass: rgba(255, 255, 255, .91);
+      --glass-soft: rgba(255, 255, 255, .84);
+      --ink: #14343d;
+      --muted: #5d747b;
+      --line: rgba(24, 70, 79, .14);
+      --cyan: #087f7b;
+      --mint: #278b65;
+      --gold: #a76500;
+      --coral: #cf5e53;
+      --blue: #4f6fc8;
+      --shadow: 0 18px 48px rgba(31, 70, 71, .14);
+    }
+    html, body { background: var(--night); }
+    body { color: var(--ink); }
+    .app {
+      background:
+        radial-gradient(circle at 73% 8%, rgba(8, 127, 123, .09), transparent 34%),
+        linear-gradient(180deg, #fbfcfa 0%, var(--night) 100%);
+    }
+    .topbar {
+      border-bottom-color: rgba(24, 70, 79, .13);
+      background: rgba(251, 253, 251, .94);
+      box-shadow: 0 8px 28px rgba(31, 70, 71, .07);
+    }
+    .play-button {
+      border-color: rgba(167, 101, 0, .35);
+      background: rgba(230, 165, 52, .15);
+      color: #865200;
+    }
+    .play-button:hover { background: rgba(230, 165, 52, .24); }
+    .speed-button { background: rgba(255, 255, 255, .7); }
+    .speed-button[aria-pressed="true"] {
+      border-color: rgba(8, 127, 123, .42);
+      background: rgba(8, 127, 123, .09);
+    }
+    .theme-switcher {
+      border-color: rgba(24, 70, 79, .13);
+      background: rgba(234, 241, 238, .78);
+    }
+    .theme-choice[aria-pressed="true"] {
+      background: #ffffff;
+      color: #087f7b;
+      box-shadow: 0 2px 8px rgba(31, 70, 71, .12);
+    }
+    #cinematicMap { background: #e9efec; }
+    .leaflet-control-attribution {
+      background: rgba(255, 255, 255, .82) !important;
+      color: #657c82 !important;
+    }
+    .leaflet-control-attribution a { color: #176f75 !important; }
+    .leaflet-control-zoom {
+      border: 0 !important;
+      box-shadow: 0 8px 24px rgba(31, 70, 71, .13) !important;
+    }
+    .leaflet-control-zoom a {
+      border-color: rgba(24, 70, 79, .12) !important;
+      background: rgba(255, 255, 255, .94) !important;
+      color: #244b54 !important;
+    }
+    .components-panel,
+    .detail-panel {
+      border-color: rgba(24, 70, 79, .13);
+      background: var(--glass);
+      box-shadow: var(--shadow);
+    }
+    .components-toggle,
+    .component-item,
+    .vessel-tab,
+    .detail-cell {
+      border-color: rgba(24, 70, 79, .11);
+      background: rgba(248, 251, 249, .88);
+    }
+    .components-toggle:hover { background: rgba(8, 127, 123, .07); }
+    .components-body { scrollbar-color: rgba(56, 96, 101, .3) transparent; }
+    .component-group-title,
+    .component-value,
+    .route-line { color: #355861; }
+    .component-item:hover,
+    .component-item.is-selected {
+      border-color: color-mix(in srgb, var(--item-color) 48%, rgba(24,70,79,.16));
+      background: color-mix(in srgb, var(--item-color) 10%, white);
+      box-shadow: 0 7px 18px rgba(31, 70, 71, .06);
+    }
+    .component-meter,
+    .progress-track { background: rgba(24, 70, 79, .09); }
+    .kpi {
+      border-color: rgba(24, 70, 79, .12);
+      background: rgba(255, 255, 255, .87);
+      box-shadow: 0 12px 28px rgba(31, 70, 71, .1);
+    }
+    .kpi-value.is-zero { color: #19724f; }
+    .kpi-value.is-alert { color: #b9473d; }
+    .event-pill {
+      border-color: rgba(167, 101, 0, .24);
+      background: rgba(255, 249, 233, .93);
+      color: #7c4c00;
+      box-shadow: 0 12px 30px rgba(84, 69, 31, .11);
+    }
+    .legend,
+    .coordinate-readout {
+      border-color: rgba(24, 70, 79, .12);
+      background: rgba(255, 255, 255, .88);
+      color: #4e6c73;
+      box-shadow: 0 10px 26px rgba(31, 70, 71, .09);
+    }
+    .grid-coordinate-label {
+      color: #385c64;
+      text-shadow: 0 1px 0 rgba(255,255,255,.9), 0 0 5px rgba(255,255,255,.95);
+    }
+    .grid-coordinate-label span {
+      border-color: rgba(24, 70, 79, .12);
+      background: rgba(255, 255, 255, .74);
+    }
+    .facility-core {
+      background: rgba(255, 255, 255, .96);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--facility-color) 13%, transparent), 0 5px 16px rgba(25, 63, 66, .16);
+    }
+    .facility-label,
+    .ship-tag {
+      border-color: rgba(24, 70, 79, .15);
+      background: rgba(255, 255, 255, .94);
+      color: #173b44;
+      box-shadow: 0 5px 14px rgba(31, 70, 71, .12);
+    }
+    .ship-glyph path {
+      stroke: rgba(255, 255, 255, .94);
+      stroke-width: 1.1;
+    }
+    .ship-marker.is-selected .ship-tag {
+      background: color-mix(in srgb, var(--ship-color) 12%, white);
+    }
+    .chart-stage {
+      border-top-color: rgba(24, 70, 79, .13);
+      background: linear-gradient(180deg, rgba(237, 244, 241, .78), rgba(255, 255, 255, .96));
+      box-shadow: 0 -8px 28px rgba(31, 70, 71, .06);
+    }
+    .chart-title { color: #244b54; }
+    @media (max-width: 680px) {
+      .topbar { background: rgba(251, 253, 251, .97); }
+    }
+  </style>
+  <script>
+    document.getElementById("lightThemeStyles").media =
+      document.documentElement.dataset.theme === "dark" ? "not all" : "all";
+  </script>
 </head>
 <body>
   <div class="app">
@@ -571,6 +763,10 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
         </div>
       </div>
       <div class="clock">
+        <div class="theme-switcher" role="group" aria-label="Visual theme">
+          <button class="theme-choice" type="button" data-theme-choice="light-v2" aria-pressed="true">Light</button>
+          <button class="theme-choice" type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+        </div>
         <div id="clockMain" class="clock-main">Day 00 · 00:00</div>
         <div id="clockSub" class="clock-sub">Hour 000 / 720</div>
       </div>
@@ -656,10 +852,14 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
     const componentsToggle = document.getElementById("componentsToggle");
     const componentsBody = document.getElementById("componentsBody");
     const coordinateReadout = document.getElementById("coordinateReadout");
+    const lightThemeStyles = document.getElementById("lightThemeStyles");
+    const themeChoices = document.querySelectorAll("[data-theme-choice]");
     const vesselMarkers = {};
     const vesselTrails = {};
     const facilityMarkers = {};
     const routeLayers = {};
+    const pipelineLayers = [];
+    const injectionLayers = [];
     const componentNodes = {};
     let currentHour = 0;
     let selectedVessel = data.vessels[0].id;
@@ -678,11 +878,16 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
       preferCanvas: false
     });
     L.control.zoom({position: "bottomright"}).addTo(map);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    const lightTileUrl = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
+    const darkTileUrl = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+    const baseTileLayer = L.tileLayer(
+      document.documentElement.dataset.theme === "dark" ? darkTileUrl : lightTileUrl,
+      {
       subdomains: "abcd",
       maxZoom: 12,
       attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
-    }).addTo(map);
+      }
+    ).addTo(map);
     map.createPane("graticulePane");
     map.getPane("graticulePane").style.zIndex = 340;
     map.getPane("graticulePane").style.pointerEvents = "none";
@@ -692,6 +897,18 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
     const graticuleLayer = L.layerGroup().addTo(map);
     const bbox = data.map.bbox;
     map.fitBounds([[bbox.min_lat, bbox.min_lon], [bbox.max_lat, bbox.max_lon]], {padding: [18, 18]});
+
+    function isDarkTheme() {
+      return document.documentElement.dataset.theme === "dark";
+    }
+
+    function themeColor(lightColor, darkColor) {
+      return isDarkTheme() ? darkColor : lightColor;
+    }
+
+    function seriesColor(series) {
+      return typeof series.color === "function" ? series.color() : series.color;
+    }
 
     function formatTonnes(value) {
       const numeric = Number(value || 0);
@@ -756,7 +973,7 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
         const value = Number(lat.toFixed(decimals));
         L.polyline([[value, west], [value, east]], {
           pane: "graticulePane",
-          color: "#8aa8b3",
+          color: themeColor("#54757c", "#8aa8b3"),
           weight: .8,
           opacity: .27,
           dashArray: "3 7",
@@ -777,7 +994,7 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
         const value = Number(lon.toFixed(decimals));
         L.polyline([[south, value], [north, value]], {
           pane: "graticulePane",
-          color: "#8aa8b3",
+          color: themeColor("#54757c", "#8aa8b3"),
           weight: .8,
           opacity: .27,
           dashArray: "3 7",
@@ -848,7 +1065,7 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
 
     Object.values(data.map.service_routes).forEach(route => {
       routeLayers[route.id] = L.polyline(route.coordinates, {
-        color: "#456d78",
+        color: themeColor("#5d7d83", "#456d78"),
         weight: 1.7,
         opacity: .42,
         className: "service-route"
@@ -856,21 +1073,25 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
     });
     (data.map.pipeline_segments || []).forEach(segment => {
       const isSubsea = segment.style === "subsea_connection";
-      L.polyline(segment.coordinates, {
-        color: isSubsea ? "#7f9cf5" : "#64c7c4",
+      const layer = L.polyline(segment.coordinates, {
+        color: isSubsea
+          ? themeColor("#4f6fc8", "#7f9cf5")
+          : themeColor("#087f7b", "#64c7c4"),
         weight: isSubsea ? 2.5 : 5,
         opacity: isSubsea ? .62 : .9,
         dashArray: isSubsea ? "3 8" : "10 11",
         className: isSubsea ? "subsea-link" : "co2-flow"
       }).bindTooltip(segment.label).addTo(map);
+      pipelineLayers.push({layer, isSubsea});
     });
     (data.map.injection_links || []).forEach(link => {
-      L.polyline(link.coordinates, {
-        color: "#72c7a0",
+      const layer = L.polyline(link.coordinates, {
+        color: themeColor("#278b65", "#72c7a0"),
         weight: 2,
         opacity: .48,
         dashArray: "2 8"
       }).addTo(map);
+      injectionLayers.push(layer);
     });
 
     data.emitters.forEach(emitter => {
@@ -1160,9 +1381,9 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
           : [route.origin, route.destination].includes(selectedComponent);
         const selectedColor = selectedIsVessel
           ? vesselById[selectedVessel].color
-          : emitterById[selectedComponent]?.color || "#64c7c4";
+          : emitterById[selectedComponent]?.color || themeColor("#087f7b", "#64c7c4");
         routeLayers[route.id].setStyle({
-          color: active ? selectedColor : "#456d78",
+          color: active ? selectedColor : themeColor("#5d7d83", "#456d78"),
           weight: active ? 3.2 : 1.7,
           opacity: active ? .82 : .34
         });
@@ -1354,52 +1575,82 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
     }
 
     const systemChartSeries = [
-      {id: "source-buffers", label: "Source buffers", color: "#f4b942", value: frame => frame.total_emitter_inventory_t},
-      {id: "vessel-cargo", label: "Vessel cargo", color: "#7f9cf5", value: frame => frame.total_vessel_inventory_t},
-      {id: "terminal", label: "Terminal", color: "#72c7a0", value: frame => frame.terminal_inventory_t},
-      {id: "cumulative-vent", label: "Cumulative vent", color: "#ef7d70", value: frame => frame.cumulative_vent_t}
+      {id: "source-buffers", label: "Source buffers", color: () => themeColor("#a76500", "#f4b942"), value: frame => frame.total_emitter_inventory_t},
+      {id: "vessel-cargo", label: "Vessel cargo", color: () => themeColor("#4f6fc8", "#7f9cf5"), value: frame => frame.total_vessel_inventory_t},
+      {id: "terminal", label: "Terminal", color: () => themeColor("#278b65", "#72c7a0"), value: frame => frame.terminal_inventory_t},
+      {id: "cumulative-vent", label: "Cumulative vent", color: () => themeColor("#cf5e53", "#ef7d70"), value: frame => frame.cumulative_vent_t}
     ];
     const systemChartMaximum = Math.max(
       1,
       ...frames.flatMap(frame => systemChartSeries.map(series => Number(series.value(frame) || 0)))
     );
 
+    function niceScaleMaximum(value) {
+      const target = Math.max(1, Number(value));
+      const magnitude = 10 ** Math.floor(Math.log10(target));
+      const normalized = target / magnitude;
+      const nice = normalized <= 1
+        ? 1
+        : normalized <= 2
+          ? 2
+          : normalized <= 2.5
+            ? 2.5
+            : normalized <= 5
+              ? 5
+              : 10;
+      return nice * magnitude;
+    }
+
+    function inventoryScaleMaximum(capacity, value) {
+      const observedMaximum = Math.max(
+        0,
+        ...frames.map(frame => Number(value(frame) || 0))
+      );
+      if (observedMaximum > Number(capacity) + 1e-6) {
+        return niceScaleMaximum(observedMaximum * 1.08);
+      }
+      return Math.max(1, Number(capacity));
+    }
+
     function chartConfigForSelection() {
       if (emitterById[selectedComponent]) {
         const emitter = emitterById[selectedComponent];
+        const inventoryValue = frame => frame.emitters[selectedComponent].inventory_t;
         return {
           key: `emitter:${selectedComponent}`,
           title: `${emitter.label} · buffer inventory`,
           format: formatTonnes,
-          maximum: Math.max(1, emitter.capacity_t),
+          maximum: inventoryScaleMaximum(emitter.capacity_t, inventoryValue),
           series: [
-            {id: "inventory", label: "Buffer inventory", color: emitter.color, value: frame => frame.emitters[selectedComponent].inventory_t},
-            {id: "capacity", label: "Buffer capacity", color: "#91a9b5", dash: [5, 5], value: () => emitter.capacity_t}
+            {id: "inventory", label: "Buffer inventory", color: emitter.color, value: inventoryValue},
+            {id: "capacity", label: "Buffer capacity", color: () => themeColor("#667f86", "#91a9b5"), dash: [5, 5], value: () => emitter.capacity_t}
           ]
         };
       }
       if (vesselById[selectedComponent]) {
         const vessel = vesselById[selectedComponent];
+        const inventoryValue = frame => frame.vessels[selectedComponent].inventory_t;
         return {
           key: `vessel:${selectedComponent}`,
           title: `${vessel.label} · cargo inventory`,
           format: formatTonnes,
-          maximum: Math.max(1, vessel.capacity_t),
+          maximum: inventoryScaleMaximum(vessel.capacity_t, inventoryValue),
           series: [
-            {id: "cargo", label: "Cargo inventory", color: vessel.color, value: frame => frame.vessels[selectedComponent].inventory_t},
-            {id: "capacity", label: "Vessel capacity", color: "#91a9b5", dash: [5, 5], value: () => vessel.capacity_t}
+            {id: "cargo", label: "Cargo inventory", color: vessel.color, value: inventoryValue},
+            {id: "capacity", label: "Vessel capacity", color: () => themeColor("#667f86", "#91a9b5"), dash: [5, 5], value: () => vessel.capacity_t}
           ]
         };
       }
       if (selectedComponent === terminal.id) {
+        const inventoryValue = frame => frame.terminal_inventory_t;
         return {
           key: `terminal:${selectedComponent}`,
           title: `${terminal.label} · terminal inventory`,
           format: formatTonnes,
-          maximum: Math.max(1, terminal.capacity_t),
+          maximum: inventoryScaleMaximum(terminal.capacity_t, inventoryValue),
           series: [
-            {id: "inventory", label: "Terminal inventory", color: infrastructureColors.terminal, value: frame => frame.terminal_inventory_t},
-            {id: "capacity", label: "Storage capacity", color: "#91a9b5", dash: [5, 5], value: () => terminal.capacity_t}
+            {id: "inventory", label: "Terminal inventory", color: infrastructureColors.terminal, value: inventoryValue},
+            {id: "capacity", label: "Storage capacity", color: () => themeColor("#667f86", "#91a9b5"), dash: [5, 5], value: () => terminal.capacity_t}
           ]
         };
       }
@@ -1441,9 +1692,10 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
         item.className = "chart-legend-item";
         const swatch = document.createElement("span");
         swatch.className = "chart-swatch";
-        swatch.style.setProperty("--series-color", series.color);
+        const color = seriesColor(series);
+        swatch.style.setProperty("--series-color", color);
         if (series.dash) {
-          swatch.style.background = `repeating-linear-gradient(90deg, ${series.color} 0 5px, transparent 5px 9px)`;
+          swatch.style.background = `repeating-linear-gradient(90deg, ${color} 0 5px, transparent 5px 9px)`;
         }
         const label = document.createElement("span");
         label.textContent = series.label;
@@ -1472,19 +1724,24 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
     }
 
     function drawSeries(series, plot, maximum) {
+      chartContext.save();
+      chartContext.beginPath();
+      chartContext.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+      chartContext.clip();
       chartContext.beginPath();
       frames.forEach((frame, index) => {
         const x = chartX(frame.hour, plot);
         const y = chartY(series.value(frame), plot, maximum);
         if (index === 0) chartContext.moveTo(x, y); else chartContext.lineTo(x, y);
       });
-      chartContext.strokeStyle = series.color;
+      chartContext.strokeStyle = seriesColor(series);
       chartContext.globalAlpha = series.id === "cumulative-vent" ? .95 : .82;
       chartContext.lineWidth = series.id === "cumulative-vent" ? 2.2 : 1.7;
       chartContext.setLineDash(series.dash || []);
       chartContext.stroke();
       chartContext.setLineDash([]);
       chartContext.globalAlpha = 1;
+      chartContext.restore();
     }
 
     function drawChart() {
@@ -1501,10 +1758,10 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
         chartContext.beginPath();
         chartContext.moveTo(plot.left, y);
         chartContext.lineTo(plot.right, y);
-        chartContext.strokeStyle = "rgba(151,190,203,.12)";
+        chartContext.strokeStyle = themeColor("rgba(24,70,79,.12)", "rgba(151,190,203,.12)");
         chartContext.lineWidth = 1;
         chartContext.stroke();
-        chartContext.fillStyle = "#77919c";
+        chartContext.fillStyle = themeColor("#607a81", "#77919c");
         chartContext.textAlign = "right";
         chartContext.fillText(config.format(value), plot.left - 8, y);
       }
@@ -1513,7 +1770,9 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
         chartContext.beginPath();
         chartContext.moveTo(x, plot.top);
         chartContext.lineTo(x, plot.top + (event.type === "vent" ? 10 : 5));
-        chartContext.strokeStyle = event.type === "vent" ? "#ef7d70" : "rgba(145,169,181,.38)";
+        chartContext.strokeStyle = event.type === "vent"
+          ? themeColor("#cf5e53", "#ef7d70")
+          : themeColor("rgba(67,96,102,.38)", "rgba(145,169,181,.38)");
         chartContext.lineWidth = event.type === "vent" ? 1.8 : 1;
         chartContext.stroke();
       });
@@ -1523,17 +1782,57 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
       chartContext.beginPath();
       chartContext.moveTo(cursorX, plot.top);
       chartContext.lineTo(cursorX, plot.bottom);
-      chartContext.strokeStyle = hoveredHour === null ? "#f4b942" : "#d8e7eb";
+      chartContext.strokeStyle = hoveredHour === null
+        ? themeColor("#a76500", "#f4b942")
+        : themeColor("#315a63", "#d8e7eb");
       chartContext.lineWidth = 1.3;
       chartContext.stroke();
-      chartContext.fillStyle = "#c9dbe0";
-      chartContext.textAlign = "center";
-      chartContext.fillText(`H${Math.round(cursorHour)}`, cursorX, plot.bottom + 16);
-      chartContext.fillStyle = "#77919c";
+      if (cursorHour > 1 && cursorHour < duration - 1) {
+        chartContext.fillStyle = themeColor("#315a63", "#c9dbe0");
+        chartContext.textAlign = "center";
+        chartContext.fillText(`H${Math.round(cursorHour)}`, cursorX, plot.bottom + 16);
+      }
+      chartContext.fillStyle = themeColor("#607a81", "#77919c");
       chartContext.textAlign = "left";
       chartContext.fillText("H0", plot.left, plot.bottom + 16);
       chartContext.textAlign = "right";
       chartContext.fillText(`H${duration}`, plot.right, plot.bottom + 16);
+    }
+
+    function applyTheme(theme, persist = true) {
+      const normalized = theme === "dark" ? "dark" : "light-v2";
+      document.documentElement.dataset.theme = normalized;
+      lightThemeStyles.media = normalized === "dark" ? "not all" : "all";
+      themeChoices.forEach(button => {
+        button.setAttribute(
+          "aria-pressed",
+          String(button.dataset.themeChoice === normalized)
+        );
+      });
+      baseTileLayer.setUrl(normalized === "dark" ? darkTileUrl : lightTileUrl);
+      Object.values(routeLayers).forEach(layer => {
+        layer.setStyle({color: themeColor("#5d7d83", "#456d78")});
+      });
+      pipelineLayers.forEach(({layer, isSubsea}) => {
+        layer.setStyle({
+          color: isSubsea
+            ? themeColor("#4f6fc8", "#7f9cf5")
+            : themeColor("#087f7b", "#64c7c4")
+        });
+      });
+      injectionLayers.forEach(layer => {
+        layer.setStyle({color: themeColor("#278b65", "#72c7a0")});
+      });
+      activeChartKey = null;
+      drawLatLonGrid();
+      render(currentHour);
+      if (persist) {
+        try {
+          localStorage.setItem("ccs-rl-dashboard-theme", normalized);
+        } catch (_error) {
+          // Theme still applies for the current view when storage is unavailable.
+        }
+      }
     }
 
     function stopPlayback() {
@@ -1575,6 +1874,27 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
       animationFrame = requestAnimationFrame(playbackTick);
     });
     timeline.max = String(duration);
+    themeChoices.forEach(button => {
+      button.addEventListener("click", () => {
+        applyTheme(button.dataset.themeChoice);
+      });
+    });
+    window.addEventListener("storage", event => {
+      if (
+        event.key === "ccs-rl-dashboard-theme"
+        && (event.newValue === "light-v2" || event.newValue === "dark")
+      ) {
+        applyTheme(event.newValue, false);
+      }
+    });
+    window.addEventListener("message", event => {
+      if (
+        event.data?.type === "ccs-rl-theme"
+        && (event.data.theme === "light-v2" || event.data.theme === "dark")
+      ) {
+        applyTheme(event.data.theme, false);
+      }
+    });
     componentsToggle.addEventListener("click", () => {
       setComponentsCollapsed(!componentsPanel.classList.contains("is-collapsed"));
     });
@@ -1624,8 +1944,7 @@ def render_cinematic_dashboard_html(payload: dict[str, Any]) -> str:
     if (window.matchMedia("(max-width: 980px)").matches) {
       setComponentsCollapsed(true);
     }
-    render(0);
-    drawLatLonGrid();
+    applyTheme(document.documentElement.dataset.theme, false);
     setTimeout(() => {
       map.invalidateSize();
       drawLatLonGrid();
