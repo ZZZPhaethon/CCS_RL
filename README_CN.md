@@ -12,7 +12,7 @@
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="MIT"></a>
   <img src="https://img.shields.io/badge/python-%E2%89%A53.10-blue?style=flat-square" alt="Python >=3.10">
   <a href="https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN"><img src="https://img.shields.io/badge/Google%20Drive-Dataset-4285F4?logo=googledrive&logoColor=white&style=flat-square" alt="Google Drive Dataset"></a>
-  <a href="https://colab.research.google.com/github/ZZZPhaethon/CCS_RL/blob/main/examples/colab_vessel_trajectory_demo.ipynb"><img src="https://img.shields.io/badge/Open%20in-Colab-F9AB00?logo=googlecolab&logoColor=white&style=flat-square" alt="在 Colab 中打开船舶航迹 Demo"></a>
+  <a href="https://colab.research.google.com/github/ZZZPhaethon/CCS_RL/blob/main/examples/colab_vessel_trajectory_demo.ipynb"><img src="https://img.shields.io/badge/Open%20in-Colab-F9AB00?logo=googlecolab&logoColor=white&style=flat-square" alt="在 Colab 中打开 Iterative Action-Q 训练与 V2 动态回放教程"></a>
   <a href="https://zzzphaethon.github.io/CCS_RL/"><img src="https://img.shields.io/badge/项目主页-Project%20Page-13B8A6?logo=githubpages&logoColor=white&style=flat-square" alt="CCS_RL 项目主页"></a>
 </p>
 
