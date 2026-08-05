@@ -25,7 +25,7 @@ from experiments import evaluate_iterative_action_q as iterative_q_eval
 from experiments import plot_e1_figure4 as legacy_figure
 
 
-TEST_SEED = 9_000_056
+TEST_SEED = 9_000_031
 MODEL_SEED = 0
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "experiments_results" / "E6"
 FORMAL_COMPARISON = (
@@ -52,18 +52,26 @@ plt.rcParams["pdf.fonttype"] = 42
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--test-seed", type=int, default=TEST_SEED)
     return parser.parse_args(argv)
 
 
 class MechanismTraceRecorder(legacy_figure.TraceRecorder):
-    def __init__(self, high_output_factor, controller: str) -> None:
+    def __init__(
+        self,
+        high_output_factor,
+        controller: str,
+        test_seed: int,
+    ) -> None:
         super().__init__(high_output_factor)
         self.controller = controller
+        self.test_seed = test_seed
 
     def record(self, env) -> None:
         super().record(env)
         frame = self.frames[-1]
         frame["controller"] = self.controller
+        frame["test_seed"] = self.test_seed
         frame["cumulative_operating_cost_eur"] = float(
             env.ledger.operating_cost
         )
@@ -71,16 +79,21 @@ class MechanismTraceRecorder(legacy_figure.TraceRecorder):
             env.ledger.vent_penalty
         )
         frame["cumulative_episode_cost_eur"] = float(env.ledger.total_cost)
+        frame["cumulative_stored_t"] = float(env.ledger.stored_t)
 
 
-def _formal_row(algorithm: str, model_seed: str = "") -> dict[str, str]:
+def _formal_row(
+    algorithm: str,
+    test_seed: int,
+    model_seed: str = "",
+) -> dict[str, str]:
     with FORMAL_COMPARISON.open("r", encoding="utf-8", newline="") as handle:
         matches = [
             row
             for row in csv.DictReader(handle)
             if row["algorithm"] == algorithm
             and row["model_seed"] == model_seed
-            and int(row["test_seed"]) == TEST_SEED
+            and int(row["test_seed"]) == test_seed
         ]
     if len(matches) != 1:
         raise ValueError(
@@ -157,6 +170,7 @@ def _gated_q_action(
 
 def replay_controller(
     controller: str,
+    test_seed: int,
 ) -> tuple[
     MechanismTraceRecorder,
     dict[str, float],
@@ -164,7 +178,10 @@ def replay_controller(
     int,
     int,
 ]:
-    args = legacy_figure.evaluation_args(legacy_figure.CHECKPOINT)
+    args = legacy_figure.evaluation_args(
+        legacy_figure.CHECKPOINT,
+        test_seed=test_seed,
+    )
     device = torch.device("cpu")
     model, metadata = iterative_q_eval._load_model(args, device)
     variant = str(metadata["observation_variant"])
@@ -176,9 +193,16 @@ def replay_controller(
         greedy_control_variate=False,
     )
     observation, info, high_output_factor = (
-        legacy_figure.reset_with_capture_event_trace(wrapper)
+        legacy_figure.reset_with_capture_event_trace(
+            wrapper,
+            test_seed=test_seed,
+        )
     )
-    recorder = MechanismTraceRecorder(high_output_factor, controller)
+    recorder = MechanismTraceRecorder(
+        high_output_factor,
+        controller,
+        test_seed,
+    )
     recorder.record(wrapper.env)
     original_step = wrapper.env.step
 
@@ -237,7 +261,7 @@ def replay_controller(
             decisions.append(
                 {
                     "controller": controller,
-                    "test_seed": TEST_SEED,
+                    "test_seed": test_seed,
                     "event_index": event_count,
                     "hour": decision_hour,
                     "vessel_id": vessel_id,
@@ -283,9 +307,13 @@ def replay_controller(
     legacy_figure.validate_trace(recorder)
     metrics = iterative_q_eval._metrics(wrapper.env)
     expected = (
-        _formal_row("greedy")
+        _formal_row("greedy", test_seed)
         if controller == "greedy"
-        else _formal_row("iterative_action_q_g60_p4", str(MODEL_SEED))
+        else _formal_row(
+            "iterative_action_q_g60_p4",
+            test_seed,
+            str(MODEL_SEED),
+        )
     )
     for field in (
         "total_cost_eur",
@@ -308,12 +336,13 @@ def replay_controller(
 
 
 def _style_axis(ax, title: str, ylabel: str) -> None:
-    ax.set_title(title, loc="left", fontsize=7.0, fontweight="bold", pad=3)
-    ax.set_ylabel(ylabel, fontsize=6.2)
-    ax.tick_params(labelsize=5.7, length=2.5, width=0.55)
+    ax.set_title(title, loc="left", fontsize=8.0, fontweight="bold", pad=3)
+    ax.set_ylabel(ylabel, fontsize=7.0)
+    ax.tick_params(labelsize=6.5, length=2.5, width=0.55)
     ax.grid(axis="y", color="#D9D9D9", linewidth=0.45)
     ax.set_axisbelow(True)
     ax.set_xlim(0, 30)
+    ax.set_xticks([0, 10, 20, 30])
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
     ax.spines["left"].set_linewidth(0.6)
@@ -351,60 +380,93 @@ def draw_system_states(
     greedy_metrics: dict[str, float],
     q_metrics: dict[str, float],
     q_decisions: list[dict[str, object]],
+    test_seed: int,
     output_dir: Path,
 ) -> list[Path]:
     fig, axes = plt.subplots(
         3,
-        2,
-        figsize=(183 / 25.4, 126 / 25.4),
+        3,
+        figsize=(220 / 25.4, 155 / 25.4),
         sharex=True,
         constrained_layout=True,
     )
+    fig.get_layout_engine().set(rect=(0.0, 0.0, 1.0, 0.86))
     hours_d = np.asarray([float(row["hour"]) / 24 for row in greedy.frames])
     q_hours_d = np.asarray(
         [float(row["hour"]) / 24 for row in iterative_q.frames]
     )
     intervention_days = [hour / 24 for hour in _intervention_hours(q_decisions)]
+    method_traces = (
+        (greedy, hours_d, GREEDY_COLOR, (0, (3, 2)), "Greedy"),
+        (iterative_q, q_hours_d, Q_COLOR, "-", "Iterative Action-Q"),
+    )
 
     for panel_index, emitter_id in enumerate(greedy.emitter_ids):
-        ax = axes.flat[panel_index]
+        ax = axes[0, panel_index]
         capacity = greedy.capacities_t[emitter_id]
-        greedy_fill = np.asarray(
-            [
-                float(row[f"{emitter_id}_inventory_t"]) / capacity * 100
-                for row in greedy.frames
-            ]
-        )
-        q_fill = np.asarray(
-            [
-                float(row[f"{emitter_id}_inventory_t"]) / capacity * 100
-                for row in iterative_q.frames
-            ]
-        )
-        ax.plot(
-            hours_d,
-            greedy_fill,
-            color=GREEDY_COLOR,
-            linewidth=1.0,
-            linestyle=(0, (3, 2)),
-            label="Greedy",
-        )
-        ax.plot(q_hours_d, q_fill, color=Q_COLOR, linewidth=1.15, label="Iterative-Q")
+        for recorder, hours, color, line_style, label in method_traces:
+            fill = np.asarray(
+                [
+                    float(row[f"{emitter_id}_inventory_t"])
+                    / capacity
+                    * 100
+                    for row in recorder.frames
+                ]
+            )
+            ax.plot(
+                hours,
+                fill,
+                color=color,
+                linewidth=1.15 if recorder is iterative_q else 1.0,
+                linestyle=line_style,
+                label=label,
+            )
         _style_axis(
             ax,
             f"{chr(97 + panel_index)}  "
             f"{legacy_figure.friendly_emitter_name(emitter_id)} buffer",
             "Fill level (%)",
         )
+        ax.set_ylim(-5, 105)
+        ax.set_yticks([0, 50, 100])
         ax.axhline(100, color=VENT_COLOR, linewidth=0.65, linestyle=":")
 
+    for vessel_index, vessel_id in enumerate(greedy.vessel_ids):
+        ax = axes[1, vessel_index]
+        capacity = greedy.capacities_t[vessel_id]
+        vessel_name = vessel_id.removeprefix("northern_").replace(
+            "_",
+            " ",
+        ).title()
+        for recorder, hours, color, line_style, label in method_traces:
+            load_percent = np.asarray(
+                [
+                    float(row[f"{vessel_id}_inventory_t"])
+                    / capacity
+                    * 100
+                    for row in recorder.frames
+                ]
+            )
+            ax.plot(
+                hours,
+                load_percent,
+                color=color,
+                linewidth=1.15 if recorder is iterative_q else 1.0,
+                linestyle=line_style,
+                label=label,
+            )
+        _style_axis(
+            ax,
+            f"{chr(100 + vessel_index)}  {vessel_name} load",
+            "Cargo load (%)",
+        )
+        ax.set_ylim(-5, 105)
+        ax.set_yticks([0, 50, 100])
+
     terminal_id = greedy.terminal_ids[0]
-    ax_terminal = axes.flat[3]
+    ax_terminal = axes[2, 0]
     terminal_capacity = greedy.capacities_t[terminal_id]
-    for recorder, color, line_style, label, hours in (
-        (greedy, GREEDY_COLOR, (0, (3, 2)), "Greedy", hours_d),
-        (iterative_q, Q_COLOR, "-", "Iterative-Q", q_hours_d),
-    ):
+    for recorder, hours, color, line_style, label in method_traces:
         terminal_fill = np.asarray(
             [
                 float(row[f"{terminal_id}_inventory_t"])
@@ -421,9 +483,11 @@ def draw_system_states(
             linestyle=line_style,
             label=label,
         )
-    _style_axis(ax_terminal, "d  Terminal buffer", "Fill level (%)")
+    _style_axis(ax_terminal, "g  Terminal buffer", "Fill level (%)")
+    ax_terminal.set_ylim(-5, 105)
+    ax_terminal.set_yticks([0, 50, 100])
 
-    ax_vent = axes.flat[4]
+    ax_vent = axes[2, 1]
     ax_vent.plot(
         hours_d,
         [float(row["cumulative_vent_t"]) for row in greedy.frames],
@@ -437,48 +501,42 @@ def draw_system_states(
         color=Q_COLOR,
         linewidth=1.15,
     )
-    _style_axis(ax_vent, "e  Cumulative venting", "Vented CO$_2$ (t)")
+    _style_axis(ax_vent, "h  Cumulative venting", "Vented CO$_2$ (t)")
 
-    ax_cost = axes.flat[5]
+    ax_storage = axes[2, 2]
     for recorder, metrics, color, line_style in (
         (greedy, greedy_metrics, GREEDY_COLOR, (0, (3, 2))),
         (iterative_q, q_metrics, Q_COLOR, "-"),
     ):
-        values = (
+        stored_kt = (
             np.asarray(
                 [
-                    float(row["cumulative_episode_cost_eur"])
+                    float(row["cumulative_stored_t"])
                     for row in recorder.frames
                 ]
             )
-            / 1e6
+            / 1e3
         )
-        ax_cost.plot(
+        ax_storage.plot(
             hours_d,
-            values,
+            stored_kt,
             color=color,
             linewidth=1.1,
             linestyle=line_style,
         )
-        ax_cost.scatter(
+        ax_storage.scatter(
             [30],
-            [float(metrics["total_cost_eur"]) / 1e6],
+            [float(metrics["stored_t"]) / 1e3],
             s=14,
             color=color,
             edgecolor="white",
             linewidth=0.35,
             zorder=4,
         )
-    _style_axis(ax_cost, "f  Cumulative cost", "Cost (€ million)")
-    ax_cost.text(
-        0.99,
-        0.04,
-        "End markers include terminal cleanup",
-        transform=ax_cost.transAxes,
-        ha="right",
-        va="bottom",
-        fontsize=5.2,
-        color="#555555",
+    _style_axis(
+        ax_storage,
+        "i  Cumulative storage",
+        "Stored CO$_2$ (kt)",
     )
 
     for ax in axes.flat:
@@ -496,17 +554,19 @@ def draw_system_states(
             clip_on=True,
         )
     for ax in axes[-1]:
-        ax.set_xlabel("Episode day", fontsize=6.2)
+        ax.set_xlabel("Episode day", fontsize=7.2)
 
     saving = greedy_metrics["total_cost_eur"] - q_metrics["total_cost_eur"]
     saving_percent = 100 * saving / greedy_metrics["total_cost_eur"]
     fig.suptitle(
-        "Iterative-Q prevents buffer overflow and venting through sparse interventions\n"
-        f"Seed {TEST_SEED}: {len(intervention_days)} interventions, "
+        "Iterative Action-Q prevents buffer overflow and venting through sparse interventions\n"
+        f"Seed {test_seed}: {len(intervention_days)} interventions, "
         f"€{saving / 1e3:,.0f}k "
         f"lower final cost ({saving_percent:.2f}%)",
-        fontsize=8.1,
+        fontsize=9.2,
         fontweight="bold",
+        y=0.995,
+        linespacing=1.15,
     )
     fig.legend(
         handles=[
@@ -515,18 +575,19 @@ def draw_system_states(
                 linewidth=1.1, label="Greedy",
             ),
             plt.Line2D(
-                [0], [0], color=Q_COLOR, linewidth=1.2, label="Iterative-Q",
+                [0], [0], color=Q_COLOR, linewidth=1.2,
+                label="Iterative Action-Q",
             ),
             plt.Line2D(
                 [0], [0], color=Q_COLOR, marker="|", linestyle="none",
-                label="Iterative-Q intervention",
+                label="Action-Q intervention",
             ),
         ],
         loc="upper center",
-        bbox_to_anchor=(0.5, 0.955),
+        bbox_to_anchor=(0.5, 0.91),
         ncol=3,
         frameon=False,
-        fontsize=5.8,
+        fontsize=6.8,
     )
     return _save_figure(fig, output_dir, "e6_system_states")
 
@@ -766,10 +827,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     )
     checkpoint_metadata = checkpoint["metadata"]
     greedy, greedy_metrics, greedy_decisions, greedy_events, _ = (
-        replay_controller("greedy")
+        replay_controller("greedy", args.test_seed)
     )
     q_trace, q_metrics, q_decisions, q_events, q_overrides = (
-        replay_controller("iterative_q")
+        replay_controller("iterative_q", args.test_seed)
     )
     _write_csv(source_dir / "e6_greedy_hourly_trace.csv", greedy.frames)
     _write_csv(
@@ -785,6 +846,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         source_dir / "e6_interventions.csv",
         interventions,
     )
+    paired_captured_t = float(
+        _formal_row("greedy", args.test_seed)["captured_t"]
+    )
     _write_csv(
         source_dir / "e6_outcome_comparison.csv",
         [
@@ -797,6 +861,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 ],
                 "vented_t": metrics["vented_t"],
                 "stored_t": metrics["stored_t"],
+                "captured_t": paired_captured_t,
+                "unit_cost_eur_per_captured_t": (
+                    metrics["total_cost_eur"] / paired_captured_t
+                ),
                 "unit_cost_eur_per_stored_t": metrics[
                     "unit_cost_eur_per_t"
                 ],
@@ -813,6 +881,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         greedy_metrics,
         q_metrics,
         q_decisions,
+        args.test_seed,
         figure_dir,
     )
     action_paths = draw_vessel_actions(
@@ -824,7 +893,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     cost_saving = greedy_metrics["total_cost_eur"] - q_metrics["total_cost_eur"]
     metadata = {
         "experiment": "E6 mechanism case study",
-        "test_seed": TEST_SEED,
+        "test_seed": args.test_seed,
         "iterative_q_model_seed": MODEL_SEED,
         "iterative_q_checkpoint": str(
             legacy_figure.CHECKPOINT.relative_to(REPO_ROOT)
@@ -844,6 +913,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         },
         "comparison": "same exogenous scenario; Greedy versus Iterative-Q",
         "trace_role": "mechanistic case study; excluded from E1 statistics",
+        "case_selection_rule": (
+            "Within model seed 0 formal episodes, require Iterative-Q "
+            "vented_t == 0 and Greedy vented_t >= 5000; then select the "
+            "cost-reduction percentage closest to the model-seed-0 median."
+        ),
+        "paired_captured_t": paired_captured_t,
         "greedy": {
             **greedy_metrics,
             "event_count": greedy_events,

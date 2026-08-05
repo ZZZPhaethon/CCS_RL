@@ -1,0 +1,7 @@
+algorithm,algorithm_display_name,method_class,test_scenario_count,model_instance_count,mean_delta_total_cost_vs_fixed_assignment_eur,median_scenario_delta_total_cost_vs_fixed_assignment_eur,ci95_low_eur,ci95_high_eur,wins_vs_fixed_assignment,ties_vs_fixed_assignment,losses_vs_fixed_assignment
+greedy,Greedy,heuristic,30,1,-332730.2803525508,-304667.5248297327,-490481.00497804274,-170378.2816368285,24,0,6
+ppo_hourly,Hourly PPO,reinforcement_learning,30,3,3072690.3516357746,3043105.2569037233,2818214.6605830314,3358741.914848662,0,0,30
+ppo_high_level,High-level PPO,reinforcement_learning,30,3,-399697.7679585709,-401029.29316286667,-499863.6412668662,-293811.2928451935,29,0,1
+masked_double_dqn,Masked Double DQN,reinforcement_learning,30,3,-422906.3534631131,-469907.4592126061,-649590.6123545108,-155070.5954652356,28,0,2
+iterative_action_q_g60_p4,Iterative Action-Q,reinforcement_learning,30,3,-722223.3693291566,-758460.6583711798,-825673.1743301689,-615578.521154695,30,0,0
+rolling_milp,Rolling MILP (600 s/replan),optimization,30,1,-497213.3827813364,-575506.366768898,-648369.1954354446,-339538.33972440055,27,0,3

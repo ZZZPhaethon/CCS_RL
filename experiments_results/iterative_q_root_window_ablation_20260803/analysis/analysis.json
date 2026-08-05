@@ -1,0 +1,178 @@
+{
+  "kind": "iterative_q_root_window_ablation",
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "test_seeds": [
+    9000031,
+    9000032,
+    9000033,
+    9000034,
+    9000035,
+    9000036,
+    9000037,
+    9000038,
+    9000039,
+    9000040,
+    9000041,
+    9000042,
+    9000043,
+    9000044,
+    9000045,
+    9000046,
+    9000047,
+    9000048,
+    9000049,
+    9000050,
+    9000051,
+    9000052,
+    9000053,
+    9000054,
+    9000055,
+    9000056,
+    9000057,
+    9000058,
+    9000059,
+    9000060
+  ],
+  "baseline": {
+    "episodes": 90,
+    "mean_total_cost_eur": 1864718.4746599607,
+    "mean_delta_cost_vs_greedy_eur": -389493.0889766058,
+    "delta_cost_vs_greedy_ci95_eur": [
+      -535080.2968644701,
+      -260592.95942235307
+    ],
+    "mean_vented_t": 949.4621594196798,
+    "mean_stored_t": 111120.75828653098,
+    "mean_override_events": 11.122222222222222,
+    "wins_vs_greedy": 26,
+    "ties_vs_greedy": 0,
+    "losses_vs_greedy": 4,
+    "model_seed_mean_total_cost_eur": [
+      1887069.4699551878,
+      1847696.1831019574,
+      1859389.7709227367
+    ]
+  },
+  "conditions": {
+    "random_root": {
+      "metrics": {
+        "episodes": 90,
+        "mean_total_cost_eur": 1925016.337321004,
+        "mean_delta_cost_vs_greedy_eur": -329195.22631556273,
+        "delta_cost_vs_greedy_ci95_eur": [
+          -481571.447346697,
+          -189699.99426251865
+        ],
+        "mean_vented_t": 1714.7498860923017,
+        "mean_stored_t": 110117.9603889741,
+        "mean_override_events": 11.1,
+        "wins_vs_greedy": 26,
+        "ties_vs_greedy": 0,
+        "losses_vs_greedy": 4,
+        "model_seed_mean_total_cost_eur": [
+          1950999.8530842243,
+          1863531.403785911,
+          1960517.7550928753
+        ]
+      },
+      "vs_formal_baseline": {
+        "mean_cost_difference_eur": 60297.862661043066,
+        "mean_cost_difference_pct_of_baseline": 3.2336174859874567,
+        "cost_difference_ci95_eur": [
+          13650.442744874854,
+          118909.9646443853
+        ],
+        "mean_vented_difference_t": 765.2877266726222,
+        "mean_stored_difference_t": -1002.797897556869,
+        "condition_lower_cost_scenarios": 4,
+        "ties": 0,
+        "baseline_lower_cost_scenarios": 26
+      },
+      "budget": [
+        {
+          "model_seed": 0,
+          "target_train_simulator_steps": 9526297,
+          "actual_train_simulator_steps": 9481085,
+          "relative_error_pct": -0.4746020410659042,
+          "train_roots": 3603
+        },
+        {
+          "model_seed": 1,
+          "target_train_simulator_steps": 9526297,
+          "actual_train_simulator_steps": 9510651,
+          "relative_error_pct": -0.16424010294871133,
+          "train_roots": 3608
+        },
+        {
+          "model_seed": 2,
+          "target_train_simulator_steps": 9526297,
+          "actual_train_simulator_steps": 9416838,
+          "relative_error_pct": -1.1490193933697428,
+          "train_roots": 3612
+        }
+      ]
+    },
+    "windows24": {
+      "metrics": {
+        "episodes": 90,
+        "mean_total_cost_eur": 1965206.7135170747,
+        "mean_delta_cost_vs_greedy_eur": -289004.85011949175,
+        "delta_cost_vs_greedy_ci95_eur": [
+          -435651.2966818685,
+          -157445.8672344309
+        ],
+        "mean_vented_t": 2287.758502119806,
+        "mean_stored_t": 108670.32246315703,
+        "mean_override_events": 11.988888888888889,
+        "wins_vs_greedy": 24,
+        "ties_vs_greedy": 0,
+        "losses_vs_greedy": 6,
+        "model_seed_mean_total_cost_eur": [
+          1958283.5064550608,
+          1963644.8475268888,
+          1973691.7865692743
+        ]
+      },
+      "vs_formal_baseline": {
+        "mean_cost_difference_eur": 100488.23885711402,
+        "mean_cost_difference_pct_of_baseline": 5.388922790365901,
+        "cost_difference_ci95_eur": [
+          46724.41861166773,
+          154625.61285872554
+        ],
+        "mean_vented_difference_t": 1338.2963427001264,
+        "mean_stored_difference_t": -2450.4358233739385,
+        "condition_lower_cost_scenarios": 2,
+        "ties": 0,
+        "baseline_lower_cost_scenarios": 28
+      },
+      "budget": [
+        {
+          "model_seed": 0,
+          "target_train_simulator_steps": 9526297,
+          "actual_train_simulator_steps": 9549017,
+          "relative_error_pct": 0.23849770797614225,
+          "train_roots": 3360
+        },
+        {
+          "model_seed": 1,
+          "target_train_simulator_steps": 9526297,
+          "actual_train_simulator_steps": 9593056,
+          "relative_error_pct": 0.7007864650871162,
+          "train_roots": 3454
+        },
+        {
+          "model_seed": 2,
+          "target_train_simulator_steps": 9526297,
+          "actual_train_simulator_steps": 9661404,
+          "relative_error_pct": 1.4182530735709793,
+          "train_roots": 3464
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+status=frozen
+train_counts=33,55,89
+validation_counts=7,11,18
+seed0_train_simulator_calls=9549017
+target=9526297
+relative_error_pct=0.2384977080

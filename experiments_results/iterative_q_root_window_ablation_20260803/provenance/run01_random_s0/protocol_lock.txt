@@ -1,0 +1,16 @@
+purpose=random-root and increased-window Iterative-Q ablations
+formal_baseline=G60-P4-no-hour
+target_train_simulator_steps=9526297
+budget_scope=training_data_generation_only
+source_g0=output/iterative_q_budget_search/runs/g60_p4/g0
+g0_reused=true
+conditions=random_root windows24
+model_seeds=0
+windows24_maximum_interventions=12
+windows24_roots_per_seed=12_rotated_across_24_windows
+random_train_counts=24,42,65
+random_validation_counts=5,8,13
+windows24_train_counts=33,55,89
+windows24_validation_counts=7,11,18
+formal_test_seeds=9000031:9000032:9000033:9000034:9000035:9000036:9000037:9000038:9000039:9000040:9000041:9000042:9000043:9000044:9000045:9000046:9000047:9000048:9000049:9000050:9000051:9000052:9000053:9000054:9000055:9000056:9000057:9000058:9000059:9000060
+formal_test_previously_accessed=true

@@ -656,9 +656,9 @@ def _summary_rows(
 
 
 def _style_axis(ax, title: str, ylabel: str) -> None:
-    ax.set_title(title, loc="left", fontsize=7.1, fontweight="bold", pad=4)
-    ax.set_ylabel(ylabel, fontsize=6.2)
-    ax.tick_params(labelsize=5.8, length=2.5, width=0.55)
+    ax.set_title(title, loc="left", fontsize=8.6, fontweight="bold", pad=5)
+    ax.set_ylabel(ylabel, fontsize=7.8)
+    ax.tick_params(labelsize=7.2, length=3.0, width=0.6)
     ax.grid(axis="y", color="#D9D9D9", linewidth=0.45)
     ax.set_axisbelow(True)
     for side in ("top", "right"):
@@ -687,7 +687,6 @@ def _draw_figure(
     horizon_labels = tuple(f"{horizon // 24} days" for horizon in HORIZONS)
     plotted = (
         "greedy",
-        "iterative_q_direct",
         "iterative_q_receding",
     )
     for controller in plotted:
@@ -709,11 +708,15 @@ def _draw_figure(
             yerr=np.vstack((reduction - reduction_low, reduction_high - reduction)),
             color=COLORS[controller],
             marker=MARKERS[controller],
-            markersize=4.1,
-            linewidth=1.1,
+            markersize=4.8,
+            linewidth=1.4,
             capsize=2.2,
             capthick=0.65,
-            label=DISPLAY_NAMES[controller],
+            label=(
+                "Iterative Action-Q"
+                if controller == "iterative_q_receding"
+                else DISPLAY_NAMES[controller]
+            ),
         )
         vent = np.asarray(
             [float(row["mean_normalized_vented_t_per_720h"]) for row in selected]
@@ -736,11 +739,15 @@ def _draw_figure(
             yerr=np.vstack((vent - vent_low, vent_high - vent)),
             color=COLORS[controller],
             marker=MARKERS[controller],
-            markersize=4.1,
-            linewidth=1.1,
+            markersize=4.8,
+            linewidth=1.4,
             capsize=2.2,
             capthick=0.65,
-            label=DISPLAY_NAMES[controller],
+            label=(
+                "Iterative Action-Q"
+                if controller == "iterative_q_receding"
+                else DISPLAY_NAMES[controller]
+            ),
         )
     axes[0].axhline(0, color="#888888", linewidth=0.7, linestyle=":")
     _style_axis(
@@ -755,25 +762,27 @@ def _draw_figure(
     )
     for ax in axes:
         ax.set_xticks(positions, horizon_labels)
-        ax.set_xlabel("Evaluation horizon", fontsize=6.2)
+        ax.set_xlabel("Evaluation horizon", fontsize=7.8)
     fig.suptitle(
         "Frozen Iterative-Q temporal deployment from 30 days to one year",
         y=0.985,
-        fontsize=8.2,
+        fontsize=10.0,
         fontweight="bold",
     )
     fig.legend(
         *axes[0].get_legend_handles_labels(),
         loc="upper center",
         bbox_to_anchor=(0.5, 0.90),
-        ncol=3,
+        ncol=2,
         frameon=False,
-        fontsize=5.8,
+        fontsize=7.2,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for suffix, dpi in (("svg", 300), ("pdf", 300), ("tiff", 600), ("png", 300)):
-        path = output_dir / f"e7_temporal_generalization.{suffix}"
+        path = output_dir / (
+            f"e7_temporal_generalization_iterative_action_q.{suffix}"
+        )
         fig.savefig(
             path,
             dpi=dpi,
@@ -781,6 +790,7 @@ def _draw_figure(
             facecolor="white",
         )
         paths.append(path)
+    plt.close(fig)
     return paths
 
 

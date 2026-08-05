@@ -1,0 +1,75 @@
+{
+  "case_selection_rule": "Within model seed 0 formal episodes, require Iterative-Q vented_t == 0 and Greedy vented_t >= 5000; then select the cost-reduction percentage closest to the model-seed-0 median.",
+  "comparison": "same exogenous scenario; Greedy versus Iterative-Q",
+  "cost_reduction_vs_greedy_percent": 15.515786818377794,
+  "cost_saving_eur": 355779.68388915784,
+  "experiment": "E6 mechanism case study",
+  "figures": [
+    "figures\\e6_system_states.svg",
+    "figures\\e6_system_states.pdf",
+    "figures\\e6_system_states.tiff",
+    "figures\\e6_system_states.png",
+    "figures\\e6_vessel_actions.svg",
+    "figures\\e6_vessel_actions.pdf",
+    "figures\\e6_vessel_actions.tiff",
+    "figures\\e6_vessel_actions.png"
+  ],
+  "greedy": {
+    "episode_conditioning_eur": 991296.1028016104,
+    "episode_loading_eur": 3869.4774345292985,
+    "episode_operating_cost_eur": 1555397.4046084378,
+    "episode_reconditioning_eur": 46932.58187229298,
+    "episode_storage_shortfall_penalty_eur": 0.0,
+    "episode_total_cost_eur": 2054666.3230846303,
+    "episode_unloading_eur": 3507.322500000005,
+    "episode_vent_penalty_eur": 499268.9184761926,
+    "episode_vessel_fuel_eur": 509791.9200000052,
+    "event_count": 584,
+    "operating_cost_eur": 1793748.4325211272,
+    "stored_t": 114469.71188364139,
+    "terminal_cleanup_operating_cost_eur": 238351.0279126895,
+    "total_cost_eur": 2293017.35099732,
+    "unit_cost_eur_per_t": 20.03165128368782,
+    "vent_penalty_eur": 499268.9184761926,
+    "vented_t": 6240.861480952415
+  },
+  "iterative_q": {
+    "episode_conditioning_eur": 1041181.5410115622,
+    "episode_loading_eur": 4064.202882273394,
+    "episode_operating_cost_eur": 1696196.7770891036,
+    "episode_reconditioning_eur": 49499.36147258274,
+    "episode_storage_shortfall_penalty_eur": 0.0,
+    "episode_total_cost_eur": 1696196.7770891036,
+    "episode_unloading_eur": 3650.0717226792954,
+    "episode_vent_penalty_eur": 0.0,
+    "episode_vessel_fuel_eur": 597801.600000006,
+    "event_count": 464,
+    "operating_cost_eur": 1937237.667108162,
+    "override_events": 11,
+    "stored_t": 120730.14993312865,
+    "terminal_cleanup_operating_cost_eur": 241040.8900190584,
+    "total_cost_eur": 1937237.667108162,
+    "unit_cost_eur_per_t": 16.046013925942948,
+    "vent_penalty_eur": 0.0,
+    "vented_t": 0.0
+  },
+  "iterative_q_checkpoint": "experiments_results\\E1\\models\\iterative_q\\g60_p4_model_seed_0\\iterative_action_q.pt",
+  "iterative_q_model_seed": 0,
+  "iterative_q_observation_schema": {
+    "excluded_state_features": [
+      "hour_of_week"
+    ],
+    "source_state_features": 94,
+    "state_features": 93
+  },
+  "paired_captured_t": 134043.80710806392,
+  "source_files": [
+    "source_data/e6_greedy_hourly_trace.csv",
+    "source_data/e6_iterative_q_hourly_trace.csv",
+    "source_data/e6_event_decisions.csv",
+    "source_data/e6_interventions.csv",
+    "source_data/e6_outcome_comparison.csv"
+  ],
+  "test_seed": 9000031,
+  "trace_role": "mechanistic case study; excluded from E1 statistics"
+}

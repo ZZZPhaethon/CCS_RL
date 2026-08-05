@@ -1,0 +1,127 @@
+{
+  "kind": "iterative_action_q_policy_evaluation",
+  "checkpoint": "output/iterative_q_full_window_0_720_20260803_run01/model_seed_1/p4/iterative_action_q.pt",
+  "eval_seeds": [
+    9000031,
+    9000032,
+    9000033,
+    9000034,
+    9000035,
+    9000036,
+    9000037,
+    9000038,
+    9000039,
+    9000040,
+    9000041,
+    9000042,
+    9000043,
+    9000044,
+    9000045,
+    9000046,
+    9000047,
+    9000048,
+    9000049,
+    9000050,
+    9000051,
+    9000052,
+    9000053,
+    9000054,
+    9000055,
+    9000056,
+    9000057,
+    9000058,
+    9000059,
+    9000060
+  ],
+  "scenario_protocol": "unified_window_v1",
+  "stress_level": "medium",
+  "forecast_context_hours": 168,
+  "state_mean_ablation": [],
+  "validation_only": false,
+  "seed_manifest": null,
+  "gates": [
+    {
+      "name": "iqfull720_s1",
+      "required_heads": 4,
+      "margin": 0.4,
+      "max_overrides": 12,
+      "min_hour": null,
+      "max_hour": null,
+      "windows": [
+        [
+          0.0,
+          59.0
+        ],
+        [
+          60.0,
+          119.0
+        ],
+        [
+          120.0,
+          179.0
+        ],
+        [
+          180.0,
+          239.0
+        ],
+        [
+          240.0,
+          299.0
+        ],
+        [
+          300.0,
+          359.0
+        ],
+        [
+          360.0,
+          419.0
+        ],
+        [
+          420.0,
+          479.0
+        ],
+        [
+          480.0,
+          539.0
+        ],
+        [
+          540.0,
+          599.0
+        ],
+        [
+          600.0,
+          659.0
+        ],
+        [
+          660.0,
+          719.0
+        ]
+      ],
+      "uncertainty_beta": 0.0
+    }
+  ],
+  "summary": {
+    "iqfull720_s1": {
+      "episodes": 30,
+      "mean_total_cost_eur": 1874049.8576491224,
+      "mean_greedy_total_cost_eur": 2254211.563636566,
+      "mean_delta_total_cost_eur": -380161.70598744386,
+      "median_delta_total_cost_eur": -355646.77917978633,
+      "mean_delta_95pct_ci_eur": [
+        -533152.6436207591,
+        -240799.21308846443
+      ],
+      "wins": 26,
+      "ties": 0,
+      "losses": 4,
+      "mean_vented_t": 804.4733910062716,
+      "mean_stored_t": 110372.77393081976,
+      "mean_unit_cost_eur_per_t": 17.015116792237475,
+      "mean_override_events": 11.8,
+      "mean_proposed_override_events": 383.9,
+      "mean_wall_clock_seconds": 3.47724351536793,
+      "early_departures": 24,
+      "emitter_to_emitter_legs": 120
+    }
+  }
+}
