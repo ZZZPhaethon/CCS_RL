@@ -46,6 +46,8 @@ ROOT_ADVANTAGE_THRESHOLD_EUR="${ROOT_ADVANTAGE_THRESHOLD_EUR:-40000}"
 ROOT_NO_IMPROVEMENT_WEIGHT="${ROOT_NO_IMPROVEMENT_WEIGHT:-0.5}"
 ROOT_MODERATE_IMPROVEMENT_WEIGHT="${ROOT_MODERATE_IMPROVEMENT_WEIGHT:-1.0}"
 ROOT_STRONG_IMPROVEMENT_WEIGHT="${ROOT_STRONG_IMPROVEMENT_WEIGHT:-2.0}"
+ROOT_SELECTION="${ROOT_SELECTION:-first_decision_event}"
+WINDOWS_PER_SEED="${WINDOWS_PER_SEED:-}"
 
 IFS=':' read -r -a G0_ROOT_FRACTION_VALUES <<< "$G0_ROOT_FRACTIONS"
 IFS=':' read -r -a POLICY_WINDOW_VALUES <<< "$POLICY_WINDOWS_H"
@@ -76,6 +78,13 @@ if ! [[ "$COLLECTION_REQUIRED_HEADS" =~ ^[1-5]$ ]]; then
   echo "COLLECTION_REQUIRED_HEADS must be an integer from 1 to 5" >&2
   exit 2
 fi
+if [[ -n "$WINDOWS_PER_SEED" ]] && (
+  ! [[ "$WINDOWS_PER_SEED" =~ ^[1-9][0-9]*$ ]] \
+  || (( WINDOWS_PER_SEED > POLICY_WINDOW_COUNT ))
+); then
+  echo "WINDOWS_PER_SEED must not exceed the policy window count" >&2
+  exit 2
+fi
 if ! [[ "$G0_ROOTS_PER_SEED" =~ ^[1-9][0-9]*$ ]] \
   || (( G0_ROOTS_PER_SEED > ${#G0_ROOT_FRACTION_VALUES[@]} )); then
   echo "G0 roots per seed must not exceed the root fraction count" >&2
@@ -96,9 +105,13 @@ for value in \
   fi
 done
 
+policy_roots_per_seed="$POLICY_WINDOW_COUNT"
+if [[ -n "$WINDOWS_PER_SEED" ]]; then
+  policy_roots_per_seed="$WINDOWS_PER_SEED"
+fi
 weighted_train_roots=$((G0_TRAIN_COUNT * G0_ROOTS_PER_SEED))
 for count in "${TRAIN_COUNTS[@]}"; do
-  weighted_train_roots=$((weighted_train_roots + count * POLICY_WINDOW_COUNT))
+  weighted_train_roots=$((weighted_train_roots + count * policy_roots_per_seed))
 done
 final_stage="p$((ITERATIONS + 1))"
 
@@ -125,6 +138,9 @@ printf 'p1_margin=%s (%s EUR) iteration_margin=%s (%s EUR)\n' \
   "$ITER_RESIDUAL_MARGIN" "$ITER_ECONOMIC_MARGIN_EUR"
 printf 'policy_windows_h=%s max_overrides=%s required_heads=%s\n' \
   "$POLICY_WINDOWS_H" "$MAX_OVERRIDES" "$COLLECTION_REQUIRED_HEADS"
+printf 'root_selection=%s windows_per_seed=%s\n' \
+  "$ROOT_SELECTION" "$WINDOWS_PER_SEED"
+printf 'policy_roots_per_seed=%s\n' "$policy_roots_per_seed"
 printf 'sampling=stage^%s near_duplicate=%s advantage=%s\n' \
   "$STAGE_SAMPLING_TEMPERATURE" "$NEAR_DUPLICATE_WEIGHTING" \
   "$ROOT_ADVANTAGE_WEIGHTING"
@@ -243,7 +259,7 @@ for ((index = 0; index < ITERATIONS; index++)); do
     --dependency=afterok:"$previous_train_job" \
     --array="0-$((rollout_tasks - 1))%${rollout_throttle}" \
     --job-name="${CONFIG_NAME}_${stage}" \
-    --export=ALL,RUN_ROOT="$RUN_ROOT",STAGE="$stage",LOCK_CONFIG="$RUN_ROOT/${previous_stage}_lock.json",TRAIN_START="$train_start",TRAIN_COUNT="$train_count",VALIDATION_START="$validation_start",VALIDATION_COUNT="$validation_count",CHUNK_SIZE="$ITER_CHUNK_SIZE",DATASET_SEED="$dataset_seed",SCENARIO_PROTOCOL="$SCENARIO_PROTOCOL",HARD_SCENARIO_PROBABILITY="$HARD_SCENARIO_PROBABILITY",FORECAST_CONTEXT_HOURS="$FORECAST_CONTEXT_HOURS",FUTURE_SUMMARY_WINDOWS_H="$FUTURE_SUMMARY_WINDOWS_H" \
+    --export=ALL,RUN_ROOT="$RUN_ROOT",STAGE="$stage",LOCK_CONFIG="$RUN_ROOT/${previous_stage}_lock.json",TRAIN_START="$train_start",TRAIN_COUNT="$train_count",VALIDATION_START="$validation_start",VALIDATION_COUNT="$validation_count",CHUNK_SIZE="$ITER_CHUNK_SIZE",DATASET_SEED="$dataset_seed",SCENARIO_PROTOCOL="$SCENARIO_PROTOCOL",HARD_SCENARIO_PROBABILITY="$HARD_SCENARIO_PROBABILITY",FORECAST_CONTEXT_HOURS="$FORECAST_CONTEXT_HOURS",FUTURE_SUMMARY_WINDOWS_H="$FUTURE_SUMMARY_WINDOWS_H",ROOT_SELECTION="$ROOT_SELECTION",WINDOWS_PER_SEED="$WINDOWS_PER_SEED" \
     hpc/submit_iterative_q_policy_data.sh)
   merge_job=$(submit_job \
     --dependency=afterok:"$rollout_job" \
@@ -320,6 +336,9 @@ job_manifest+=("eval=$eval_job")
     "$ITER_ECONOMIC_MARGIN_EUR"
   printf 'policy_windows_h=%s\n' "$POLICY_WINDOWS_H"
   printf 'max_overrides=%s\n' "$MAX_OVERRIDES"
+  printf 'root_selection=%s\n' "$ROOT_SELECTION"
+  printf 'windows_per_seed=%s\n' "$WINDOWS_PER_SEED"
+  printf 'policy_roots_per_seed=%s\n' "$policy_roots_per_seed"
   printf 'collection_required_heads=%s\n' "$COLLECTION_REQUIRED_HEADS"
   printf 'model_seed=%s\n' "$MODEL_SEED"
   printf 'eval_each_stage=%s\n' "$EVAL_EACH_STAGE"

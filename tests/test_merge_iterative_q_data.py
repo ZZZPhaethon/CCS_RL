@@ -6,7 +6,7 @@ import pytest
 from experiments.merge_iterative_q_data import merge_shards, parse_args
 
 
-def _write_shard(path, split, seeds, delta):
+def _write_shard(path, split, seeds, delta, attempted_seeds=None):
     metadata = {
         "kind": "greedy_rollin_event_counterfactual",
         "split": split,
@@ -28,6 +28,8 @@ def _write_shard(path, split, seeds, delta):
             "simulator_hour_steps": 100.0 * len(seeds),
         },
     }
+    if attempted_seeds is not None:
+        metadata["attempted_scenario_seeds"] = attempted_seeds
     baseline = np.full(len(seeds), 100.0)
     np.savez_compressed(
         path,
@@ -96,3 +98,36 @@ def test_merge_shards_rejects_overlapping_scenario_seeds(tmp_path):
     )
     with pytest.raises(ValueError, match="overlap"):
         merge_shards(args)
+
+
+def test_merge_shards_accepts_attempted_seed_with_no_realized_root(tmp_path):
+    first = tmp_path / "first.npz"
+    second = tmp_path / "second.npz"
+    output = tmp_path / "merged.npz"
+    _write_shard(
+        first,
+        "train",
+        [1],
+        [0.0],
+        attempted_seeds=[1, 2],
+    )
+    _write_shard(second, "train", [3], [0.0], attempted_seeds=[3])
+    args = parse_args(
+        [
+            "--shards",
+            str(first),
+            str(second),
+            "--out-path",
+            str(output),
+            "--expected-seeds",
+            "1",
+            "2",
+            "3",
+        ]
+    )
+    summary = merge_shards(args)
+    assert summary["scenario_seeds"] == 2
+    with np.load(output, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"]))
+    assert metadata["scenario_seeds"] == [1, 3]
+    assert metadata["attempted_scenario_seeds"] == [1, 2, 3]

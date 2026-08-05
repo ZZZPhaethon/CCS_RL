@@ -72,20 +72,31 @@ def merge_shards(args) -> dict[str, object]:
 
     merged = {key: np.concatenate([shard[key] for shard in shards]) for key in key_set}
     actual_seeds = sorted(set(int(seed) for seed in merged["scenario_seed"]))
-    shard_seeds = [
+    shard_actual_seeds = [
         int(seed)
         for metadata in metadata_rows
         for seed in metadata["scenario_seeds"]
     ]
-    if len(shard_seeds) != len(set(shard_seeds)):
+    shard_attempted_seeds = [
+        int(seed)
+        for metadata in metadata_rows
+        for seed in metadata.get(
+            "attempted_scenario_seeds", metadata["scenario_seeds"]
+        )
+    ]
+    if len(shard_attempted_seeds) != len(set(shard_attempted_seeds)):
         raise ValueError("scenario seeds overlap between shards")
-    if actual_seeds != sorted(shard_seeds):
+    if actual_seeds != sorted(shard_actual_seeds):
         raise ValueError("metadata scenario seeds do not match array contents")
-    if args.expected_seeds is not None and actual_seeds != sorted(args.expected_seeds):
-        raise ValueError("merged scenario seeds do not match --expected-seeds")
+    if (
+        args.expected_seeds is not None
+        and sorted(shard_attempted_seeds) != sorted(args.expected_seeds)
+    ):
+        raise ValueError("attempted scenario seeds do not match --expected-seeds")
 
     metadata = dict(reference)
     metadata["scenario_seeds"] = actual_seeds
+    metadata["attempted_scenario_seeds"] = sorted(shard_attempted_seeds)
     metadata["candidates_per_seed"] = None
     metadata["merged_shards"] = [str(path) for path in args.shards]
     metadata["candidate_count"] = int(len(merged["scenario_seed"]))
