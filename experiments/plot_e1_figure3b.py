@@ -198,9 +198,14 @@ def draw_figure(rows: list[dict[str, object]], output_dir: Path) -> list[Path]:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     base = output_dir / "figure_3b_cost_decomposition"
-    outputs = [base.with_suffix(".pdf"), base.with_suffix(".png")]
+    outputs = [
+        base.with_suffix(".pdf"),
+        base.with_suffix(".svg"),
+        base.with_suffix(".png"),
+    ]
     fig.savefig(outputs[0], bbox_inches="tight")
-    fig.savefig(outputs[1], dpi=300, bbox_inches="tight")
+    fig.savefig(outputs[1], bbox_inches="tight")
+    fig.savefig(outputs[2], dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outputs
 
@@ -223,7 +228,7 @@ def main() -> None:
                 },
                 "rolling_milp_time_limit_seconds_per_replan": 600,
                 "input_csv": str(args.input_csv.relative_to(REPO_ROOT)),
-                "output_formats": ["pdf", "png"],
+                "output_formats": ["pdf", "svg", "png"],
             },
             handle,
             indent=2,

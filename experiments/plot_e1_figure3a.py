@@ -356,10 +356,14 @@ def draw_figure(
         fontsize=5.6,
         color="#4D4D4D",
     )
+    point_note = (
+        "Points: 30 paired test scenarios (learned methods: mean across 3 model seeds)\n"
+        "Diamonds: overall mean; bars: hierarchical-bootstrap 95% CI"
+    )
     ax.text(
         0.0,
         -0.26,
-        "Points: 30 paired test scenarios; diamonds: mean; bars: 95% CI",
+        point_note,
         transform=ax.transAxes,
         ha="left",
         va="top",
@@ -377,10 +381,12 @@ def draw_figure(
     base = output_dir / "figure_3a_fixed_assignment_baseline"
     outputs = [
         base.with_suffix(".pdf"),
+        base.with_suffix(".svg"),
         base.with_suffix(".png"),
     ]
     fig.savefig(outputs[0], bbox_inches="tight")
-    fig.savefig(outputs[1], dpi=300, bbox_inches="tight")
+    fig.savefig(outputs[1], bbox_inches="tight")
+    fig.savefig(outputs[2], dpi=300, bbox_inches="tight")
     plt.close(fig)
     return outputs
 
@@ -415,7 +421,7 @@ def main() -> None:
                 "bootstrap_draws": BOOTSTRAP_DRAWS,
                 "rolling_milp_time_limit_seconds_per_replan": 600,
                 "input_csv": str(args.input_csv.relative_to(REPO_ROOT)),
-                "output_formats": ["pdf", "png"],
+                "output_formats": ["pdf", "svg", "png"],
             },
             handle,
             indent=2,

@@ -116,7 +116,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def evaluation_args(checkpoint: Path) -> argparse.Namespace:
+def evaluation_args(
+    checkpoint: Path,
+    test_seed: int = TEST_SEED,
+) -> argparse.Namespace:
     return iterative_q_eval.parse_args(
         [
             "--checkpoint",
@@ -124,7 +127,7 @@ def evaluation_args(checkpoint: Path) -> argparse.Namespace:
             "--out-dir",
             "unused-figure-4-trace",
             "--eval-seeds",
-            str(TEST_SEED),
+            str(test_seed),
             "--episode-hours",
             "720",
             "--reward-scale",
@@ -306,7 +309,7 @@ def validate_metric(field: str, actual: float, expected: float) -> None:
         )
 
 
-def reset_with_capture_event_trace(wrapper):
+def reset_with_capture_event_trace(wrapper, test_seed: int = TEST_SEED):
     high_output_series: list[list[float]] = []
     original_factor_window_series = scenario_generator._factor_window_series
 
@@ -335,7 +338,7 @@ def reset_with_capture_event_trace(wrapper):
 
     scenario_generator._factor_window_series = traced_factor_window_series
     try:
-        observation, info = wrapper.residual_env.reset_native_seed(TEST_SEED)
+        observation, info = wrapper.residual_env.reset_native_seed(test_seed)
     finally:
         scenario_generator._factor_window_series = original_factor_window_series
 
