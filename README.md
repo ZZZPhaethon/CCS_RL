@@ -306,6 +306,7 @@ control/
 |-- rule_based.py               # Fixed-assignment and rule controllers
 |-- milp.py / cplex_milp.py     # Static MILP benchmark and CPLEX backend
 |-- rolling_milp.py             # Rolling-horizon MILP with replay-validated warm start
+|-- shikha2025.py               # Paper Lagrangean + shrinking-horizon reproduction
 |-- native_mpc.py               # Multi-candidate native MPC
 |-- iterative_action_q.py       # Main method: the production Q network
 |-- hourly_ppo/                 # Direct one-policy-action-per-hour PPO baseline
@@ -328,8 +329,9 @@ controller receives identical physics. See [`src/sim/control/event_based/README.
 | Document | Contents |
 |---|---|
 | [`docs/paper_structure_zh.md`](docs/paper_structure_zh.md) | Paper argument chain, section-by-section evidence requirements |
-| [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md) | E0–E5 experiment design, fairness protocol, metrics, statistics |
+| [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md) | Formal E0/E1/E6/E4/E7/E3/E5 experiment sequence, fairness protocol, metrics, statistics |
 | [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md) | Method definition, production configuration, code entry points |
+| [`docs/shikha2025_reproduction_zh.md`](docs/shikha2025_reproduction_zh.md) | Shikha et al. (2025) Lagrangean + shrinking-horizon reproduction on the shared case |
 | [`docs/preliminary results/`](docs/preliminary%20results/) | Dated result records — controller comparison, encoder comparison, future-adapter and reproducibility ablations |
 | [`docs/CCS_RL_Research_Core_Idea.md`](docs/CCS_RL_Research_Core_Idea.md) | Original research framing |
 | [`docs/physical_layer_v1_cn.md`](docs/physical_layer_v1_cn.md) | Physical-layer model specification |

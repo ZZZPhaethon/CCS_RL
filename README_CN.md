@@ -289,6 +289,7 @@ control/
 |-- rule_based.py               # 固定分工与规则控制器
 |-- milp.py / cplex_milp.py     # 静态 MILP benchmark 与 CPLEX 后端
 |-- rolling_milp.py             # 带回放校验 warm start 的滚动 MILP
+|-- shikha2025.py               # 论文拉格朗日分解 + shrinking-horizon 复现
 |-- native_mpc.py               # 多候选原生 MPC
 |-- iterative_action_q.py       # 主方法：唯一生产 Q 网络
 |-- recurrent_distributional_q.py
@@ -310,8 +311,9 @@ control/
 | 文档 | 内容 |
 |---|---|
 | [`docs/paper_structure_zh.md`](docs/paper_structure_zh.md) | 论文论证链条与各章节证据要求 |
-| [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md) | E0–E5 实验设计、公平协议、指标与统计方法 |
+| [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md) | 正式 E0/E1/E6/E4/E7/E3/E5 实验顺序、公平协议、指标与统计方法 |
 | [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md) | 方法定义、生产配置、代码入口 |
+| [`docs/shikha2025_reproduction_zh.md`](docs/shikha2025_reproduction_zh.md) | Shikha et al. (2025) 拉格朗日分解 + shrinking-horizon 复现与同 case 用法 |
 | [`docs/preliminary results/`](docs/preliminary%20results/) | 按日期归档的结果记录：控制器比较、encoder 比较、future adapter 与可复现性消融 |
 | [`docs/CCS_RL_Research_Core_Idea.md`](docs/CCS_RL_Research_Core_Idea.md) | 最初的研究构想 |
 | [`docs/physical_layer_v1_cn.md`](docs/physical_layer_v1_cn.md) | 物理层模型说明 |
