@@ -1,0 +1,120 @@
+{
+  "kind": "iterative_q_checkpoint_router_validation",
+  "checkpoints": {
+    "p1": "output/iterative_q_v3_router_validation/checkpoints/p1.pt",
+    "p2": "output/iterative_q_v3_router_validation/checkpoints/p2.pt",
+    "p3": "output/iterative_q_v3_router_validation/checkpoints/p3.pt",
+    "p4": "output/iterative_q_v3_router_validation/checkpoints/p4.pt"
+  },
+  "eval_seeds": [
+    8100001,
+    8100002,
+    8100003,
+    8100004,
+    8100005,
+    8100006,
+    8100007,
+    8100008,
+    8100009,
+    8100010,
+    8100011,
+    8100012,
+    8100013,
+    8100014,
+    8100015,
+    8100016,
+    8100017,
+    8100018,
+    8100019,
+    8100020
+  ],
+  "validation_only": true,
+  "seed_manifest": "experiments/protocols/unified_window_v1_seed_manifest.json",
+  "max_overrides": 12,
+  "policy_windows": [
+    [
+      108.0,
+      155.0
+    ],
+    [
+      156.0,
+      203.0
+    ],
+    [
+      204.0,
+      251.0
+    ],
+    [
+      252.0,
+      299.0
+    ],
+    [
+      300.0,
+      347.0
+    ],
+    [
+      348.0,
+      395.0
+    ],
+    [
+      396.0,
+      443.0
+    ],
+    [
+      444.0,
+      491.0
+    ],
+    [
+      492.0,
+      539.0
+    ],
+    [
+      540.0,
+      587.0
+    ],
+    [
+      588.0,
+      635.0
+    ],
+    [
+      636.0,
+      680.0
+    ]
+  ],
+  "routers": [
+    {
+      "name": "p3_p4_confidence",
+      "mode": "confidence",
+      "checkpoints": [
+        "p3",
+        "p4"
+      ],
+      "required_heads": 4,
+      "margin": 0.4,
+      "uncertainty_beta": 0.0
+    }
+  ],
+  "summary": {
+    "p3_p4_confidence": {
+      "episodes": 20,
+      "mean_total_cost_eur": 1851943.1022109452,
+      "mean_greedy_total_cost_eur": 2074008.3646553264,
+      "mean_delta_total_cost_eur": -222065.26244438085,
+      "median_delta_total_cost_eur": -191108.11610366125,
+      "mean_delta_95pct_ci_eur": [
+        -319209.82302527234,
+        -131921.29863779078
+      ],
+      "wins": 18,
+      "ties": 0,
+      "losses": 2,
+      "mean_vented_t": 794.3562302623915,
+      "mean_stored_t": 109211.89562788678,
+      "mean_unit_cost_eur_per_t": 16.96214479699044,
+      "mean_override_events": 11.8,
+      "mean_proposed_override_events": 234.15,
+      "early_departures": 12,
+      "emitter_to_emitter_legs": 42
+    }
+  }
+}

@@ -1,10 +1,11 @@
 """Generate action comparisons on states visited by a locked iterative policy.
 
-For every configured policy window, the locked policy rolls in to the first
-decision event in that window. Each legal sparse joint action is substituted
-once, then the same locked policy completes the 720-hour episode. Targets are
-the scaled economic saving relative to the locked policy's original action at
-that root. MPC is never called.
+For every selected policy window, the locked policy rolls in to either the
+first decision event in that window or the first decision event at/after a
+reproducibly sampled time in that window. Each legal sparse joint action is
+substituted once, then the same locked policy completes the 720-hour episode.
+Targets are the scaled economic saving relative to the locked policy's
+original action at that root. MPC is never called.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +43,19 @@ def parse_args(argv=None):
     parser.add_argument("--variant", default=common.DEFAULT_VARIANT)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--window-indices", type=int, nargs="+")
+    parser.add_argument(
+        "--windows-per-seed",
+        type=int,
+        help=(
+            "deterministically rotate this many roots across the selected "
+            "policy windows for each scenario seed"
+        ),
+    )
+    parser.add_argument(
+        "--root-selection",
+        choices=("first_decision_event", "random_time"),
+        default="first_decision_event",
+    )
     parser.add_argument("--overwrite", action="store_true")
     common.add_scenario_protocol_arguments(parser)
     args = parser.parse_args(argv)
@@ -59,7 +74,53 @@ def parse_args(argv=None):
         or min(args.window_indices) < 0
     ):
         parser.error("window indices must be unique and non-negative")
+    if args.windows_per_seed is not None and args.windows_per_seed <= 0:
+        parser.error("windows per seed must be positive")
     return args
+
+
+def select_window_indices(args, seed: int, window_count: int) -> list[int]:
+    windows = (
+        list(range(int(window_count)))
+        if args.window_indices is None
+        else list(args.window_indices)
+    )
+    if any(index >= int(window_count) for index in windows):
+        raise ValueError("window index exceeds the configured policy windows")
+    count = (
+        len(windows)
+        if args.windows_per_seed is None
+        else int(args.windows_per_seed)
+    )
+    if count > len(windows):
+        raise ValueError("windows per seed exceeds the selected policy windows")
+    if count == len(windows):
+        return windows
+    start = int(seed) % len(windows)
+    return sorted(
+        windows[(start + offset) % len(windows)] for offset in range(count)
+    )
+
+
+def select_target_root_h(
+    args,
+    seed: int,
+    window_index: int,
+    window_start: float,
+    window_end: float,
+) -> int:
+    first_hour = int(math.ceil(float(window_start)))
+    last_hour = int(math.floor(float(window_end)))
+    if first_hour > last_hour:
+        raise ValueError("policy window contains no integer physical hour")
+    if args.root_selection == "first_decision_event":
+        return first_hour
+    rng = np.random.default_rng(
+        np.random.SeedSequence(
+            [int(args.dataset_seed), int(seed), int(window_index), 1]
+        )
+    )
+    return int(rng.integers(first_hour, last_hour + 1))
 
 
 def _checkpoint_sha256(path: Path) -> str:
@@ -148,20 +209,40 @@ def prepare_root(
     window_index,
     device,
     simulator_step_counter=None,
+    target_root_h=None,
 ):
     wrapper = common.make_event_env(args, simulator_step_counter)
     observation, _info = wrapper.reset_native_seed(int(seed))
     gate_state = {"used_windows": set(), "override_events": 0}
     follow = int(metadata["follow_action_index"])
     window_start, window_end = policy_config["windows_h"][int(window_index)]
-    done = False
-    while float(wrapper.env.t) < float(window_start) and not done:
-        action, active_window, _decision = locked_action(
-            wrapper, observation, model, metadata, policy_config, gate_state, device
+    if target_root_h is None:
+        target_root_h = float(window_start)
+    if not float(window_start) <= float(target_root_h) <= float(window_end):
+        raise ValueError(
+            "target root time must lie inside its requested policy window"
         )
+    done = False
+    while float(wrapper.env.t) < float(target_root_h) and not done:
+        if float(wrapper.env.t) < float(window_start):
+            action, active_window, _decision = locked_action(
+                wrapper,
+                observation,
+                model,
+                metadata,
+                policy_config,
+                gate_state,
+                device,
+            )
+        else:
+            # Reserve the requested window's single legal intervention for the
+            # sampled root instead of consuming it at an earlier event.
+            action, active_window = follow, None
         observation, done = _step(wrapper, action)
         update_gate_state(gate_state, action, follow, active_window)
     if done or float(wrapper.env.t) > float(window_end):
+        return None
+    if gate_state["override_events"] >= int(policy_config["max_overrides"]):
         return None
     anchor_action, active_window, _decision = locked_action(
         wrapper, observation, model, metadata, policy_config, gate_state, device
@@ -204,6 +285,7 @@ def _candidate_record(
     baseline_metrics,
     candidate_metrics,
     reward_scale,
+    target_root_h=None,
 ):
     arrays = common.empty_candidate_arrays(wrapper, 1)
     arrays["states"][0] = observation["state"]
@@ -223,7 +305,9 @@ def _candidate_record(
         "scenario_seed": int(seed),
         "candidate_index": int(candidate_index),
         "sampling_attempt": 0,
-        "target_root_time_h": int(wrapper.env.t),
+        "target_root_time_h": int(
+            wrapper.env.t if target_root_h is None else target_root_h
+        ),
         "root_time_h": int(wrapper.env.t),
         "requested_sequence_events": 1,
         "actual_sequence_events": 1,
@@ -246,18 +330,23 @@ def generate_dataset(args):
     policy_config = lock["policy"]
     records = []
     root_action_counts = []
+    root_wait_hours = []
     skipped_roots = 0
     simulator_step_counter = SimulatorStepCounter()
-    window_indices = (
-        list(range(len(policy_config["windows_h"])))
-        if args.window_indices is None
-        else list(args.window_indices)
-    )
-    if any(index >= len(policy_config["windows_h"]) for index in window_indices):
-        raise ValueError("window index exceeds the configured policy windows")
     for seed in args.seeds:
         candidate_index = 0
+        window_indices = select_window_indices(
+            args, int(seed), len(policy_config["windows_h"])
+        )
         for window_index in window_indices:
+            window_start, window_end = policy_config["windows_h"][int(window_index)]
+            target_root_h = select_target_root_h(
+                args,
+                int(seed),
+                int(window_index),
+                float(window_start),
+                float(window_end),
+            )
             root = prepare_root(
                 args,
                 model,
@@ -267,11 +356,13 @@ def generate_dataset(args):
                 window_index,
                 device,
                 simulator_step_counter,
+                target_root_h,
             )
             if root is None:
                 skipped_roots += 1
                 continue
             wrapper, observation, _gate_state, anchor_action, _active_window = root
+            root_wait_hours.append(float(wrapper.env.t) - float(target_root_h))
             rng = np.random.default_rng(
                 np.random.SeedSequence(
                     [int(args.dataset_seed), int(seed), int(window_index)]
@@ -316,6 +407,7 @@ def generate_dataset(args):
                         baseline_metrics,
                         outcomes[int(action)],
                         args.reward_scale,
+                        target_root_h,
                     )
                 )
                 candidate_index += 1
@@ -336,6 +428,7 @@ def generate_dataset(args):
         "scenario_seeds": sorted(
             set(int(record["scenario_seed"]) for record in records)
         ),
+        "attempted_scenario_seeds": sorted(int(seed) for seed in args.seeds),
         "candidates_per_seed": None,
         "episode_hours": int(args.episode_hours),
         "observation_variant": str(args.variant),
@@ -364,6 +457,10 @@ def generate_dataset(args):
         "rollin_checkpoint": str(checkpoint_path),
         "rollin_checkpoint_sha256": lock["checkpoint_sha256"],
         "policy_windows_h": policy_config["windows_h"],
+        "root_selection": str(args.root_selection),
+        "windows_per_seed": (
+            None if args.windows_per_seed is None else int(args.windows_per_seed)
+        ),
         "training_simulator_usage": simulator_step_counter.snapshot().as_dict(),
         "configuration": vars(args),
     }
@@ -378,6 +475,7 @@ def generate_dataset(args):
         "roots": int(len(root_action_counts)),
         "skipped_roots": int(skipped_roots),
         "mean_actions_per_root": float(np.mean(root_action_counts)),
+        "mean_target_to_decision_wait_h": float(np.mean(root_wait_hours)),
         "improving_candidates": int((targets > 1e-6).sum()),
         "anchor_or_ties": int((np.abs(targets) <= 1e-6).sum()),
         "worse_candidates": int((targets < -1e-6).sum()),

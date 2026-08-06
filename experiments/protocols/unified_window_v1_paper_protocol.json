@@ -1,9 +1,21 @@
 {
   "protocol_id": "paper_unified_window_v1_3vessel_2026-07-27",
-  "protocol_version": 8,
+  "protocol_version": 9,
   "locked_on": "2026-07-28",
-  "amended_on": "2026-07-30",
-  "status": "e1_completed_analysis_pending",
+  "amended_on": "2026-08-05",
+  "status": "e1_completed_with_posthoc_dqn_analysis_pending",
+  "posthoc_addenda": [
+    "experiments/protocols/e1_masked_double_dqn_addendum.json"
+  ],
+  "formal_experiment_order": [
+    "E0",
+    "E1",
+    "E6",
+    "E4",
+    "E7",
+    "E3",
+    "E5"
+  ],
   "test_set_revision": {
     "active_range_inclusive": [
       9000031,
@@ -102,6 +114,7 @@
         "Greedy",
         "Hourly Centralized Maskable PPO",
         "High-level Centralized Maskable PPO",
+        "Masked Double DQN",
         "Iterative Action-Q",
         "Rolling MILP",
         "Full-horizon MILP"
@@ -124,6 +137,7 @@
       "methods": [
         "Hourly Centralized Maskable PPO",
         "High-level Centralized Maskable PPO",
+        "Masked Double DQN",
         "Iterative Action-Q"
       ],
       "representation": "shared_structured_summary",
@@ -203,6 +217,27 @@
       "gamma": 1.0,
       "reward_objective": "realised_total_cost",
       "terminal_rule": "include common compact trip cleanup cost in total return"
+    },
+    "Masked Double DQN": {
+      "protocol_addendum": "experiments/protocols/e1_masked_double_dqn_addendum.json",
+      "implementation_entrypoint": "python -m sim.control.hourly_dqn.train_hourly_dqn",
+      "evaluation_entrypoint": "python -m sim.control.hourly_dqn.evaluate_hourly_dqn",
+      "policy_transition_hours": 1,
+      "physical_steps_per_policy_transition": 1,
+      "observation": "current physical state plus shared 168 h structured summary",
+      "action_space": {
+        "native_type": "MultiDiscrete",
+        "three_vessel_dimensions": [
+          5,
+          5,
+          5
+        ],
+        "dqn_representation": "Discrete enumeration of 125 joint vessel actions",
+        "legal_action_masks": true
+      },
+      "gamma": 1.0,
+      "terminal_rule": "include common compact trip cleanup cost in total return",
+      "posthoc_baseline": true
     },
     "Iterative Action-Q": {
       "policy_transition_hours": "intervention-window-dependent",
@@ -290,7 +325,7 @@
     },
     "promoted_result_provenance": {
       "promotion_date": "2026-07-30",
-      "rolling_result_root": "experiments_results/E1/formal_rolling_milp_h168_r24_t600s_cplex222_seeds_9000031-9000060_run03",
+      "rolling_result_root": "experiments_results/E1/algorithms/formal_rolling_milp_h168_r24_t600s_cplex222_seeds_9000031-9000060_run03",
       "full_result_root": "experiments_results/E5/formal_full_milp_h720_t18000s_cplex222_seeds_9000031-9000060_run03",
       "configuration_lock": "experiments_results/milp_extended_600s_18000s_9000031_9000060_run03_lock",
       "rolling_array_job_id": 34375,
@@ -344,10 +379,12 @@
     "matched_methods": [
       "Hourly Centralized Maskable PPO",
       "High-level Centralized Maskable PPO",
+      "Masked Double DQN",
       "Iterative Action-Q G60-P4"
     ],
     "iterative_q_measured_value": 9526297,
     "ppo_per_independent_training_run_hard_cap": 9505319,
+    "masked_double_dqn_actual_per_independent_training_run": 9505312,
     "maximum_relative_budget_difference_pct": 0.22,
     "measurement_status": "measured_and_frozen_in_e1_artifacts",
     "excluded_from_budget": [
@@ -366,7 +403,7 @@
       1,
       2
     ],
-    "formal_test_results": "experiments_results/E1/formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01"
+    "formal_test_results": "experiments_results/E1/algorithms/formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01"
   },
   "iterative_q_selected_configuration": {
     "model_name": "G60-P4",
@@ -445,6 +482,7 @@
     "Greedy",
     "Hourly Centralized Maskable PPO",
     "High-level Centralized Maskable PPO",
+    "Masked Double DQN",
     "Iterative Action-Q",
     "Rolling MILP"
   ],
@@ -453,7 +491,7 @@
     "remove well-rate choices from every upper-level controller interface",
     "apply the shared automatic well rule inside the environment",
     "make Rolling MILP and Full-horizon MILP reproduce the same automatic well rule",
-    "make all three learning methods consume the same 168 h summary implementation without a valid-fraction feature",
+    "make all four learning methods consume the same 168 h summary implementation without a valid-fraction feature",
     "generate 888 h sampled scenarios while enforcing a read-only forecast boundary after the 720 h execution and scoring horizon",
     "add complete episode cost-component and activity diagnostics",
     "add the bottom-level one-hour simulator-step counter",

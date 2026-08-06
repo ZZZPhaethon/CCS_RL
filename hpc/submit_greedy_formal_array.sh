@@ -17,7 +17,7 @@ source /scratch_root/hx721/miniconda3/etc/profile.d/conda.sh
 conda activate "${CONDA_ENV:-mas-ccus}"
 
 PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_milp_validation_20260728}"
-RESULT_ROOT="${RESULT_ROOT:-$PROJECT_DIR/experiments_results/E1/formal_greedy_seeds_9000031-9000060_run01}"
+RESULT_ROOT="${RESULT_ROOT:-$PROJECT_DIR/experiments_results/E1/algorithms/formal_greedy_seeds_9000031-9000060_run01}"
 PURPOSE="formal_test_E1_greedy_9000031_9000060"
 
 if (( ${SLURM_ARRAY_TASK_ID:--1} < 0 || ${SLURM_ARRAY_TASK_ID:--1} > 29 )); then

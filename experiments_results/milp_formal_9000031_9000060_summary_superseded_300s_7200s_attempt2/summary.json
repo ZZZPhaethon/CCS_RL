@@ -1,0 +1,278 @@
+{
+  "protocol": "unified_window_v1",
+  "formal_attempt": 2,
+  "seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "seed_count": 30,
+  "rolling_milp": {
+    "evaluation_role": "online_controller",
+    "run_status_counts": {
+      "completed": 30
+    },
+    "solver_status_counts_across_replans": {
+      "Integer Feasible": 603,
+      "Optimal": 297
+    },
+    "episode_count": 30,
+    "replan_count": 900,
+    "solver_failure_count": 0,
+    "solver_timeout_count": 603,
+    "warm_start_acceptance": {
+      "accepted": 898,
+      "observed": 900,
+      "rate": 0.9977777777777778
+    },
+    "relative_gap": {
+      "count": 900,
+      "mean": 0.1264070049363881,
+      "standard_deviation": 0.12952916375595577,
+      "median": 0.10213965035081102,
+      "minimum": 0.0,
+      "maximum": 0.515595546619747,
+      "p95": 0.3955792653180058
+    },
+    "solve_wall_seconds_per_replan": {
+      "count": 900,
+      "mean": 210.15833132556742,
+      "standard_deviation": 134.70080677638296,
+      "median": 301.9362725876272,
+      "minimum": 2.298445348162204,
+      "maximum": 303.70076276827604,
+      "p95": 302.41693203775213
+    },
+    "metrics": {
+      "total_cost": {
+        "count": 30,
+        "mean": 2213972.1178254345,
+        "standard_deviation": 384975.5708612732,
+        "median": 2119595.760202455,
+        "minimum": 1749991.6922290896,
+        "maximum": 3533346.3895627037,
+        "p95": 2864186.3344908985
+      },
+      "operating_cost": {
+        "count": 30,
+        "mean": 1688198.1781993958,
+        "standard_deviation": 95282.27420224535,
+        "median": 1683177.8199404373,
+        "minimum": 1477508.232397434,
+        "maximum": 1848802.1254191913,
+        "p95": 1841561.6287651383
+      },
+      "total_cost_per_stored_t": {
+        "count": 30,
+        "mean": 21.800953498282375,
+        "standard_deviation": 5.959168428740267,
+        "median": 20.100164293704626,
+        "minimum": 15.121163789479587,
+        "maximum": 43.547834773859165,
+        "p95": 31.730860720438727
+      },
+      "cost_per_stored_t": {
+        "count": 30,
+        "mean": 16.370642054861285,
+        "standard_deviation": 1.249365142508546,
+        "median": 16.127612339538647,
+        "minimum": 14.338893199375748,
+        "maximum": 19.05841716262083,
+        "p95": 18.638633615292235
+      },
+      "stored_t": {
+        "count": 30,
+        "mean": 103676.77144680274,
+        "standard_deviation": 9495.641112769781,
+        "median": 103105.32167720736,
+        "minimum": 81137.13133870196,
+        "maximum": 124463.61990029803,
+        "p95": 115526.52223524274
+      },
+      "vented_t": {
+        "count": 30,
+        "mean": 6572.174245325485,
+        "standard_deviation": 5449.691557541782,
+        "median": 6155.682924387924,
+        "minimum": 0.0,
+        "maximum": 25697.976964565867,
+        "p95": 15562.236969223315
+      },
+      "captured_t": {
+        "count": 30,
+        "mean": 126282.56570334815,
+        "standard_deviation": 4170.52121608548,
+        "median": 126041.41352413295,
+        "minimum": 116933.45658342756,
+        "maximum": 134043.80710806392,
+        "p95": 132300.58987805698
+      },
+      "in_transit_t": {
+        "count": 30,
+        "mean": 26135.696951900074,
+        "standard_deviation": 4669.34510396922,
+        "median": 24979.024976396868,
+        "minimum": 19088.454012068287,
+        "maximum": 37679.958752206076,
+        "p95": 34845.07821853267
+      },
+      "terminal_cleanup_operating_cost": {
+        "count": 30,
+        "mean": 226005.51814118127,
+        "standard_deviation": 46913.265231988255,
+        "median": 220905.98451373464,
+        "minimum": 123800.62038750286,
+        "maximum": 347042.9315763592,
+        "p95": 313704.2369631616
+      },
+      "wall_clock_seconds": {
+        "count": 30,
+        "mean": 6566.731264165432,
+        "standard_deviation": 875.7503242133442,
+        "median": 6630.465004952857,
+        "minimum": 3820.8682733168826,
+        "maximum": 8231.327367382124,
+        "p95": 7795.9550314521875
+      },
+      "solver_solve_wall_seconds": {
+        "count": 30,
+        "mean": 6304.749939767023,
+        "standard_deviation": 911.3300888771845,
+        "median": 6371.740483925212,
+        "minimum": 3521.4315212881193,
+        "maximum": 8090.291110686958,
+        "p95": 7573.888990726042
+      }
+    }
+  },
+  "full_milp": {
+    "evaluation_role": "offline_reference",
+    "online_comparable": false,
+    "run_status_counts": {
+      "completed": 30
+    },
+    "solver_status_counts": {
+      "Integer Feasible": 30
+    },
+    "episode_count": 30,
+    "valid_incumbent_count": 30,
+    "replay_executable_count": 30,
+    "optimal_count": 0,
+    "time_limit_count": 30,
+    "warm_start_acceptance": {
+      "accepted": 30,
+      "observed": 30,
+      "rate": 1.0
+    },
+    "relative_gap": {
+      "count": 30,
+      "mean": 0.9649415856839219,
+      "standard_deviation": 0.31678356907375854,
+      "median": 1.083676487809284,
+      "minimum": 0.10547165344366129,
+      "maximum": 1.111020824191725,
+      "p95": 1.1043903677499616
+    },
+    "metrics": {
+      "total_cost": {
+        "count": 30,
+        "mean": 2254197.725636566,
+        "standard_deviation": 419094.66406766156,
+        "median": 2230178.087059638,
+        "minimum": 1749991.6922290896,
+        "maximum": 3533761.529562704,
+        "p95": 3064871.2593361204
+      },
+      "operating_cost": {
+        "count": 30,
+        "mean": 1670455.8678512848,
+        "standard_deviation": 89493.11443857908,
+        "median": 1665732.0025704582,
+        "minimum": 1477923.372397434,
+        "maximum": 1821277.1599969582,
+        "p95": 1795045.637905949
+      },
+      "total_cost_per_stored_t": {
+        "count": 30,
+        "mean": 22.396712398024118,
+        "standard_deviation": 6.424543703288722,
+        "median": 21.534244170620447,
+        "minimum": 15.121163789479587,
+        "maximum": 43.552891006064264,
+        "p95": 35.07930807004254
+      },
+      "cost_per_stored_t": {
+        "count": 30,
+        "mean": 16.30379374436859,
+        "standard_deviation": 1.0770375826551548,
+        "median": 16.1778944404606,
+        "minimum": 14.338893199375748,
+        "maximum": 18.768177912433888,
+        "p95": 18.058053593818386
+      },
+      "stored_t": {
+        "count": 30,
+        "mean": 102984.17556541668,
+        "standard_deviation": 9772.212207079992,
+        "median": 101777.51795203038,
+        "minimum": 81137.24365784733,
+        "maximum": 124463.61990029803,
+        "p95": 115902.5057471614
+      },
+      "vented_t": {
+        "count": 30,
+        "mean": 7296.773222316017,
+        "standard_deviation": 5925.333078462556,
+        "median": 6376.789618780695,
+        "minimum": 0.0,
+        "maximum": 25697.976964565867,
+        "p95": 18972.051940843645
+      },
+      "captured_t": {
+        "count": 30,
+        "mean": 126282.56570334815,
+        "standard_deviation": 4170.521216085482,
+        "median": 126041.41352413295,
+        "minimum": 116933.45658342756,
+        "maximum": 134043.80710806392,
+        "p95": 132300.58987805698
+      },
+      "in_transit_t": {
+        "count": 30,
+        "mean": 26103.693856295627,
+        "standard_deviation": 4348.225543348176,
+        "median": 25711.88094846771,
+        "minimum": 16227.208449663642,
+        "maximum": 36419.692358781984,
+        "p95": 33256.14480649194
+      },
+      "terminal_cleanup_operating_cost": {
+        "count": 30,
+        "mean": 219329.47664330972,
+        "standard_deviation": 41636.20216477171,
+        "median": 217458.40793566883,
+        "minimum": 123800.62038750286,
+        "maximum": 329963.2737352864,
+        "p95": 281082.82410753507
+      },
+      "wall_clock_seconds": {
+        "count": 30,
+        "mean": 7307.293997040111,
+        "standard_deviation": 3.8194102526038343,
+        "median": 7306.73176626442,
+        "minimum": 7300.8342644823715,
+        "maximum": 7318.544977969024,
+        "p95": 7312.787056368357
+      },
+      "solver_solve_wall_seconds": {
+        "count": 30,
+        "mean": 7216.52329104996,
+        "standard_deviation": 1.1489373515973265,
+        "median": 7216.340502735926,
+        "minimum": 7215.100111624226,
+        "maximum": 7220.581886320841,
+        "p95": 7218.24256235999
+      }
+    }
+  },
+  "interpretation": "Rolling MILP is an online controller. Full MILP is a time-limited perfect-information offline reference; completed does not imply proven optimality."
+}

@@ -16,6 +16,8 @@ conda activate mas-ccus
 
 PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_iterq_validation_search_20260728}"
 : "${OUT_ROOT:?OUT_ROOT must be set}"
+: "${SOURCE_RUN:?SOURCE_RUN must be set}"
+AUDIT_OUT_PATH="${AUDIT_OUT_PATH:-$OUT_ROOT/shared/data_quality.json}"
 
 cd "$PROJECT_DIR"
 mkdir -p logs
@@ -30,4 +32,6 @@ python -u experiments/audit_iterative_sampling_data.py \
     "$OUT_ROOT/shared/g1/train_merged.npz" \
   --stage-names g0 g1 \
   --observation-input shared_future_summary \
-  --out-path "$OUT_ROOT/shared/data_quality.json"
+  --normalization-checkpoint \
+    "$SOURCE_RUN/p1/iterative_action_q.pt" \
+  --out-path "$AUDIT_OUT_PATH"

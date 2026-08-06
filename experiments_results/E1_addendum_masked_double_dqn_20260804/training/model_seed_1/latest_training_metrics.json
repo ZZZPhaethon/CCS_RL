@@ -1,0 +1,8 @@
+{
+  "elapsed_seconds": 10269.294768556952,
+  "epsilon": 0.050000000000000044,
+  "gradient_updates": 2350002,
+  "mean_recent_loss": 0.00044744424932287075,
+  "replay_size": 1000000,
+  "training_simulator_hour_steps": 9500000
+}

@@ -57,3 +57,19 @@ def test_new_launcher_contains_no_formal_seed_literals():
     assert "9000" not in launcher
     assert "9000" not in evaluator
     assert "--validation-only" in evaluator
+
+
+def test_recursive_launcher_keeps_two_routes_and_validation_only():
+    launcher = (
+        ROOT / "hpc" / "launch_iterative_h3_sampler_recursive.sh"
+    ).read_text(encoding="utf-8")
+    evaluator = (
+        ROOT / "hpc" / "submit_iterative_h3_recursive_validation.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "9000" not in launcher
+    assert "9000" not in evaluator
+    assert "SELECTED_VARIANT" in launcher
+    assert "--array=0-29%12" in launcher
+    assert "--array=0-47%12" in launcher
+    assert "--validation-only" in evaluator

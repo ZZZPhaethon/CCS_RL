@@ -45,6 +45,7 @@ ITERATIVE_Q_RESULTS = (
     REPO_ROOT
     / "experiments_results"
     / "E1"
+    / "algorithms"
     / "formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01"
     / "model_seed_0"
     / "evaluation.csv"
@@ -106,18 +107,27 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--checkpoint", type=Path, default=CHECKPOINT)
+    parser.add_argument(
+        "--iterative-q-results",
+        type=Path,
+        default=ITERATIVE_Q_RESULTS,
+    )
     return parser.parse_args()
 
 
-def evaluation_args() -> argparse.Namespace:
+def evaluation_args(
+    checkpoint: Path,
+    test_seed: int = TEST_SEED,
+) -> argparse.Namespace:
     return iterative_q_eval.parse_args(
         [
             "--checkpoint",
-            str(CHECKPOINT),
+            str(checkpoint),
             "--out-dir",
             "unused-figure-4-trace",
             "--eval-seeds",
-            str(TEST_SEED),
+            str(test_seed),
             "--episode-hours",
             "720",
             "--reward-scale",
@@ -136,8 +146,8 @@ def evaluation_args() -> argparse.Namespace:
     )
 
 
-def load_archived_result() -> dict[str, str]:
-    with ITERATIVE_Q_RESULTS.open("r", encoding="utf-8", newline="") as handle:
+def load_formal_result(iterative_q_results: Path) -> dict[str, str]:
+    with iterative_q_results.open("r", encoding="utf-8", newline="") as handle:
         matches = [
             row
             for row in csv.DictReader(handle)
@@ -145,7 +155,7 @@ def load_archived_result() -> dict[str, str]:
         ]
     if len(matches) != 1:
         raise ValueError(
-            f"Expected one archived Iterative Action-Q row for seed {TEST_SEED}, "
+            f"Expected one formal Iterative Action-Q row for seed {TEST_SEED}, "
             f"found {len(matches)}."
         )
     return matches[0]
@@ -299,7 +309,7 @@ def validate_metric(field: str, actual: float, expected: float) -> None:
         )
 
 
-def reset_with_capture_event_trace(wrapper):
+def reset_with_capture_event_trace(wrapper, test_seed: int = TEST_SEED):
     high_output_series: list[list[float]] = []
     original_factor_window_series = scenario_generator._factor_window_series
 
@@ -328,7 +338,7 @@ def reset_with_capture_event_trace(wrapper):
 
     scenario_generator._factor_window_series = traced_factor_window_series
     try:
-        observation, info = wrapper.residual_env.reset_native_seed(TEST_SEED)
+        observation, info = wrapper.residual_env.reset_native_seed(test_seed)
     finally:
         scenario_generator._factor_window_series = original_factor_window_series
 
@@ -347,6 +357,7 @@ def reset_with_capture_event_trace(wrapper):
 
 def replay_iterative_q(
     args,
+    iterative_q_results: Path,
 ) -> tuple[TraceRecorder, dict[str, float], int, int]:
     device = torch.device("cpu")
     model, metadata = iterative_q_eval._load_model(args, device)
@@ -421,7 +432,7 @@ def replay_iterative_q(
 
     validate_trace(recorder)
     metrics = iterative_q_eval._metrics(wrapper.env)
-    archived = load_archived_result()
+    formal = load_formal_result(iterative_q_results)
     for field in (
         "total_cost_eur",
         "episode_total_cost_eur",
@@ -429,15 +440,15 @@ def replay_iterative_q(
         "vented_t",
         "stored_t",
     ):
-        validate_metric(field, float(metrics[field]), float(archived[field]))
-    if event_count != int(archived["event_count"]):
+        validate_metric(field, float(metrics[field]), float(formal[field]))
+    if event_count != int(formal["event_count"]):
         raise ValueError(
-            f"Event count changed: {event_count} vs {archived['event_count']}."
+            f"Event count changed: {event_count} vs {formal['event_count']}."
         )
-    if override_events != int(archived["override_events"]):
+    if override_events != int(formal["override_events"]):
         raise ValueError(
             f"Intervention count changed: {override_events} vs "
-            f"{archived['override_events']}."
+            f"{formal['override_events']}."
         )
     return recorder, metrics, event_count, override_events
 
@@ -919,7 +930,8 @@ def high_output_windows(
 def main() -> None:
     args = parse_args()
     recorder, metrics, event_count, override_events = replay_iterative_q(
-        evaluation_args()
+        evaluation_args(args.checkpoint),
+        args.iterative_q_results,
     )
 
     source_data_dir = args.output_dir / "source_data"
@@ -973,9 +985,9 @@ def main() -> None:
                 "test_seed": TEST_SEED,
                 "iterative_q_model_seed": 0,
                 "trace_role": "trace-only replay; excluded from E1 statistics",
-                "checkpoint": str(CHECKPOINT.relative_to(REPO_ROOT)),
-                "archived_results": str(
-                    ITERATIVE_Q_RESULTS.relative_to(REPO_ROOT)
+                "checkpoint": str(args.checkpoint.relative_to(REPO_ROOT)),
+                "formal_results": str(
+                    args.iterative_q_results.relative_to(REPO_ROOT)
                 ),
                 "hourly_frames": len(recorder.frames),
                 "emitter_display_names": {

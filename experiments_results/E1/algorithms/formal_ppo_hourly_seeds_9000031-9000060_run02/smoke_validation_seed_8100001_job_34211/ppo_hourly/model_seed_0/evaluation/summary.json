@@ -1,0 +1,28 @@
+{
+  "mean_stored_t": 45363.92358338245,
+  "mean_total_cost_eur": 5776013.498429789,
+  "mean_vented_t": 50820.36103998329,
+  "model_path": "experiments_results/E1/formal_hourly_centralized_maskable_ppo_seeds_9000031-9000060_run02/smoke_validation_seed_8100001_job_34211/hourly_centralized_maskable_ppo/model_seed_0/checkpoint_best_validation.zip",
+  "paper_name": "Hourly Centralized Maskable PPO",
+  "per_seed": [
+    {
+      "captured_t": 125542.11540130965,
+      "cost_per_stored_t_eur": 127.3261447020345,
+      "decisions": 720,
+      "episode_total_cost_eur": 5357030.251867868,
+      "loss_rate": 0.4048072702736466,
+      "operating_cost_eur": 1710384.6152311175,
+      "seed": 8100001,
+      "simulated_hours": 720.0,
+      "storage_rate": 0.36134426633143396,
+      "stored_t": 45363.92358338245,
+      "terminal_cleanup_operating_cost_eur": 418983.24656192114,
+      "total_cost_eur": 5776013.498429789,
+      "unit_total_cost_eur_per_t": 127.3261447020345,
+      "vented_t": 50820.36103998329
+    }
+  ],
+  "seeds": [
+    8100001
+  ]
+}

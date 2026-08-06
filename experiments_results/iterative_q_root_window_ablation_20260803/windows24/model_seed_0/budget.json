@@ -1,0 +1,106 @@
+{
+  "kind": "iterative_q_physical_simulator_budget",
+  "run_root": "output/iterative_q_root_window_matched_budget_20260803_run02/windows24/model_seed_0",
+  "stages": [
+    "g0",
+    "g1",
+    "g2",
+    "g3"
+  ],
+  "target_train_simulator_steps": 9526297,
+  "train": [
+    {
+      "stage": "g0",
+      "split": "train",
+      "roots": 2159,
+      "candidates": 13400,
+      "scenario_seeds": 180,
+      "simulator_step_calls": 5639992,
+      "simulator_simulated_hours": 5639992.0,
+      "simulator_hour_steps": 5639992.0
+    },
+    {
+      "stage": "g1",
+      "split": "train",
+      "roots": 196,
+      "candidates": 1192,
+      "scenario_seeds": 32,
+      "simulator_step_calls": 725519,
+      "simulator_simulated_hours": 725519.0,
+      "simulator_hour_steps": 725519.0
+    },
+    {
+      "stage": "g2",
+      "split": "train",
+      "roots": 399,
+      "candidates": 2197,
+      "scenario_seeds": 55,
+      "simulator_step_calls": 1218707,
+      "simulator_simulated_hours": 1218707.0,
+      "simulator_hour_steps": 1218707.0
+    },
+    {
+      "stage": "g3",
+      "split": "train",
+      "roots": 606,
+      "candidates": 3367,
+      "scenario_seeds": 89,
+      "simulator_step_calls": 1964799,
+      "simulator_simulated_hours": 1964799.0,
+      "simulator_hour_steps": 1964799.0
+    }
+  ],
+  "validation": [
+    {
+      "stage": "g0",
+      "split": "validation",
+      "roots": 478,
+      "candidates": 3004,
+      "scenario_seeds": 40,
+      "simulator_step_calls": 1273028,
+      "simulator_simulated_hours": 1273028.0,
+      "simulator_hour_steps": 1273028.0
+    },
+    {
+      "stage": "g1",
+      "split": "validation",
+      "roots": 35,
+      "candidates": 195,
+      "scenario_seeds": 7,
+      "simulator_step_calls": 106542,
+      "simulator_simulated_hours": 106542.0,
+      "simulator_hour_steps": 106542.0
+    },
+    {
+      "stage": "g2",
+      "split": "validation",
+      "roots": 77,
+      "candidates": 407,
+      "scenario_seeds": 11,
+      "simulator_step_calls": 260617,
+      "simulator_simulated_hours": 260617.0,
+      "simulator_hour_steps": 260617.0
+    },
+    {
+      "stage": "g3",
+      "split": "validation",
+      "roots": 137,
+      "candidates": 740,
+      "scenario_seeds": 18,
+      "simulator_step_calls": 434153,
+      "simulator_simulated_hours": 434153.0,
+      "simulator_hour_steps": 434153.0
+    }
+  ],
+  "totals": {
+    "train_roots": 3360,
+    "validation_roots": 727,
+    "train_candidates": 20156,
+    "validation_candidates": 4346,
+    "train_simulator_steps": 9549017,
+    "validation_simulator_steps": 2074340,
+    "all_data_simulator_steps": 11623357,
+    "train_step_error": 22720,
+    "train_step_relative_error_pct": 0.23849770797614225
+  }
+}

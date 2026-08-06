@@ -1,0 +1,87 @@
+﻿{
+    "protocol":  "unified_window_v1",
+    "purpose":  "formal_test_E1_fixed_assignment_9000031_9000060_local_attempt1",
+    "execution_location":  "local",
+    "seed_range_inclusive":  [
+                                 9000031,
+                                 9000060
+                             ],
+    "seed_count":  30,
+    "online_episode_hours":  720,
+    "forecast_context_hours":  168,
+    "terminal_cleanup_included":  true,
+    "run_status_counts":  {
+                              "completed":  30
+                          },
+    "metrics":  {
+                    "total_cost":  {
+                                       "count":  30,
+                                       "mean":  2586941.843989118,
+                                       "standard_deviation":  373637.28190331091,
+                                       "median":  2641410.8095482988,
+                                       "minimum":  1835118.6531191771,
+                                       "maximum":  3102200.0320528345
+                                   },
+                    "operating_cost":  {
+                                           "count":  30,
+                                           "mean":  1617302.2076398409,
+                                           "standard_deviation":  33783.93982386087,
+                                           "median":  1618759.5760332695,
+                                           "minimum":  1561491.6394060161,
+                                           "maximum":  1689865.09245783
+                                       },
+                    "stored_t":  {
+                                     "count":  30,
+                                     "mean":  95578.715278332747,
+                                     "standard_deviation":  6016.684277412226,
+                                     "median":  95610.099888145283,
+                                     "minimum":  82658.099295913285,
+                                     "maximum":  108679.63681713025
+                                 },
+                    "vented_t":  {
+                                     "count":  30,
+                                     "mean":  12120.495454365953,
+                                     "standard_deviation":  4665.2321336692394,
+                                     "median":  12554.205835432022,
+                                     "minimum":  2342.9201028304915,
+                                     "maximum":  18739.161083644805
+                                 },
+                    "total_cost_per_stored_t":  {
+                                                    "count":  30,
+                                                    "mean":  27.227657813858496,
+                                                    "standard_deviation":  4.6298885698478829,
+                                                    "median":  27.264836015164825,
+                                                    "minimum":  17.887766439005411,
+                                                    "maximum":  33.91864703410517
+                                                },
+                    "wall_clock_seconds":  {
+                                               "count":  30,
+                                               "mean":  1.4153965833333737,
+                                               "standard_deviation":  0.43437719265923369,
+                                               "median":  1.4831581000003098,
+                                               "minimum":  0.51774340000065422,
+                                               "maximum":  2.1215953999999329
+                                           }
+                },
+    "paired_vs_greedy":  {
+                             "fixed_minus_greedy_total_cost":  {
+                                                                   "count":  30,
+                                                                   "mean":  332730.28035255079,
+                                                                   "standard_deviation":  453095.03708857042,
+                                                                   "median":  304667.52482973272,
+                                                                   "minimum":  -677324.08433903754,
+                                                                   "maximum":  1095729.82203517
+                                                               },
+                             "cost_improvement_vs_greedy_percent":  {
+                                                                        "count":  30,
+                                                                        "mean":  -17.113537722720462,
+                                                                        "standard_deviation":  21.058151830054744,
+                                                                        "median":  -13.784467449432135,
+                                                                        "minimum":  -62.613429932313593,
+                                                                        "maximum":  24.066072278611927
+                                                                    },
+                             "lower_cost_seed_count":  6,
+                             "equal_cost_seed_count":  0,
+                             "higher_cost_seed_count":  24
+                         }
+}

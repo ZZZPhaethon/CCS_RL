@@ -1,0 +1,141 @@
+{
+  "aggregate": [
+    {
+      "algorithm": "Hourly Centralized Maskable PPO",
+      "between_model_seed_sd_total_cost_eur": 255170.65111236984,
+      "hierarchical_bootstrap_95pct_ci_high_eur": 3684811.4485643087,
+      "hierarchical_bootstrap_95pct_ci_low_eur": 3159057.500443545,
+      "losses": 90,
+      "mean_delta_vs_greedy_eur": 3405420.631988325,
+      "mean_stored_t": 44082.93672106332,
+      "mean_total_cost_eur": 5659632.195624892,
+      "mean_unit_cost_eur_per_t": 136.05162720037183,
+      "mean_vented_t": 49756.756780677155,
+      "model_seeds": "0,1,2",
+      "test_episodes": 90,
+      "ties": 0,
+      "win_rate": 0.0,
+      "wins": 0
+    }
+  ],
+  "formal_seeds": [
+    9000031,
+    9000032,
+    9000033,
+    9000034,
+    9000035,
+    9000036,
+    9000037,
+    9000038,
+    9000039,
+    9000040,
+    9000041,
+    9000042,
+    9000043,
+    9000044,
+    9000045,
+    9000046,
+    9000047,
+    9000048,
+    9000049,
+    9000050,
+    9000051,
+    9000052,
+    9000053,
+    9000054,
+    9000055,
+    9000056,
+    9000057,
+    9000058,
+    9000059,
+    9000060
+  ],
+  "formal_test": true,
+  "greedy": {
+    "algorithm": "Greedy",
+    "mean_stored_t": 102984.17556541668,
+    "mean_total_cost_eur": 2254211.5636365665,
+    "mean_unit_cost_eur_per_t": 22.396848358833353,
+    "mean_vented_t": 7296.773222316018,
+    "test_episodes": 30
+  },
+  "model_choice": "best_validation",
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "per_model_seed": [
+    {
+      "algorithm": "Hourly Centralized Maskable PPO",
+      "losses": 30,
+      "mean_delta_vs_greedy_eur": 3694675.3489402453,
+      "mean_stored_t": 37377.980350631646,
+      "mean_total_cost_eur": 5948886.912576812,
+      "mean_unit_cost_eur_per_t": 165.50751807986398,
+      "mean_vented_t": 53409.364536762594,
+      "median_total_cost_eur": 5923471.796728766,
+      "model_seed": 0,
+      "paired_bootstrap_95pct_ci_high_eur": 3913804.5229670424,
+      "paired_bootstrap_95pct_ci_low_eur": 3473038.3209084375,
+      "test_episodes": 30,
+      "ties": 0,
+      "win_rate": 0.0,
+      "wins": 0
+    },
+    {
+      "algorithm": "Hourly Centralized Maskable PPO",
+      "losses": 30,
+      "mean_delta_vs_greedy_eur": 3212204.769420254,
+      "mean_stored_t": 47563.84222663779,
+      "mean_total_cost_eur": 5466416.333056821,
+      "mean_unit_cost_eur_per_t": 119.46364673153516,
+      "mean_vented_t": 47229.427143743495,
+      "median_total_cost_eur": 5530455.062814293,
+      "model_seed": 1,
+      "paired_bootstrap_95pct_ci_high_eur": 3450459.25452425,
+      "paired_bootstrap_95pct_ci_low_eur": 2960839.096402181,
+      "test_episodes": 30,
+      "ties": 0,
+      "win_rate": 0.0,
+      "wins": 0
+    },
+    {
+      "algorithm": "Hourly Centralized Maskable PPO",
+      "losses": 30,
+      "mean_delta_vs_greedy_eur": 3309381.7776044765,
+      "mean_stored_t": 47306.98758592053,
+      "mean_total_cost_eur": 5563593.341241043,
+      "mean_unit_cost_eur_per_t": 123.18371678971633,
+      "mean_vented_t": 48631.47866152538,
+      "median_total_cost_eur": 5419002.176567271,
+      "model_seed": 2,
+      "paired_bootstrap_95pct_ci_high_eur": 3525268.8975280863,
+      "paired_bootstrap_95pct_ci_low_eur": 3092504.3656137553,
+      "test_episodes": 30,
+      "ties": 0,
+      "win_rate": 0.0,
+      "wins": 0
+    }
+  ],
+  "provenance": {
+    "Hourly Centralized Maskable PPO": {
+      "0": {
+        "checkpoint_sha256": "0d066e992562da3fb865e2e4773e5577365ed00f58dc3519fc5132021d87d2f8",
+        "slurm_array_job_id": "34212",
+        "slurm_array_task_id": "0"
+      },
+      "1": {
+        "checkpoint_sha256": "a44d85a7f148d3426908492073e039b3098c4a37ca42344cd19fde190ad11bfa",
+        "slurm_array_job_id": "34212",
+        "slurm_array_task_id": "1"
+      },
+      "2": {
+        "checkpoint_sha256": "c3f5a2b31f72b22fb26f2d9722424f6fa7d339c41b94d75f9c2afb64adda391c",
+        "slurm_array_job_id": "34212",
+        "slurm_array_task_id": "2"
+      }
+    }
+  },
+  "reported_total_cost": "720 h episode total cost + common compact terminal cleanup operating cost"
+}

@@ -1,0 +1,146 @@
+{
+  "protocol": "unified_window_v1",
+  "purpose": "formal_test_E5_full_milp_cplex222_7200s",
+  "configuration": {
+    "out_dir": "/scratch_root/hx721/CCS_RLLLM_milp_validation_20260728/experiments_results/E5/full_milp_formal_9000031_9000060_cplex222_7200s_attempt2/seed_9000049",
+    "seed": 9000049,
+    "controllers": [
+      "full_milp"
+    ],
+    "online_episode_hours": 720,
+    "forecast_context_hours": 168,
+    "rolling_replan_hours": 24,
+    "rolling_planning_horizon_hours": 48,
+    "rolling_time_limit_seconds": 5.0,
+    "full_milp_horizon_hours": 720,
+    "full_milp_time_limit_seconds": 7200.0,
+    "mip_gap_relative": null,
+    "solver_threads": 4,
+    "purpose": "formal_test_E5_full_milp_cplex222_7200s",
+    "overwrite": false
+  },
+  "rows": [
+    {
+      "controller": "full_milp",
+      "seed": 9000049,
+      "evaluation_role": "offline_reference",
+      "online_comparable": false,
+      "run_status": "completed",
+      "error_type": "",
+      "error_message": "",
+      "wall_clock_seconds": 7307.482336072717,
+      "controller_decision_calls": 1,
+      "simulator_step_calls": 3599,
+      "simulator_simulated_hours": 3599.0,
+      "simulator_hour_steps": 3599.0,
+      "solver_status": "Integer Feasible",
+      "solver_is_valid": true,
+      "solver_validation_error": "",
+      "solver_incumbent_objective": 1840479.7749805038,
+      "solver_augmented_objective": 1840479.7749805038,
+      "solver_best_bound": -194285.52,
+      "solver_relative_gap": 1.105562431405723,
+      "solver_termination_reason": "Time limit exceeded, integer feasible",
+      "solver_warm_start_accepted": true,
+      "solver_solve_wall_seconds": 7216.336819032673,
+      "solver_time_limit_seconds": 7200.0,
+      "solver_threads": 4,
+      "solver_executable": "/scratch_root/hx721/software/CPLEX_Studio2220/cplex/bin/x86-64_linux/cplex",
+      "warm_start_mode": "greedy",
+      "fallback_used": false,
+      "replay_is_executable": true,
+      "replay_is_exact": null,
+      "replay_mismatches": "",
+      "planning_horizon_hours": 720,
+      "evaluation_horizon_hours": 720,
+      "episode_operating_cost": 1461765.7224979086,
+      "episode_total_cost": 1687273.8920566018,
+      "terminal_cleanup_operating_cost": 153205.8829228738,
+      "solver_terminal_cleanup_operating_cost": 153205.88292388324,
+      "operating_cost": 1614971.6054207825,
+      "total_cost": 1840479.7749794757,
+      "replay_minus_solver_objective": -1.0281801223754883e-06,
+      "cost_per_stored_t": 15.691983999951226,
+      "total_cost_per_stored_t": 17.88314982397901,
+      "vessel_fuel": 476995.8600000061,
+      "conditioning": 935846.9986671886,
+      "reconditioning": 42195.961850622494,
+      "loading": 3653.0344800915527,
+      "unloading": 3073.867500000004,
+      "vent_penalty": 225508.1695586931,
+      "storage_shortfall_penalty": 0.0,
+      "stored_t": 102916.98012346955,
+      "vented_t": 2818.852119483664,
+      "captured_t": 124881.7699196395,
+      "in_transit_t": 25442.609954559626,
+      "vessel_sailing_hours": 1149.0000000000148,
+      "vessel_loading_hours": 149.59191155166067,
+      "vessel_unloading_hours": 125.87500000000018,
+      "vessel_waiting_hours": 735.5330884483243,
+      "loaded_t": 119673.52924132848,
+      "unloaded_t": 100700.0,
+      "executed_action_count": 720
+    }
+  ],
+  "diagnostics": {
+    "full_milp_stages": [
+      {
+        "stage": "weighted",
+        "time_limit_s": 7200.0,
+        "wall_time_s": 7216.336819032673,
+        "status": "Integer Feasible",
+        "objective_value": 1840479.7749805038,
+        "best_bound": -194285.52,
+        "relative_gap": 1.105562431405723,
+        "termination_reason": "Time limit exceeded, integer feasible",
+        "warm_start_requested": true,
+        "warm_start_accepted": true
+      },
+      {
+        "stage": "mip_start_audit",
+        "total_variables": 138343,
+        "initialized_variables": 103783,
+        "missing_variable_count": 34560,
+        "bound_violation_count": 0,
+        "integrality_violation_count": 0,
+        "total_constraints": 243866,
+        "evaluated_constraints": 181190,
+        "partial_constraint_count": 62676,
+        "violated_constraint_count": 2,
+        "max_constraint_violation": 3.108899136350374e-05,
+        "top_violations": [
+          {
+            "constraint": "_C243660",
+            "sense": "==",
+            "residual": -3.108899136350374e-05,
+            "violation": 3.108899136350374e-05,
+            "variable_names": [
+              "tail_shipped_northern_pathfinder_brevik",
+              "tail_topup_northern_pathfinder_brevik",
+              "tail_shipped_northern_phoenix_brevik",
+              "tail_topup_northern_phoenix_brevik",
+              "tail_shipped_northern_pioneer_brevik",
+              "tail_topup_northern_pioneer_brevik",
+              "source_stock_brevik_720"
+            ]
+          },
+          {
+            "constraint": "_C243661",
+            "sense": "==",
+            "residual": -2.029339839282329e-06,
+            "violation": 2.029339839282329e-06,
+            "variable_names": [
+              "tail_shipped_northern_pathfinder_celsio",
+              "tail_topup_northern_pathfinder_celsio",
+              "tail_shipped_northern_phoenix_celsio",
+              "tail_topup_northern_phoenix_celsio",
+              "tail_shipped_northern_pioneer_celsio",
+              "tail_topup_northern_pioneer_celsio",
+              "source_stock_celsio_720"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

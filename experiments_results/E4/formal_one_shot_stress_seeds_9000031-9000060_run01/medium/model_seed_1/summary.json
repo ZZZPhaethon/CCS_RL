@@ -1,0 +1,127 @@
+{
+  "kind": "iterative_action_q_policy_evaluation",
+  "checkpoint": "/scratch_root/hx721/CCS_RLLLM_iterq_validation_search_20260728/experiments_results/E2/training_one_shot_hour_removed_budget_matched_20260730_run01/model_seed_1/p1/iterative_action_q.pt",
+  "eval_seeds": [
+    9000031,
+    9000032,
+    9000033,
+    9000034,
+    9000035,
+    9000036,
+    9000037,
+    9000038,
+    9000039,
+    9000040,
+    9000041,
+    9000042,
+    9000043,
+    9000044,
+    9000045,
+    9000046,
+    9000047,
+    9000048,
+    9000049,
+    9000050,
+    9000051,
+    9000052,
+    9000053,
+    9000054,
+    9000055,
+    9000056,
+    9000057,
+    9000058,
+    9000059,
+    9000060
+  ],
+  "scenario_protocol": "unified_window_v1",
+  "stress_level": "medium",
+  "forecast_context_hours": 168,
+  "state_mean_ablation": [],
+  "validation_only": false,
+  "seed_manifest": null,
+  "gates": [
+    {
+      "name": "e4_nohour_one_shot_medium_s1",
+      "required_heads": 4,
+      "margin": 0.4,
+      "max_overrides": 12,
+      "min_hour": null,
+      "max_hour": null,
+      "windows": [
+        [
+          108.0,
+          155.0
+        ],
+        [
+          156.0,
+          203.0
+        ],
+        [
+          204.0,
+          251.0
+        ],
+        [
+          252.0,
+          299.0
+        ],
+        [
+          300.0,
+          347.0
+        ],
+        [
+          348.0,
+          395.0
+        ],
+        [
+          396.0,
+          443.0
+        ],
+        [
+          444.0,
+          491.0
+        ],
+        [
+          492.0,
+          539.0
+        ],
+        [
+          540.0,
+          587.0
+        ],
+        [
+          588.0,
+          635.0
+        ],
+        [
+          636.0,
+          680.0
+        ]
+      ],
+      "uncertainty_beta": 0.0
+    }
+  ],
+  "summary": {
+    "e4_nohour_one_shot_medium_s1": {
+      "episodes": 30,
+      "mean_total_cost_eur": 1894341.7406488927,
+      "mean_greedy_total_cost_eur": 2254211.563636566,
+      "mean_delta_total_cost_eur": -359869.82298767363,
+      "median_delta_total_cost_eur": -306081.3128674808,
+      "mean_delta_95pct_ci_eur": [
+        -504980.6520795745,
+        -236523.7514461639
+      ],
+      "wins": 27,
+      "ties": 0,
+      "losses": 3,
+      "mean_vented_t": 1213.8472976152764,
+      "mean_stored_t": 110249.18456991625,
+      "mean_unit_cost_eur_per_t": 17.25357496668854,
+      "mean_override_events": 11.8,
+      "mean_proposed_override_events": 388.7,
+      "mean_wall_clock_seconds": 3.4208100109981996,
+      "early_departures": 15,
+      "emitter_to_emitter_legs": 45
+    }
+  }
+}

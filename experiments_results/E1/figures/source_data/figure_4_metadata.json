@@ -4,7 +4,7 @@
   "iterative_q_model_seed": 0,
   "trace_role": "trace-only replay; excluded from E1 statistics",
   "checkpoint": "experiments_results\\E1\\models\\iterative_q\\g60_p4_model_seed_0\\iterative_action_q.pt",
-  "archived_results": "experiments_results\\E1\\formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01\\model_seed_0\\evaluation.csv",
+  "formal_results": "experiments_results\\E1\\algorithms\\formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01\\model_seed_0\\evaluation.csv",
   "hourly_frames": 721,
   "emitter_display_names": {
     "brevik": "Brevik",
@@ -100,10 +100,10 @@
     ]
   },
   "replay_validation": {
-    "total_cost_eur": 1899314.9664683864,
-    "vented_t": 0.0,
-    "stored_t": 105907.74065289191,
-    "event_count": 343,
+    "total_cost_eur": 1912474.3282112405,
+    "vented_t": 860.8512848724498,
+    "stored_t": 108453.56588629827,
+    "event_count": 403,
     "status": "exact_match_to_archived_metrics"
   },
   "output_formats": [

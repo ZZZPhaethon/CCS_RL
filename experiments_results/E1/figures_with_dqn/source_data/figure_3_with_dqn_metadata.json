@@ -1,0 +1,25 @@
+{
+  "figure": "E1 Figure 3a-c with post-hoc Masked Double DQN",
+  "backend": "Python/matplotlib",
+  "formal_test_seeds": [
+    9000031,
+    9000060
+  ],
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "dqn_episode_records": 90,
+  "point_definition_figure_3a": "Per-test-scenario paired total-cost difference; learned-method points average model seeds 0, 1, and 2.",
+  "interval_definition_figure_3a": "95% percentile hierarchical bootstrap confidence interval for the mean; test scenarios and learned model instances are resampled independently.",
+  "posthoc_disclosure": "Masked Double DQN was locked and evaluated as a post-hoc addendum after the original E1 formal test set had been accessed for other controllers.",
+  "reference_episode_csv": "experiments_results\\E1\\algorithms\\formal_comparison\\e1_formal_per_episode.csv",
+  "reference_algorithm_csv": "experiments_results\\E1\\algorithms\\formal_comparison\\e1_formal_per_algorithm.csv",
+  "dqn_results_dir": "experiments_results\\E1_addendum_masked_double_dqn_20260804\\formal_test",
+  "output_formats": [
+    "pdf",
+    "svg",
+    "png"
+  ]
+}

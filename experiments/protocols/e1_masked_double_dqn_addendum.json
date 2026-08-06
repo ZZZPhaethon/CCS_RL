@@ -1,0 +1,105 @@
+{
+  "addendum_id": "e1_posthoc_masked_double_dqn_2026-08-04",
+  "status": "locked_before_dqn_training",
+  "locked_on": "2026-08-04",
+  "parent_protocol": "experiments/protocols/unified_window_v1_paper_protocol.json",
+  "reason": "Add a direct off-policy value-learning baseline symmetric with the direct Hourly Centralized Maskable PPO interface.",
+  "posthoc_disclosure": {
+    "baseline_added_after_original_e1_completion": true,
+    "formal_test_seeds_previously_accessed_for_other_controllers": true,
+    "dqn_hyperparameter_or_checkpoint_selection_on_formal_test": false,
+    "formal_test_rule": "Freeze implementation and configuration using unit tests, smoke tests, and controller-validation seeds, then evaluate the locked checkpoint once on the existing paired E1 formal seeds."
+  },
+  "method": {
+    "paper_name": "Hourly Masked Double DQN",
+    "implementation_entrypoint": "python -m sim.control.hourly_dqn.train_hourly_dqn",
+    "evaluation_entrypoint": "python -m sim.control.hourly_dqn.evaluate_hourly_dqn",
+    "training_from_scratch": true,
+    "policy_transition_hours": 1,
+    "physical_steps_per_policy_transition": 1,
+    "observation": "current physical state plus the shared 168 h structured summary without valid_fraction",
+    "action_space": {
+      "native_type": "MultiDiscrete",
+      "native_dimensions": [
+        5,
+        5,
+        5
+      ],
+      "dqn_representation": "row-major Discrete enumeration",
+      "maximum_joint_actions": 125,
+      "legal_action_masks_applied_to": [
+        "epsilon-greedy behaviour selection",
+        "greedy evaluation selection",
+        "online-network next-action argmax in the Double-DQN target"
+      ]
+    },
+    "excluded_structure": [
+      "event trigger",
+      "multi-hour dispatch goal",
+      "rule or MPC executor",
+      "Greedy default",
+      "FOLLOW action",
+      "residual action",
+      "behaviour-cloning warm start",
+      "agent-selected well rate"
+    ],
+    "well_control": "automatic_continuous_maximum_feasible_rate",
+    "objective": "negative realised economic cost including common compact trip cleanup terminal value",
+    "gamma": 1.0,
+    "algorithm": "one-step Double DQN with Huber loss, replay buffer, hard target-network updates, and physical legality masks"
+  },
+  "locked_training_configuration": {
+    "model_seeds": [
+      0,
+      1,
+      2
+    ],
+    "training_episode_seed_range_inclusive": [
+      100000,
+      999999
+    ],
+    "controller_validation_seed_range_inclusive": [
+      8100001,
+      8100020
+    ],
+    "formal_test_seed_range_inclusive": [
+      9000031,
+      9000060
+    ],
+    "hidden_sizes": [
+      256,
+      256
+    ],
+    "learning_rate": 0.0003,
+    "batch_size": 256,
+    "replay_capacity": 1000000,
+    "learning_starts_simulator_hours": 100000,
+    "gradient_steps_per_8_environment_vector_step": 2,
+    "target_update_interval_simulator_hours": 10000,
+    "epsilon_start": 1.0,
+    "epsilon_final": 0.05,
+    "epsilon_anneal_fraction_of_budget": 0.2,
+    "reward_scale": 0.000001,
+    "vector_environments": 8,
+    "checkpoint_validation_interval_simulator_hours": 950531,
+    "checkpoint_selection": "minimum mean total cost on the 20 controller-validation seeds",
+    "device": "one CUDA GPU per model seed"
+  },
+  "training_budget": {
+    "definition": "actual calls that advance the bottom-level simulator by one physical hour, summed across all vector workers",
+    "nominal_hard_cap_per_model_seed": 9505319,
+    "effective_8_worker_stop_per_model_seed": 9505312,
+    "difference_from_nominal_calls": -7,
+    "relative_difference_from_nominal_pct": -0.000073643,
+    "validation_and_formal_test_rollouts_included": false,
+    "network_forward_backward_and_replay_updates_included": false,
+    "report_separately": [
+      "actual simulator calls",
+      "gradient updates",
+      "GPU hours",
+      "CPU hours",
+      "wall time",
+      "replay capacity"
+    ]
+  }
+}

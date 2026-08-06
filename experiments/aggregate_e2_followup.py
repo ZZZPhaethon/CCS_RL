@@ -286,6 +286,9 @@ def aggregate_one_shot_e4(results_root: Path) -> None:
             "multiple_comparison_correction": (
                 "Not applied; three pre-specified descriptive stress levels."
             ),
+            "iterative_q_state_feature_exclusions": ["hour_of_week"],
+            "one_shot_state_feature_exclusions": ["hour_of_week"],
+            "state_feature_count": 93,
             "formats": ["pdf", "png"],
             "png_dpi": 300,
         },

@@ -1,0 +1,120 @@
+{
+  "protocol_id": "paper_unified_window_v1_3vessel_2026-07-27",
+  "manifest_version": 4,
+  "locked_on": "2026-07-29",
+  "supersedes_manifest_version": 3,
+  "model_training_seeds": [
+    0,
+    1,
+    2
+  ],
+  "ppo_training_episode_seeds": {
+    "Hourly Centralized Maskable PPO": {
+      "range_inclusive": [
+        100000,
+        999999
+      ]
+    },
+    "Event-Residual PPO": {
+      "range_inclusive": [
+        100000,
+        999999
+      ]
+    },
+    "sampling_rule": "Each model seed drives an independent reproducible RNG stream within this training-only range."
+  },
+  "iterative_q_data": {
+    "G0": {
+      "train_range_inclusive": [
+        1500,
+        1699
+      ],
+      "validation_range_inclusive": [
+        3200,
+        3239
+      ],
+      "roots_per_train_seed": 12,
+      "dataset_seed": 20260723
+    },
+    "G1": {
+      "train_range_inclusive": [
+        1500,
+        1539
+      ],
+      "validation_range_inclusive": [
+        3200,
+        3207
+      ],
+      "roots_per_train_seed": 12,
+      "dataset_seed": 20260724
+    },
+    "G2": {
+      "train_range_inclusive": [
+        1600,
+        1659
+      ],
+      "validation_range_inclusive": [
+        3230,
+        3241
+      ],
+      "roots_per_train_seed": 12,
+      "dataset_seed": 20260725
+    }
+  },
+  "controller_validation": {
+    "range_inclusive": [
+      8100001,
+      8100020
+    ],
+    "count": 20,
+    "allowed_uses": [
+      "checkpoint selection",
+      "gate selection",
+      "shared future-summary lock",
+      "Rolling MILP horizon and time-limit smoke validation"
+    ]
+  },
+  "formal_test": {
+    "range_inclusive": [
+      9000031,
+      9000060
+    ],
+    "count": 30,
+    "designation": "revised_primary_comparison_set_for_future_frozen_controllers",
+    "paired_across_controllers": true,
+    "paired_across_stress_levels": true,
+    "locked_for_future_comparisons_on": "2026-07-29",
+    "access_status": "unvisited holdout test set for future frozen controllers",
+    "access_rule": "future controllers may be evaluated only after their method, checkpoint, gate, budget and reporting choices are frozen; this range must not be used for any further selection"
+  },
+  "deprecated_formal_test": {
+    "range_inclusive": [
+      9000001,
+      9000030
+    ],
+    "count": 30,
+    "deprecated_on": "2026-07-29",
+    "result_status": "deprecated_for_future_primary_comparison_but_retained_for_provenance",
+    "reason": "superseded by manifest version 4 for future controller comparisons",
+    "prohibited_actions": [
+      "delete archived results",
+      "relabel as unseen",
+      "use for model or hyperparameter selection"
+    ]
+  },
+  "legacy_development_only": {
+    "range_inclusive": [
+      8000001,
+      8000030
+    ],
+    "reason": "already used by unified-window comparisons and reproducibility evaluations before the paper protocol was frozen",
+    "prohibited_use": "formal test claims"
+  },
+  "split_rules": [
+    "formal test seeds must not be used for training, root generation, hyperparameter selection, checkpoint selection or debugging",
+    "controller validation seeds must not appear in the formal test range",
+    "Low, Medium and High stress evaluations reuse the same formal test seed numbers to preserve pairing",
+    "all future controller comparisons use the revised formal test range only after controller configuration is frozen",
+    "deprecated formal-test results remain archived and identifiable in provenance records"
+  ]
+}

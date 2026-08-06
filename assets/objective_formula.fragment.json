@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "type": "latex-formula-image-fragment",
+  "images": [
+    {
+      "id": "objective_formula",
+      "path": "assets/objective_formula.pdf",
+      "box_px": [
+        955.0,
+        215.0,
+        570.0,
+        70.0
+      ],
+      "alt": "LaTeX rendered formula objective_formula",
+      "z_index": 220
+    }
+  ],
+  "asset_provenance": [
+    {
+      "path": "assets/objective_formula.pdf",
+      "source": "assets/objective_formula.tex",
+      "source_type": "latex-rendered-formula",
+      "provenance_note": "Rendered from LaTeX by editppt formula render-latex; visual fidelity is prioritized over formula editability."
+    }
+  ],
+  "formula_inventory": [
+    {
+      "id": "objective_formula",
+      "decision": "latex-rendered-image",
+      "editable": false,
+      "image": "assets/objective_formula.pdf",
+      "tex_source": "assets/objective_formula.tex"
+    }
+  ]
+}

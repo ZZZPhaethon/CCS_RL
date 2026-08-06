@@ -1,0 +1,536 @@
+{
+  "dataset_name": "E1 formal comparison dataset",
+  "version": "2026-07-29",
+  "formal_test_seed_range_inclusive": [
+    9000031,
+    9000060
+  ],
+  "conventions": {
+    "cleanup": "Terminal cleanup is retained as one scalar cost and is not split into components.",
+    "model_seed": "Null means the method is not trained and therefore has no training model seed.",
+    "greedy_pairing": "All Greedy comparisons use the standalone Greedy formal result joined by test_seed.",
+    "missing_values": "Blank CSV cells mean not applicable or not exported; they must not be interpreted as zero."
+  },
+  "files": {
+    "e1_formal_per_episode.csv": {
+      "grain": "one algorithm x model_seed x test_seed observation",
+      "rows": 450,
+      "primary_key": [
+        "algorithm",
+        "model_seed",
+        "test_seed"
+      ],
+      "columns": {
+        "algorithm": {
+          "type": "string",
+          "unit": null,
+          "description": "Stable short algorithm identifier."
+        },
+        "algorithm_display_name": {
+          "type": "string",
+          "unit": null,
+          "description": "Human-readable algorithm name."
+        },
+        "method_class": {
+          "type": "string",
+          "unit": null,
+          "description": "heuristic, optimization, or reinforcement_learning."
+        },
+        "model_seed": {
+          "type": "integer_or_null",
+          "unit": null,
+          "description": "Independent training seed; null for non-learning algorithms."
+        },
+        "test_seed": {
+          "type": "integer",
+          "unit": null,
+          "description": "Formal scenario seed."
+        },
+        "episode_hours": {
+          "type": "number",
+          "unit": "h",
+          "description": "Evaluated physical horizon."
+        },
+        "decision_count": {
+          "type": "integer",
+          "unit": null,
+          "description": "Controller decisions or event decisions during the episode."
+        },
+        "mean_decision_interval_h": {
+          "type": "number",
+          "unit": "h",
+          "description": "episode_hours divided by decision_count."
+        },
+        "episode_vessel_fuel_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Vessel fuel cost realised inside the episode."
+        },
+        "episode_conditioning_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Conditioning cost realised inside the episode."
+        },
+        "episode_reconditioning_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Reconditioning cost realised inside the episode."
+        },
+        "episode_loading_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Loading cost realised inside the episode."
+        },
+        "episode_unloading_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Unloading cost realised inside the episode."
+        },
+        "episode_operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Sum of the five episode operating-cost components."
+        },
+        "episode_vent_penalty_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Vent penalty realised inside the episode."
+        },
+        "episode_storage_shortfall_penalty_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Storage-shortfall penalty realised inside the episode."
+        },
+        "episode_total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Episode operating cost plus episode penalties."
+        },
+        "terminal_cleanup_operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Scalar terminal cleanup cost; intentionally not component-split."
+        },
+        "operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Episode operating cost plus terminal cleanup."
+        },
+        "total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Episode total cost plus terminal cleanup."
+        },
+        "captured_t": {
+          "type": "number_or_null",
+          "unit": "t CO2",
+          "description": "Captured CO2; unavailable in Iterative Action-Q exports."
+        },
+        "stored_t": {
+          "type": "number",
+          "unit": "t CO2",
+          "description": "CO2 stored during the episode."
+        },
+        "vented_t": {
+          "type": "number",
+          "unit": "t CO2",
+          "description": "CO2 vented during the episode."
+        },
+        "storage_rate": {
+          "type": "number_or_null",
+          "unit": "fraction",
+          "description": "stored_t / captured_t; unavailable when captured_t was not exported."
+        },
+        "loss_rate": {
+          "type": "number_or_null",
+          "unit": "fraction",
+          "description": "vented_t / captured_t; unavailable when captured_t was not exported."
+        },
+        "unit_total_cost_eur_per_t": {
+          "type": "number",
+          "unit": "EUR/t CO2 stored",
+          "description": "total_cost_eur divided by stored_t."
+        },
+        "greedy_total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Standalone Greedy formal result joined by test_seed."
+        },
+        "delta_total_cost_vs_greedy_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "total_cost_eur minus greedy_total_cost_eur; negative is better."
+        },
+        "paired_outcome_vs_greedy": {
+          "type": "string",
+          "unit": null,
+          "description": "win, tie, or loss using a EUR 1e-6 tolerance."
+        },
+        "hard_violations": {
+          "type": "number_or_null",
+          "unit": "count",
+          "description": "Reported hard constraint violations when exported."
+        },
+        "override_events": {
+          "type": "number_or_null",
+          "unit": "count",
+          "description": "Executed Iterative Action-Q overrides."
+        },
+        "proposed_override_events": {
+          "type": "number_or_null",
+          "unit": "count",
+          "description": "Proposed Iterative Action-Q overrides before gating."
+        },
+        "selected_interventions": {
+          "type": "number_or_null",
+          "unit": "count",
+          "description": "Selected Event-Residual PPO interventions."
+        },
+        "effective_intervention_rate": {
+          "type": "number_or_null",
+          "unit": "fraction",
+          "description": "Fraction of decisions that changed the native action."
+        },
+        "solver_replan_count": {
+          "type": "number_or_null",
+          "unit": "count",
+          "description": "Rolling MILP replans."
+        },
+        "solver_failure_count": {
+          "type": "number_or_null",
+          "unit": "count",
+          "description": "Rolling MILP solver failures."
+        },
+        "solver_timeout_count": {
+          "type": "number_or_null",
+          "unit": "count",
+          "description": "Rolling MILP solver timeouts."
+        },
+        "fallback_used": {
+          "type": "boolean_or_null",
+          "unit": null,
+          "description": "Whether Rolling MILP used a fallback controller."
+        },
+        "wall_clock_seconds": {
+          "type": "number_or_null",
+          "unit": "s",
+          "description": "Reported evaluation wall-clock time; not available for all methods."
+        },
+        "source_file": {
+          "type": "string",
+          "unit": null,
+          "description": "Source result file relative to experiments_results/E1."
+        }
+      }
+    },
+    "e1_formal_per_model_seed.csv": {
+      "grain": "one algorithm x independent model instance",
+      "rows": 15,
+      "note": "Each row summarizes 30 formal test seeds. Non-learning methods have a blank model_seed.",
+      "columns": {
+        "algorithm": {
+          "type": "string",
+          "unit": null,
+          "description": "Stable short algorithm identifier."
+        },
+        "algorithm_display_name": {
+          "type": "string",
+          "unit": null,
+          "description": "Human-readable algorithm name."
+        },
+        "method_class": {
+          "type": "string",
+          "unit": null,
+          "description": "heuristic, optimization, or reinforcement_learning."
+        },
+        "model_seed": {
+          "type": "integer_or_null",
+          "unit": null,
+          "description": "Independent training seed; null for non-learning algorithms."
+        },
+        "episodes": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Formal test episodes summarized in this row."
+        },
+        "mean_episode_vessel_fuel_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Vessel fuel cost realised inside the episode."
+        },
+        "mean_episode_conditioning_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Conditioning cost realised inside the episode."
+        },
+        "mean_episode_reconditioning_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Reconditioning cost realised inside the episode."
+        },
+        "mean_episode_loading_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Loading cost realised inside the episode."
+        },
+        "mean_episode_unloading_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Unloading cost realised inside the episode."
+        },
+        "mean_episode_operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Sum of the five episode operating-cost components."
+        },
+        "mean_episode_vent_penalty_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Vent penalty realised inside the episode."
+        },
+        "mean_episode_storage_shortfall_penalty_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Storage-shortfall penalty realised inside the episode."
+        },
+        "mean_episode_total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Episode operating cost plus episode penalties."
+        },
+        "mean_terminal_cleanup_operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Scalar terminal cleanup cost; intentionally not component-split."
+        },
+        "mean_operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Episode operating cost plus terminal cleanup."
+        },
+        "mean_total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Episode total cost plus terminal cleanup."
+        },
+        "mean_captured_t": {
+          "type": "number_or_null",
+          "unit": "t CO2",
+          "description": "Mean across formal test episodes: Captured CO2; unavailable in Iterative Action-Q exports."
+        },
+        "mean_stored_t": {
+          "type": "number",
+          "unit": "t CO2",
+          "description": "Mean across formal test episodes: CO2 stored during the episode."
+        },
+        "mean_vented_t": {
+          "type": "number",
+          "unit": "t CO2",
+          "description": "Mean across formal test episodes: CO2 vented during the episode."
+        },
+        "mean_storage_rate": {
+          "type": "number_or_null",
+          "unit": "fraction",
+          "description": "Mean across formal test episodes: stored_t / captured_t; unavailable when captured_t was not exported."
+        },
+        "mean_loss_rate": {
+          "type": "number_or_null",
+          "unit": "fraction",
+          "description": "Mean across formal test episodes: vented_t / captured_t; unavailable when captured_t was not exported."
+        },
+        "mean_unit_total_cost_eur_per_t": {
+          "type": "number",
+          "unit": "EUR/t CO2 stored",
+          "description": "Mean across formal test episodes: total_cost_eur divided by stored_t."
+        },
+        "mean_delta_total_cost_vs_greedy_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: total_cost_eur minus greedy_total_cost_eur; negative is better."
+        },
+        "sd_total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Sample SD of total_cost_eur across the 30 test seeds."
+        },
+        "sd_delta_total_cost_vs_greedy_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Sample SD of paired total-cost differences across the 30 test seeds."
+        },
+        "wins_vs_greedy": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Test seeds with total cost below standalone Greedy."
+        },
+        "ties_vs_greedy": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Test seeds tied with standalone Greedy within EUR 1e-6."
+        },
+        "losses_vs_greedy": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Test seeds with total cost above standalone Greedy."
+        }
+      }
+    },
+    "e1_formal_per_algorithm.csv": {
+      "grain": "one algorithm",
+      "rows": 7,
+      "note": "Learning algorithms pool 3 model seeds x 30 test seeds. between_model_seed_sd is the sample SD of the three model-seed mean total costs.",
+      "columns": {
+        "algorithm": {
+          "type": "string",
+          "unit": null,
+          "description": "Stable short algorithm identifier."
+        },
+        "algorithm_display_name": {
+          "type": "string",
+          "unit": null,
+          "description": "Human-readable algorithm name."
+        },
+        "method_class": {
+          "type": "string",
+          "unit": null,
+          "description": "heuristic, optimization, or reinforcement_learning."
+        },
+        "model_instances": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Independent controller/model instances represented."
+        },
+        "trained_model_seed_count": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Independent training seeds; zero for non-learning methods."
+        },
+        "episode_records": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Algorithm x model-seed x test-seed records summarized."
+        },
+        "mean_episode_vessel_fuel_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Vessel fuel cost realised inside the episode."
+        },
+        "mean_episode_conditioning_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Conditioning cost realised inside the episode."
+        },
+        "mean_episode_reconditioning_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Reconditioning cost realised inside the episode."
+        },
+        "mean_episode_loading_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Loading cost realised inside the episode."
+        },
+        "mean_episode_unloading_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Unloading cost realised inside the episode."
+        },
+        "mean_episode_operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Sum of the five episode operating-cost components."
+        },
+        "mean_episode_vent_penalty_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Vent penalty realised inside the episode."
+        },
+        "mean_episode_storage_shortfall_penalty_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Storage-shortfall penalty realised inside the episode."
+        },
+        "mean_episode_total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Episode operating cost plus episode penalties."
+        },
+        "mean_terminal_cleanup_operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Scalar terminal cleanup cost; intentionally not component-split."
+        },
+        "mean_operating_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Episode operating cost plus terminal cleanup."
+        },
+        "mean_total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: Episode total cost plus terminal cleanup."
+        },
+        "mean_captured_t": {
+          "type": "number_or_null",
+          "unit": "t CO2",
+          "description": "Mean across formal test episodes: Captured CO2; unavailable in Iterative Action-Q exports."
+        },
+        "mean_stored_t": {
+          "type": "number",
+          "unit": "t CO2",
+          "description": "Mean across formal test episodes: CO2 stored during the episode."
+        },
+        "mean_vented_t": {
+          "type": "number",
+          "unit": "t CO2",
+          "description": "Mean across formal test episodes: CO2 vented during the episode."
+        },
+        "mean_storage_rate": {
+          "type": "number_or_null",
+          "unit": "fraction",
+          "description": "Mean across formal test episodes: stored_t / captured_t; unavailable when captured_t was not exported."
+        },
+        "mean_loss_rate": {
+          "type": "number_or_null",
+          "unit": "fraction",
+          "description": "Mean across formal test episodes: vented_t / captured_t; unavailable when captured_t was not exported."
+        },
+        "mean_unit_total_cost_eur_per_t": {
+          "type": "number",
+          "unit": "EUR/t CO2 stored",
+          "description": "Mean across formal test episodes: total_cost_eur divided by stored_t."
+        },
+        "mean_delta_total_cost_vs_greedy_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Mean across formal test episodes: total_cost_eur minus greedy_total_cost_eur; negative is better."
+        },
+        "pooled_episode_sd_total_cost_eur": {
+          "type": "number",
+          "unit": "EUR",
+          "description": "Sample SD of total cost across all episode records for the algorithm."
+        },
+        "between_model_seed_sd_mean_total_cost_eur": {
+          "type": "number_or_null",
+          "unit": "EUR",
+          "description": "Sample SD of model-seed mean total costs; null for non-learning methods."
+        },
+        "wins_vs_greedy": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Test seeds with total cost below standalone Greedy."
+        },
+        "ties_vs_greedy": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Test seeds tied with standalone Greedy within EUR 1e-6."
+        },
+        "losses_vs_greedy": {
+          "type": "integer",
+          "unit": "count",
+          "description": "Test seeds with total cost above standalone Greedy."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "job_id": "33538",
+  "array_job_id": "33520",
+  "array_task_id": "7",
+  "host": "rootrunner",
+  "seed": 9000038,
+  "purpose": "formal_test_E5_full_milp_cplex222_7200s",
+  "cplex_bin": "/scratch_root/hx721/software/CPLEX_Studio2220/cplex/bin/x86-64_linux/cplex",
+  "run_status": "completed"
+}

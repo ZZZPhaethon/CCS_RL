@@ -1,0 +1,83 @@
+{
+  "checkpoint": "/scratch_root/hx721/CCS_RLLLM_iterq_validation_search_20260728/output/E1_hour_removed_formal_models/g60_p4_model_seed_2/iterative_action_q.pt",
+  "checkpoint_sha256": "6e8f7dba48ce08b1a299327ca8c95f7b72c67bdb0164b05806464cfe6e28d50f",
+  "controller": "iterative_q_direct",
+  "device": "cpu",
+  "direct_policy_windows": [
+    [
+      108,
+      155
+    ],
+    [
+      156,
+      203
+    ],
+    [
+      204,
+      251
+    ],
+    [
+      252,
+      299
+    ],
+    [
+      300,
+      347
+    ],
+    [
+      348,
+      395
+    ],
+    [
+      396,
+      443
+    ],
+    [
+      444,
+      491
+    ],
+    [
+      492,
+      539
+    ],
+    [
+      540,
+      587
+    ],
+    [
+      588,
+      635
+    ],
+    [
+      636,
+      680
+    ]
+  ],
+  "execution_horizon_hours": 720,
+  "experiment": "E7 temporal-horizon generalization",
+  "forecast_context_hours": 168,
+  "host": "rootrunner",
+  "model_seed": 2,
+  "nested_scenario_prefix": true,
+  "observation_schema": {
+    "excluded_state_features": [
+      "hour_of_week"
+    ],
+    "source_state_features": 94,
+    "state_features": 93
+  },
+  "receding_adapter": null,
+  "records": 5,
+  "scenario_hours": 8928,
+  "slurm_array_job_id": "35466",
+  "slurm_array_task_id": "75",
+  "slurm_cpus_per_task": "4",
+  "slurm_job_id": "35514",
+  "test_seeds": [
+    9000046,
+    9000047,
+    9000048,
+    9000049,
+    9000050
+  ]
+}

@@ -61,6 +61,22 @@ def test_root_fraction_budget_rotates_omitted_fixed_root_across_seeds(tmp_path):
     assert select_root_fractions(args, 2) == [(0, 0.1), (2, 0.3)]
 
 
+def test_root_fraction_zero_is_valid_for_a_full_episode_window(tmp_path):
+    args = parse_args(
+        [
+            "--out-path",
+            str(tmp_path / "unused.npz"),
+            "--split",
+            "train",
+            "--seeds",
+            "1",
+            "--root-fractions",
+            "0",
+        ]
+    )
+    assert select_root_fractions(args, 1) == [(0, 0.0)]
+
+
 def test_small_dense_dataset_has_paired_actions_and_aligned_returns(tmp_path):
     out_path = tmp_path / "dense.npz"
     args = parse_args(

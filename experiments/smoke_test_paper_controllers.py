@@ -28,6 +28,10 @@ from sim.control.replay import (
     action_for_well_control_mode,
     replay_native_actions,
 )
+from sim.control.shikha2025 import (
+    Shikha2025Config,
+    solve_shikha2025,
+)
 from sim.environment import CCSEnvConfig, build_phase1_env
 from sim.metrics import run_recorded_episode
 
@@ -37,6 +41,7 @@ CONTROLLERS = (
     "greedy",
     "rolling_milp",
     "full_milp",
+    "shikha2025",
 )
 
 
@@ -62,6 +67,27 @@ def parse_args(argv=None):
     )
     parser.add_argument("--full-milp-horizon-hours", type=int, default=48)
     parser.add_argument("--full-milp-time-limit-seconds", type=float, default=30.0)
+    parser.add_argument("--shikha-max-iterations", type=int, default=18)
+    parser.add_argument(
+        "--shikha-active-window-hours", type=int, default=120
+    )
+    parser.add_argument(
+        "--shikha-fix-window-hours", type=int, default=60
+    )
+    parser.add_argument(
+        "--shikha-subproblem-time-limit-seconds",
+        type=float,
+        default=30.0,
+    )
+    parser.add_argument(
+        "--shikha-repair-time-limit-seconds",
+        type=float,
+        default=30.0,
+    )
+    parser.add_argument(
+        "--shikha-tolerance-relative", type=float, default=0.02
+    )
+    parser.add_argument("--shikha-step-size", type=float, default=1.0)
     parser.add_argument("--mip-gap-relative", type=float)
     parser.add_argument("--solver-threads", type=int, default=4)
     parser.add_argument(
@@ -78,11 +104,21 @@ def parse_args(argv=None):
         "rolling_time_limit_seconds",
         "full_milp_horizon_hours",
         "full_milp_time_limit_seconds",
+        "shikha_max_iterations",
+        "shikha_active_window_hours",
+        "shikha_fix_window_hours",
+        "shikha_subproblem_time_limit_seconds",
+        "shikha_repair_time_limit_seconds",
+        "shikha_step_size",
     )
     if any(float(getattr(args, name)) <= 0.0 for name in positive):
         parser.error("all horizons, intervals and time limits must be positive")
     if args.mip_gap_relative is not None and args.mip_gap_relative < 0.0:
         parser.error("mip gap must be non-negative")
+    if not 0.0 < args.shikha_tolerance_relative < 1.0:
+        parser.error("Shikha tolerance must lie between zero and one")
+    if args.shikha_fix_window_hours > args.shikha_active_window_hours:
+        parser.error("Shikha fix window cannot exceed active window")
     if args.solver_threads <= 0:
         parser.error("solver threads must be positive")
     return args
@@ -634,6 +670,167 @@ def _run_full_milp(
         )
 
 
+def _run_shikha2025(
+    args,
+    executed_actions_out: list[dict[str, list[int]]] | None = None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    evaluation_horizon_h = int(args.full_milp_horizon_hours)
+    planning_env = make_env(
+        evaluation_horizon_h,
+        args.forecast_context_hours,
+    )
+    planning_env.reset(seed=args.seed)
+    usage_before = planning_env.simulator_step_usage()
+    started_at = time.perf_counter()
+    evaluation_actions: list[dict[str, list[int]]] = []
+    try:
+        decomposition = solve_shikha2025(
+            planning_env,
+            horizon_h=evaluation_horizon_h,
+            config=Shikha2025Config(
+                active_window_h=args.shikha_active_window_hours,
+                fix_window_h=args.shikha_fix_window_hours,
+                max_iterations=args.shikha_max_iterations,
+                tolerance_rel=args.shikha_tolerance_relative,
+                step_size=args.shikha_step_size,
+                subproblem_time_limit_s=(
+                    args.shikha_subproblem_time_limit_seconds
+                ),
+                repair_time_limit_s=(
+                    args.shikha_repair_time_limit_seconds
+                ),
+                mip_gap_rel=args.mip_gap_relative,
+                threads=args.solver_threads,
+            ),
+            progress=lambda message: print(message, flush=True),
+        )
+        result = decomposition.feasible_result
+        diagnostics = [
+            {
+                "iteration": item.iteration,
+                "surrogate_dual_objective": (
+                    item.surrogate_dual_objective
+                ),
+                "best_feasible_objective": (
+                    item.best_feasible_objective
+                ),
+                "relative_surrogate_gap": (
+                    item.relative_surrogate_gap
+                ),
+                "maximum_service_violation": (
+                    item.maximum_service_violation
+                ),
+                "multiplier_norm": item.multiplier_norm,
+                "repair_status": item.repair_status,
+                "repair_is_valid": item.repair_is_valid,
+                "wall_time_s": item.wall_time_s,
+                "subproblems": [
+                    {
+                        "vessel_id": sub.vessel_id,
+                        "shrinking_stage_count": (
+                            sub.shrinking_stage_count
+                        ),
+                        "statuses": list(sub.statuses),
+                        "augmented_objective": (
+                            sub.augmented_objective
+                        ),
+                        "wall_time_s": sub.wall_time_s,
+                    }
+                    for sub in item.subproblems
+                ],
+            }
+            for item in decomposition.iterations
+        ]
+        replay_env = make_env(
+            evaluation_horizon_h,
+            args.forecast_context_hours,
+        )
+        replay_env.reset(seed=args.seed)
+        evaluation_actions = [
+            action_for_well_control_mode(replay_env, action)
+            for action in result.native_actions_by_hour[
+                :evaluation_horizon_h
+            ]
+        ]
+        replay = replay_native_actions(
+            replay_env,
+            evaluation_actions,
+            horizon_h=evaluation_horizon_h,
+            copy_env=False,
+        )
+        row = _full_milp_success_row(
+            args,
+            replay_env,
+            result,
+            replay,
+            time.perf_counter() - started_at,
+            planning_env.simulator_step_usage() - usage_before,
+        )
+        row.update(
+            {
+                "controller": "shikha2025",
+                "algorithm": (
+                    "vessel_lagrangian_plus_shrinking_horizon"
+                ),
+                "decomposition_converged": decomposition.converged,
+                "decomposition_stopping_reason": (
+                    decomposition.stopping_reason
+                ),
+                "decomposition_iterations": len(
+                    decomposition.iterations
+                ),
+                "subproblem_solve_count": sum(
+                    sub.shrinking_stage_count
+                    for item in decomposition.iterations
+                    for sub in item.subproblems
+                ),
+                "solver_solve_wall_seconds": decomposition.wall_time_s,
+                "solver_time_limit_seconds": None,
+                "subproblem_time_limit_seconds": float(
+                    args.shikha_subproblem_time_limit_seconds
+                ),
+                "repair_time_limit_seconds": float(
+                    args.shikha_repair_time_limit_seconds
+                ),
+                "paper_active_window_hours": int(
+                    args.shikha_active_window_hours
+                ),
+                "paper_fix_window_hours": int(
+                    args.shikha_fix_window_hours
+                ),
+                "paper_tolerance_relative": float(
+                    args.shikha_tolerance_relative
+                ),
+                "paper_step_size": float(args.shikha_step_size),
+                "executed_action_count": len(evaluation_actions),
+            }
+        )
+        if executed_actions_out is not None:
+            executed_actions_out.extend(evaluation_actions)
+        return row, diagnostics
+    except Exception as error:
+        failure = _failure_row(
+            "shikha2025",
+            args.seed,
+            error,
+            time.perf_counter() - started_at,
+            planning_env.simulator_step_usage() - usage_before,
+            evaluation_role="offline_reference",
+        )
+        failure.update(
+            {
+                "planning_horizon_hours": evaluation_horizon_h,
+                "evaluation_horizon_hours": evaluation_horizon_h,
+                "solver_threads": int(args.solver_threads),
+                "solver_executable": shutil.which("cplex") or "",
+                "executed_action_count": len(evaluation_actions),
+            }
+        )
+        if executed_actions_out is not None:
+            executed_actions_out.extend(evaluation_actions)
+        return failure, []
+
+
 def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
     fieldnames = list(
         dict.fromkeys(key for row in rows for key in row)
@@ -686,6 +883,12 @@ def run(args):
             rows.append(row)
             diagnostics["full_milp_stages"] = stages
             executed_actions["full_milp"] = actions
+        elif controller == "shikha2025":
+            actions = []
+            row, iterations = _run_shikha2025(args, actions)
+            rows.append(row)
+            diagnostics["shikha2025_iterations"] = iterations
+            executed_actions["shikha2025"] = actions
 
     _write_csv(args.out_dir / "per_controller.csv", rows)
     action_payload = {

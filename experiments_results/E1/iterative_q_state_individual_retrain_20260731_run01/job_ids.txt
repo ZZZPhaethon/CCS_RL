@@ -1,0 +1,7 @@
+env_check=35843
+seed_0_train=35844
+seed_0_eval=35845
+seed_1_train=35846
+seed_1_eval=35847
+seed_2_train=35848
+seed_2_eval=35849

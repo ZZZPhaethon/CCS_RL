@@ -10,7 +10,7 @@
   "interval_definition": "95% percentile hierarchical bootstrap confidence interval for the mean; test scenarios and learned model instances are resampled independently.",
   "bootstrap_draws": 20000,
   "rolling_milp_time_limit_seconds_per_replan": 600,
-  "input_csv": "experiments_results\\E1\\formal_comparison\\e1_formal_per_episode.csv",
+  "input_csv": "experiments_results\\E1\\algorithms\\formal_comparison\\e1_formal_per_episode.csv",
   "output_formats": [
     "pdf",
     "png"

@@ -1,0 +1,25 @@
+{
+  "controller": "fixed_assignment",
+  "device": "cpu",
+  "direct_policy_windows": null,
+  "execution_horizon_hours": 8760,
+  "experiment": "E7 temporal-horizon generalization",
+  "forecast_context_hours": 168,
+  "host": "rootrunner",
+  "model_seed": null,
+  "nested_scenario_prefix": true,
+  "receding_adapter": null,
+  "records": 5,
+  "scenario_hours": 8928,
+  "slurm_array_job_id": "35089",
+  "slurm_array_task_id": "12",
+  "slurm_cpus_per_task": "4",
+  "slurm_job_id": "35101",
+  "test_seeds": [
+    9000031,
+    9000032,
+    9000033,
+    9000034,
+    9000035
+  ]
+}

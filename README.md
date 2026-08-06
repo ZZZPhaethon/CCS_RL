@@ -503,7 +503,25 @@ documented directories from the
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome. When adding a controller:
+```text
+control/
+|-- baselines.py                # Idle and greedy shuttle policies
+|-- rule_based.py               # Fixed-assignment and rule controllers
+|-- milp.py / cplex_milp.py     # Static MILP benchmark and CPLEX backend
+|-- rolling_milp.py             # Rolling-horizon MILP with replay-validated warm start
+|-- shikha2025.py               # Paper Lagrangean + shrinking-horizon reproduction
+|-- native_mpc.py               # Multi-candidate native MPC
+|-- iterative_action_q.py       # Main method: the production Q network
+|-- hourly_ppo/                 # Direct one-policy-action-per-hour PPO baseline
+|-- recurrent_distributional_q.py
+|-- imitation.py / demonstrations.py / replay.py
+`-- event_based/                # Algorithm layer, outside the physics layer
+    |-- contracts.py            # DispatchGoal boundary: high-level policy <-> executor
+    |-- evaluation.py           # Physical rollout evaluator for fair comparison
+    |-- hybrid/                 # Rule, native-MPC and rolling-MILP executors
+    |-- rl/                     # Sparse 24 h high-level PPO
+    `-- residual_rl{,_v2,_v3,_v4}/  # Residual intervention PPO, v4 is Event-Residual PPO
+```
 
 1. implement it under `src/sim/control/`;
 2. express decisions through `ActionProposal` / `ActionFrame`;
@@ -514,12 +532,63 @@ Issues and pull requests are welcome. When adding a controller:
 
 ## 🤝 Contributors
 
-Thanks to everyone who has contributed to CCS_RL.
+| Document | Contents |
+|---|---|
+| [`docs/paper_structure_zh.md`](docs/paper_structure_zh.md) | Paper argument chain, section-by-section evidence requirements |
+| [`docs/paper_experiment_plan_zh.md`](docs/paper_experiment_plan_zh.md) | Formal E0/E1/E6/E4/E7/E3/E5 experiment sequence, fairness protocol, metrics, statistics |
+| [`docs/iterative_action_q_training_zh.md`](docs/iterative_action_q_training_zh.md) | Method definition, production configuration, code entry points |
+| [`docs/shikha2025_reproduction_zh.md`](docs/shikha2025_reproduction_zh.md) | Shikha et al. (2025) Lagrangean + shrinking-horizon reproduction on the shared case |
+| [`docs/preliminary results/`](docs/preliminary%20results/) | Dated result records — controller comparison, encoder comparison, future-adapter and reproducibility ablations |
+| [`docs/CCS_RL_Research_Core_Idea.md`](docs/CCS_RL_Research_Core_Idea.md) | Original research framing |
+| [`docs/physical_layer_v1_cn.md`](docs/physical_layer_v1_cn.md) | Physical-layer model specification |
+| [`docs/northern_lights_line_source_pressure_study.md`](docs/northern_lights_line_source_pressure_study.md) | Reservoir pressure line-source study |
+| [`docs/experiments_summary.md`](docs/experiments_summary.md) | Historical record of the earlier RL/LLM phase (scripts since removed) |
+| `src/sim/scenario_generation/wave_height/prediction/README.md` | Wave-height prediction models |
 
-<a href="https://github.com/ZZZPhaethon/CCS_RL/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ZZZPhaethon/CCS_RL"
-       alt="CCS_RL contributors" />
-</a>
+## Data
+
+Large external files are not fully tracked in git. Download them and restore them into the
+matching directories before running the related scripts.
+
+- Google Drive: <https://drive.google.com/drive/folders/147lfZ1M1d3Am0v65fk1SX0jsXmk2lVzN?usp=sharing>
+- `scenarios/` — scenario JSON, including `northern_lights_phase1_3vessels.json`, the network used
+  by the paper protocol.
+- `data/capture_rates/` — Phase 1/Phase 1+ emitter capture-rate profiles and metadata.
+- `data/网络收集资料/` — curated external references such as Climate TRACE source mapping.
+
+## Extending the codebase
+
+**Add a controller.** Implement it under `src/sim/control/` (algorithm-layer controllers go in
+`event_based/`), express actions as `ActionProposal` / `ActionFrame`, route them through
+`ActionResolver` into `network.step()`, register it in the comparison experiment, and add a
+behaviour test under `tests/`.
+
+**Add a scenario.** Add the JSON under `scenarios/`, put any new capture profile in
+`data/capture_rates/`, add a loading entry point in `src/sim/network_scenarios.py` or an
+environment factory, and validate it with a demo or comparison run.
+
+**Add a disturbance.** Generate the episode time series in
+`src/sim/scenario_generation/generator.py`, define runtime resolution in
+`disturbance_resolver.py`, connect it to `CCSEnv` or the relevant operation module, and add
+fixed-seed tests. Changing any `unified_window_v1` disturbance parameter requires a **new protocol
+version** and a rerun of all methods.
+
+## Roadmap
+
+- [x] Physical entities, operation modules, network step, and pressure limits.
+- [x] Action proposal/resolver protocol layer.
+- [x] Rule-based, static MILP, rolling MILP and native MPC controllers.
+- [x] Gymnasium/SB3 RL environments and PPO/BC training entry points.
+- [x] Event-based algorithm layer with hybrid executors and residual RL v1–v4.
+- [x] Iterative Action-Q training, evaluation and gating.
+- [x] Frozen `unified_window_v1` protocol and seed manifest.
+- [ ] Implement the pending protocol requirements: shared automatic well rule in every controller
+      interface, complete cost/activity diagnostics, and the 1 h simulator-step counter for `B_4800`.
+- [ ] Retrain Hourly Centralized Maskable PPO and Event-Residual PPO with objective-aligned rewards.
+- [ ] Run ≥3 independent training seeds and report future frozen-controller comparisons on
+      unvisited test set `9,000,031–9,000,060`.
+- [ ] Replace personal paths in HPC scripts with environment-variable configuration.
+- [ ] Package large datasets and model weights as downloadable release assets.
 
 ## 📝 Citation
 

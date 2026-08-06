@@ -1,0 +1,754 @@
+{
+  "bootstrap_samples": 20000,
+  "bootstrap_seed": 20260730,
+  "controllers": [
+    "fixed_assignment",
+    "greedy",
+    "iterative_q_direct",
+    "iterative_q_receding"
+  ],
+  "experiment": "E7 temporal-horizon generalization",
+  "figures": [
+    "figures\\e7_temporal_generalization.svg",
+    "figures\\e7_temporal_generalization.pdf",
+    "figures\\e7_temporal_generalization.tiff",
+    "figures\\e7_temporal_generalization.png"
+  ],
+  "frozen_q_weights": true,
+  "horizons_hours": [
+    720,
+    2160,
+    8760
+  ],
+  "input_root": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01",
+  "iterative_q_state_feature_count": 93,
+  "iterative_q_state_feature_exclusions": [
+    "hour_of_week"
+  ],
+  "metadata_records": 144,
+  "records": 720,
+  "rolling_milp_included": false,
+  "same_8928h_scenario_then_prefix_truncation": true,
+  "shards": [
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h2160\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "b476fdd10e68e1ca034148fda6e6372b467ea871db2621c955a7b7dca12a2bc1"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h2160\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "87debf0d5386af3459638ee836529445d96de5c65e35a685372b83f5a36565b0"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h2160\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "8fcc294e1f121c303f5a6d9267b1f05569fa77f9bb4319897776cdf7dd330c4e"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h2160\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "6a21a92f1129b38a1b23e62a9c0d54d5f81c6c8ec41620e0b87e773d0c272ed9"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h2160\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "a811dc5e572869196ba18801f5072920d72474e66874a9af87e6b5b733330c85"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h2160\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "6def159d339319d3815cc59b434de4b6243da9db7a645459ffb557fd3f8d1885"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h720\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "89fd9fabfb19cacfd19630432ccc8771afe6369e8ce4772fb09b3e97203a255b"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h720\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "74b4f73bb86115ad524de496656253c25202919caeaf2151379e915ea7d79baa"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h720\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "75fc0e430c9aad1b2e7bb472531d3f119a3ba8ca2ec998765a0eba4ed8784399"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h720\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "2ed57080f909bbc35d6a5c3ef68832be633c18d6cece86faa9d7cfc8c91dd505"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h720\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "28b016a988a0458f83b0b4bff31cf64a2ac72b37d71584ca870dac78588412bd"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h720\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "4259eb27709c5f3a43f9858c8cf75463a55579a6dd89c0a1b48cb9c2375977a7"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h8760\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "4a2d49524225bbe1b0f8ddbf6b245771fd09af43e9f6c731be72f2299068ff27"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h8760\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "9893c9b58368eb389b63150aa8888cd7638256edefd51c0e4957a4be1355693f"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h8760\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "864f141691e3904923a5eb7c9f6a5efa4a59807f273bb020660b1b5d957b5238"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h8760\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "a4219cdad5663b046661df321e2a1d3367c4b326eb08ef01719282a0e5dcfe1a"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h8760\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "c519d01eafb9ae79c622a85520b78ff2e398350f873eeacfdaef4eb23cd83afb"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\fixed_assignment\\h8760\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "c9f36471616a2f4e48ae85611a38d7ba1d151b209814920bee302a62e3401d1d"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h2160\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "46c00a8996080e8c21491e210d750d62486e2c6633b72d3856b0a0cce899184b"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h2160\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "043d0c402cf776a1d0d55b6483de201050e7292805a93b88e23a6f9b26fa3606"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h2160\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "a46c6c97167dec0098588b143ad8342ae6bc6d390e9ae7f11bf6b465a26420fd"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h2160\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "f8b0e71334d388cbe550a652b7641efbe6a633b668fe913e26111872230efbe1"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h2160\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "c925bc3ec04fd13980cbb65d03e87cef51b64f95a18f51280de325ec161978b4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h2160\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "67aa340d007800336861167b34f8a9f2221fc4f11583cfc5b7ac8b4a327f1667"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h720\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "5396fc45f10e99f885d0ac267eaff620678d6638e3e62379feecc3e2c1d801ff"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h720\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "1ed934d3e7a3fdbc522b89853d92d9c2280f5bca888f091333abba7cf63c61de"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h720\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "4f86a4d04f3bde938e6a884119620e01e58431364c39dd73af876985e139699c"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h720\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "d72bca0d593b66dba8b75ff057439c30cfac6ae666471b80acad6eac8af14ad4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h720\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "a4de548390fa912946cddb7963915573de6d9d59787b4d957f3fc6924cd46cd4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h720\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "c0bf3f46e9d3ce290e5bcc7d0384c5ae1233113b74c56c9bffbace02c37fafd9"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h8760\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "359892d30d8176431de23decc94441fcd106fc130541830ee6e9ac82ccf129fd"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h8760\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "7d366fd26273635ddeda3012229873632bf6b68ebfc51cdb714315b6a1b96e7a"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h8760\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "322dc489ca6f307c2c3fb65cae16ded0decf7d231cc0b732d1253aae4eef6257"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h8760\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "25aaa85088a0c32e3d7423ab3f9320b455579f35c6d8ac1d4d1fe9db5f902eb6"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h8760\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "0d4d2e550d8454b48599f7566d1375c72b562d0fb49da173772e2f85b1ebab80"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\greedy\\h8760\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "0ced794471c1e0a0e287817b6543fe85248702558639ab577b4834319c91c69f"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_0\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "042f2f13302d8b6c9f170fb7c1a709bad028d77d1ee3b5db1eff65610c13de60"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_0\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "b211df8017bfb23d0028d89e0bebe92c7c92cd75e28237e80d9dec3625e6c4ca"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_0\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "3cdf0cf4f2407d615b89d49b1ece501de10930dbf05cc0623d5961d1a38086cc"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_0\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "730ea6bc9f784745d9817a1d00df944ecd6da5b1027bda747534c65734d52896"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_0\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "1c66be4a5d419caedb1283513756e981016357f200e550c6121e25209cdac014"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_0\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "0db84d8cd7c137a3c336dccf5e1741d7d0fb3079d890beb8b7cf4a614bbfc4b4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_1\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "d2430dd0a349b68efacb147d9107c9ab03246857ac97440feddbddfb7e8c8334"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_1\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "34044cdc136bd852a15aed4f474574be5bf7bac9bb55ab814df1c5cb05a709fd"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_1\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "81f90a5a3c805cf19ce5bf72d40af9a9526073f013da896f4ade488c562cf984"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_1\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "7f701f9fddc67570a28d36b9e82e8c2a98929b7467f633ec623403bb669071b3"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_1\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "82198917eb6ffe95d7c5290dc2fbb3609ec0c44dbdeb3af69836e631c2c218bc"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_1\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "a5682a893cfcf88a9066c025cde6133907b75121453aa9014585070b9c64b0b4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_2\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "cf53265c74dc2ddc046b692e2aba008d3aafef3b704998a2e86af6af18575333"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_2\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "95cd022c1cda44edede8830c4e70a682644ffa3c1842af502275fe122296081f"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_2\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "c477eb6c5af9e22bdefdf0677772880d7505505138572e963dff5826ee5fe79d"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_2\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "c2de0242a7c75e0ffdf51b8e9f737e157577770202bfc3ea847f5ea8009efcb8"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_2\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "f65f2d7a4552dcaeb7de5497e5aa1ed5998e0bd1ad399a3812b337e297affcdb"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h2160\\model_seed_2\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "d4e5d0c04a3cf5d96a85106a878277972709ecce88fd9542b81426239c480518"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_0\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "48891a31f01093ef93271a1d127f2569f9ed22e1462e0ec8e4f089dc4a6ecba0"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_0\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "f5a05deaf07db7ac7bf2596abb4bc07037b516cbb8218af359e6a46084c36783"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_0\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "fbdaae19e13bc6cf05c9d917392bba8ad9f0335fd202ab74e487e7ec1853ecd4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_0\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "9f4adf950fe2a8fce2c0457a78938c991d1d63b88e0dc517debbc6697a268cfd"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_0\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "74baa9cb9fef622c53cf70f037c15a0ac12ea1a87cff9f814d9c612f8edca290"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_0\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "84c46f6a4196e0d14efa8b52f97ca8d21cb9d467be7e151004b93e7a576c73a4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_1\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "8454e75cb351d942daf0f85007e679cdcf014513a59b85431101fb9ac6392675"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_1\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "80d09859f99844f6b9189c3fe55669e3f71a8246bdf50833477baae258824a32"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_1\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "d2642eb00fcd5e87807eede358d916c0b8bcbee8e80a989f9c5e323995217d0e"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_1\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "31aa6bfa90c239994a01ba4ff659f65d5f63f345bb548451ebe6ff2cec39c67e"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_1\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "4ad8ff755d70c9cdcd693b9a82306df23f413d44cfd1d81752078b56ce895a17"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_1\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "f3342eaf3a88b3405180393356ecc49598e60e42f5ef228784a2f0991d0afbed"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_2\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "037b039441de60c4b0c2b5ab349bab2372b74bd8044d2ae4fb101a052483ee9e"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_2\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "07970fa07d16b75aa15b577d4cf3f1446476dd34351126d7cfef44d0a169af2c"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_2\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "be6d871d2f16f38077c0f23685da116873dd002f607d2bf4a9eacc3c85b947ff"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_2\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "cc82b679644a1713e8dc3bb102719ef2417d126a2d91f151361daf5d5015c47a"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_2\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "c2ed14bb604c4714c7b5ceb8a83fc1e166ef0944a8075d46c67be2c41da37a99"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h720\\model_seed_2\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "52fe7ae75b688ca030b1bec28a46319399114476032836205322eb63b8e7bf05"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_0\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "f3a16221f5a9f6a23de2c05e279ffc3eee6f78fc510f5708076721346fbfeb2b"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_0\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "7f8ecbd1285e25bf20b4669d60e2027467eb75d4b9c01f1513c068eb8be79169"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_0\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "cdd62e253765cfd4281d22eeb6fb584ff2c28c2a93c8f6cd1e6655f17149ecea"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_0\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "d3462e231221e93d6e0c6652a6bbcdde5a41c7804ab5c2aa88d6ddcdaf76d4fd"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_0\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "35830c06be784c9c90820a973a6e471ddd774438f68a90c46842248600937e3a"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_0\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "d6a0c626c6a0e385e845df0126c995f2c698a925fb1f98e08e88009b673f1f4b"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_1\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "097392f1435964d02d244bddc161e96c856dc21145807910ad190eab7228ed5f"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_1\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "d365a54cf66b4a8151e988169e2be0c2199aacc6656e2a35275f1da5414abede"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_1\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "4c8798b21e2de8c0d2f8fc684325e3e7def61b6e916eb5eb049820bdce4eb004"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_1\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "91e80d4e9ce3487dba616e4377e97ce4d7e7a2b95a6a016118409dd5ecdb5ed3"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_1\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "d77d85c98dfb0c4bed6567a16533b12865d3844b10cc5975a200d3279199e8c2"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_1\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "cc7cac2e6d1d216d59efb60c60fd4ff0da4abc5be8009478ea345ed2bf432286"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_2\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "b4382496780efd86d12a6d31e84570db2cbd3961c4b038fa4e8584702313b7b5"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_2\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "b5aa788e95c64258e5cd31004214fb5c4ea21cb1123cda0b9c089063a8f4b745"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_2\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "88da50a2bbd2bbed1326b81becc12c43a7dee6624e46c214a1bbc849fa997db3"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_2\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "4020e89a0b71dbc145770481d25e788a9995f2ee7b6159450e1cf086b39014d5"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_2\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "80bb2641f61f15f167c6297a66763417c639f7f957405a6e2117e0aab1127df4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_direct\\h8760\\model_seed_2\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "0b8df1903774c0417ae97636f4b6df874394c5506a9720eada4aad04907ab793"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_0\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "d9f3ba5d2c965e8b7c887c3e47aa0596eb2d47c8bf576ddb523129bd935e8a55"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_0\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "61bc03f5d13453e2dcc7c8a2519b5dc8b44fed1eaebacaee93e282927935dda8"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_0\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "8c4f70397e5cc99bb811f63a94f4d72045298285111dc444f62ad4b77b5c7f53"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_0\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "bddc60c40c1eeff44d733f910f60953e16c854a6b0fc74744e601af049f79c86"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_0\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "4cfd34b07387c524e8bdd82ea40d9d99bbbcaa9b9ee80e76963d1a8802728891"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_0\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "3bec3bbaed8559c34da1e8904fd6a2011c9fac96833b3e898f826b36e70b4237"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_1\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "da3efd26d880272d769a85dd475e5a958d2f6fafbb8e18b9ef7efa8bb0b34965"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_1\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "9d4b87fbbf1d406ae77a9e7cd5d313de4ad77229cbe2b52561ab0598cf8392c5"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_1\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "007d558da8abe239b9eb643d66159feddca24f68c7c1a064b8d352e78c911408"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_1\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "bef855a54d3c93cbca83ef0a89d442f689ac88dc1b7c1a629c1748b9d372b9bd"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_1\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "9c835cfe7e9ff25b09ea119acc59dfc456cfe8c0f56c7667440e3f6f97171eb2"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_1\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "757f65c6df0d4a3f389d71f5d873257e3f2e39c26de9820f4640d0ed08e02ef4"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_2\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "566fa196b6316cc36856022ac8077afabe4eec730e54b3d47a79fbd894f9e778"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_2\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "7d2bfa96add4c6fdffc47da5feae9393eceb485a095bd7bfe5eb5632390b352a"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_2\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "14220747213ee952ec48f7162505c9ef97ace9705c6255eb87ffb3473a3e065d"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_2\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "16db37545a3de972782feb5fc01f09f04b4173b34b54cb3e2732f97a889b8df7"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_2\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "6590a7f3fd69d0b4850df5cbba5dfb2dc99134a6ba6d89b0509f51afa225ccb3"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h2160\\model_seed_2\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "1b7e1d037937e6997e3901d6d5cc953f546bb10ea44698d919ad82d22e9c4408"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_0\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "70754a3356636189a9f4c9f07ec882fb9c3b0480a1767757485102e7a9316dc2"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_0\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "a34d4ed0fd09fbaf58bbfac78cd5ab4c045340c5956f1368ae3884bca2d7503f"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_0\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "804d8505a71c5f5f77bd6d04093408bc9fed96b1a335d949ad2712625a117127"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_0\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "a8455ef9e2878b2d21b6864ca4b6fca41680b398184c1b3e4b1abdf150a61f41"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_0\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "70fee951994c0548232840aaefd9793eb8e847bcc3413cae97a0f647f692ddcc"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_0\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "233a5c7256ceafdc66c7e04f6d7dd588f68485f75a56cb8fdfeb59e0b4f91fad"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_1\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "14448a6c2f9cc4c34e6501b65242cbca0b3a3161dd0f91ec5bb573488e83d62d"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_1\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "0ea9a3d8bbea2425867572952200b7c148b55f32016ff94bb751b290ddcfecdc"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_1\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "5c3ff217fda1f9a6686b449c11b1d6b215d7426f28be51ebf3db6e9690d17bd3"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_1\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "adb483ad1097548ee3c339f1f74a45b710d80614340f2624eab3e790a91a6d97"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_1\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "be97f938d5275c0869ee06da3e8a2c958fb12e77f4f33f1346d0716c4922d6df"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_1\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "ee418465315b32f93b63303aba9b0014773585c1bdc00407212f04c1e8962383"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_2\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "0e39977d21813eea20c673b462c7087050e68c25d29f05a7be8117b3bfbd93e0"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_2\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "9474daec5a1e995339d4d54f0ddb75a40a45226d8084f93f0771687648c7278e"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_2\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "3b0ed36884491244a65981943aec71c52e4e0ba150d5ce163c116d6217f43ea2"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_2\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "f49c46213a31dd7c4cb6bbbac89915cd964509169e6b1cb64a819677fb7eb7fa"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_2\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "f7ffb2740be3e313a34173445297e36a25ffcd9a9e2d5b8631719e87fe69b646"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h720\\model_seed_2\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "8cba6892bd0ee82f450559492f8b7fda1a9fef28c98fcda3d5408a1866243265"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_0\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "3b32a5de4315dbcf56694449e38f5932ed976d0d3fe0ad88f103a871a2eb1b7b"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_0\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "9b16c9a41383063d209e313322cbc8fc3d39ce62e407f4c56263f0827b404603"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_0\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "425a078b0c78cac980f7cd7027b562f4f22e93733e1a616e549ad54a2fcdb080"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_0\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "1405d457da7fef7bffcfaf9304000143ca1c89dae6d9a46d1d66725fb656f9aa"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_0\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "dbb73745b604aa4fccec2668fd394bb3cd0f290ed9be8c12ebed6f92db123dfa"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_0\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "02910a6fd3aad4487ed2e5d1eb4ca928b40299c22eef6812e0bfa9d4031b5819"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_1\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "2edeb72140cfbcb3beca4836338ee6bc718c7342d0925ba1593dea23c9275934"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_1\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "bc377ffd0429cc6d7df4b1128c2881a4cf0c87530b63d94037f39548c1d2924f"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_1\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "531e6553174f834f3bba1aef138ce806772c9e5e45ee12561fbacd0286329b7c"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_1\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "b42cc8e70535560ffde764e8c3b842b36d2aab102fb5a89d24e45e0a33586c39"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_1\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "e331dc0d90897380de19fa72c4838b3b0dd6f363ca6b435db456f5d4e854d331"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_1\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "c7a8c0f7e0218911e93fb27754ad9e4adf4f6a728d0374f829e7defefb3dc77e"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_2\\block_0\\per_episode.csv",
+      "records": "5",
+      "sha256": "c5a39a24843242ee873a4e2993f27b7e87b5d12d39402bd684ea9733eda7dd80"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_2\\block_1\\per_episode.csv",
+      "records": "5",
+      "sha256": "0126fae80fbf16d7f8dde50c8aac656910ce82b22718d7cefc2411f67eb05200"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_2\\block_2\\per_episode.csv",
+      "records": "5",
+      "sha256": "ac4160aa7e815f6a497c1a979f206543da4e29b2c5f45b69c7f9c589fecffacd"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_2\\block_3\\per_episode.csv",
+      "records": "5",
+      "sha256": "08713daaf34918a700a134142afb8dc09f3689404b38242a4f49ef1bc9049273"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_2\\block_4\\per_episode.csv",
+      "records": "5",
+      "sha256": "db59d7fb9f0f16c15b6e065b4a4d8f091c382ad0e2c4324803edc9e0bf8d088a"
+    },
+    {
+      "path": "experiments_results\\.staging\\no_hour_refresh_20260730\\E7\\formal_run01\\iterative_q_receding\\h8760\\model_seed_2\\block_5\\per_episode.csv",
+      "records": "5",
+      "sha256": "947984c4aa28aee19ef6c0b1a6feb71bebf0b86332bc2198c14570bdda9bdd14"
+    }
+  ]
+}

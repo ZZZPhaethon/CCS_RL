@@ -8,6 +8,28 @@ tmp/
 output/
 .worktrees/
 
-# Colab demo outputs (examples/colab_vessel_trajectory_demo.ipynb)
-vessel_tracks.png
-vessel_dashboard_30d.html
+# Local Codex/runtime and presentation-audit artifacts
+.cache/
+.codex_tmp/
+.tmp/
+outputs/
+*.pptx.inspect.ndjson
+
+# Raw or intermediate experiment artifacts
+experiments_results/archive/
+experiments_results/iterative_q_budget_search/
+experiments_results/iterative_q_validation_search/
+experiments_results/**/logs/
+experiments_results/**/slurm_logs/
+experiments_results/**/augmented_data/
+experiments_results/**/*.out
+experiments_results/**/*.err
+experiments_results/**/*.log
+experiments_results/**/*.npz
+experiments_results/**/*.tar.gz
+experiments_results/**/*.tif
+experiments_results/**/*.tiff
+
+# Generated model checkpoints
+*.pt
+experiments_results/E1/models/**/*.zip

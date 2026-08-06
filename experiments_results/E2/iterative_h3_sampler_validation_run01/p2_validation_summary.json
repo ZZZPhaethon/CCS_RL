@@ -1,0 +1,173 @@
+{
+  "kind": "iterative_h3_sampler_p2_validation_summary",
+  "figure_contract": {
+    "core_conclusion": "Determine whether deduplication, stage balancing, and advantage strata improve H3-collected iterative-Q data without worsening tail cost or intervention intensity.",
+    "archetype": "quantitative grid",
+    "backend": "Python/matplotlib",
+    "replicates": "3 model seeds x 20 locked controller-validation seeds",
+    "interval": "95% hierarchical bootstrap over model and scenario seeds",
+    "baseline": "Greedy controller"
+  },
+  "formal_test_access": false,
+  "metrics": [
+    {
+      "variant": "b_gate_only",
+      "gate": "h4_m040_w12_c12",
+      "metrics": {
+        "episodes": 60,
+        "model_seeds": 3,
+        "controller_validation_seeds": 20,
+        "mean_delta_total_cost_eur": -202731.58811022286,
+        "mean_delta_total_cost_95pct_hierarchical_ci_eur": [
+          -311575.300609386,
+          -100545.3859889402
+        ],
+        "p90_delta_total_cost_eur": 45997.51199738359,
+        "median_delta_total_cost_eur": -163463.18823487917,
+        "win_fraction_vs_greedy": 0.7833333333333333,
+        "mean_vented_t": 1046.505164735328,
+        "mean_override_events": 11.716666666666667,
+        "model_seed_mean_delta_total_cost_eur": [
+          -201770.89130808692,
+          -192859.26640486604,
+          -213564.60661771568
+        ]
+      }
+    },
+    {
+      "variant": "b_gate_only",
+      "gate": "h3_m040_w12_c12",
+      "metrics": {
+        "episodes": 60,
+        "model_seeds": 3,
+        "controller_validation_seeds": 20,
+        "mean_delta_total_cost_eur": -179407.7646387972,
+        "mean_delta_total_cost_95pct_hierarchical_ci_eur": [
+          -292176.34222230886,
+          -72545.26377382051
+        ],
+        "p90_delta_total_cost_eur": 62684.0735930137,
+        "median_delta_total_cost_eur": -158381.41209369747,
+        "win_fraction_vs_greedy": 0.7666666666666667,
+        "mean_vented_t": 1356.3240014554842,
+        "mean_override_events": 11.8,
+        "model_seed_mean_delta_total_cost_eur": [
+          -175326.50434221412,
+          -185160.31502558407,
+          -177736.47454859345
+        ]
+      }
+    },
+    {
+      "variant": "c_dedup_balanced",
+      "gate": "h4_m040_w12_c12",
+      "metrics": {
+        "episodes": 60,
+        "model_seeds": 3,
+        "controller_validation_seeds": 20,
+        "mean_delta_total_cost_eur": -178240.14747204806,
+        "mean_delta_total_cost_95pct_hierarchical_ci_eur": [
+          -293731.84340270376,
+          -66212.91960130849
+        ],
+        "p90_delta_total_cost_eur": 75280.45203744118,
+        "median_delta_total_cost_eur": -111085.51747328986,
+        "win_fraction_vs_greedy": 0.7833333333333333,
+        "mean_vented_t": 1323.0122763018023,
+        "mean_override_events": 11.633333333333333,
+        "model_seed_mean_delta_total_cost_eur": [
+          -201133.1310196199,
+          -207752.57808808814,
+          -125834.73330843623
+        ]
+      }
+    },
+    {
+      "variant": "c_dedup_balanced",
+      "gate": "h3_m040_w12_c12",
+      "metrics": {
+        "episodes": 60,
+        "model_seeds": 3,
+        "controller_validation_seeds": 20,
+        "mean_delta_total_cost_eur": -161595.66598295662,
+        "mean_delta_total_cost_95pct_hierarchical_ci_eur": [
+          -277477.2837235335,
+          -54898.43433738646
+        ],
+        "p90_delta_total_cost_eur": 70635.00846914026,
+        "median_delta_total_cost_eur": -99272.64421648602,
+        "win_fraction_vs_greedy": 0.8,
+        "mean_vented_t": 1509.7748978324407,
+        "mean_override_events": 11.783333333333333,
+        "model_seed_mean_delta_total_cost_eur": [
+          -197064.75901976888,
+          -158576.260900187,
+          -129145.97802891403
+        ]
+      }
+    },
+    {
+      "variant": "d_dedup_advantage",
+      "gate": "h4_m040_w12_c12",
+      "metrics": {
+        "episodes": 60,
+        "model_seeds": 3,
+        "controller_validation_seeds": 20,
+        "mean_delta_total_cost_eur": -135570.75863704568,
+        "mean_delta_total_cost_95pct_hierarchical_ci_eur": [
+          -254252.17897345754,
+          -21463.96275583642
+        ],
+        "p90_delta_total_cost_eur": 129398.31818091398,
+        "median_delta_total_cost_eur": -86042.7310964131,
+        "win_fraction_vs_greedy": 0.6833333333333333,
+        "mean_vented_t": 1896.1454184699896,
+        "mean_override_events": 11.983333333333333,
+        "model_seed_mean_delta_total_cost_eur": [
+          -163951.76274314523,
+          -127711.00648333147,
+          -115049.50668466036
+        ]
+      }
+    },
+    {
+      "variant": "d_dedup_advantage",
+      "gate": "h3_m040_w12_c12",
+      "metrics": {
+        "episodes": 60,
+        "model_seeds": 3,
+        "controller_validation_seeds": 20,
+        "mean_delta_total_cost_eur": -170709.69625557298,
+        "mean_delta_total_cost_95pct_hierarchical_ci_eur": [
+          -274180.43150479364,
+          -72399.33496302062
+        ],
+        "p90_delta_total_cost_eur": 83677.89307165924,
+        "median_delta_total_cost_eur": -142088.93736474623,
+        "win_fraction_vs_greedy": 0.7166666666666667,
+        "mean_vented_t": 1411.7200347698629,
+        "mean_override_events": 11.983333333333333,
+        "model_seed_mean_delta_total_cost_eur": [
+          -172219.58542115786,
+          -180242.3539304022,
+          -159667.14941515884
+        ]
+      }
+    }
+  ],
+  "selection": {
+    "selection_gate": "h4_m040_w12_c12",
+    "baseline_retained": "b_gate_only",
+    "selected_reweight_variant": "c_dedup_balanced",
+    "other_reweight_variant": "d_dedup_advantage",
+    "selected_minus_other_mean_cost_eur": -42669.38883500242,
+    "selected_minus_other_mean_cost_95pct_hierarchical_ci_eur": [
+      -114066.61476873756,
+      30693.82256958239
+    ],
+    "selected_minus_baseline_mean_cost_eur": 24491.440638174798,
+    "selected_minus_baseline_p90_cost_eur": 29282.94004005759,
+    "selected_minus_baseline_mean_vented_t": 276.50711156647435,
+    "formal_test_access": false
+  }
+}

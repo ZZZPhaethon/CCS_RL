@@ -1,0 +1,42 @@
+{
+  "kind": "e1_current_iterative_q_model",
+  "method": "Iterative Action-Q",
+  "selected_model": "G60-P4-no-hour",
+  "status": "current",
+  "adopted_on": "2026-07-30",
+  "model_manifest": "experiments_results/E1/models/iterative_q/g60_p4_model_seed_0/model_manifest.json",
+  "checkpoint": "experiments_results/E1/models/iterative_q/g60_p4_model_seed_0/iterative_action_q.pt",
+  "checkpoint_sha256": "962373fc027107000979ba26209e1b2be781d992dc4abc45038a5f2f3285c3dc",
+  "model_seeds": [
+    0,
+    1,
+    2
+  ],
+  "replication_checkpoints": {
+    "1": {
+      "checkpoint": "experiments_results/E1/models/iterative_q/g60_p4_model_seed_1/iterative_action_q.pt",
+      "checkpoint_sha256": "f4cfbeab74b072d22dcb3801890f95c3660d4b77293f52542d31879cc894ccbc"
+    },
+    "2": {
+      "checkpoint": "experiments_results/E1/models/iterative_q/g60_p4_model_seed_2/iterative_action_q.pt",
+      "checkpoint_sha256": "6e8f7dba48ce08b1a299327ca8c95f7b72c67bdb0164b05806464cfe6e28d50f"
+    }
+  },
+  "test_results": "experiments_results/E1/algorithms/formal_iterative_action_q_g60_p4_seeds_9000031-9000060_run01",
+  "observation_schema": {
+    "source_state_features": 94,
+    "state_features": 93,
+    "excluded_state_features": [
+      "hour_of_week"
+    ]
+  },
+  "selection_provenance": {
+    "test_accessed_before_adoption": true,
+    "test_seed_range_inclusive": [
+      9000031,
+      9000060
+    ],
+    "adoption_basis": "User decision after paired 30-seed, three-model-seed self-consistent ablation review on 2026-07-30.",
+    "holdout_status": "The 9000031-9000060 range is not an untouched model-selection holdout."
+  }
+}

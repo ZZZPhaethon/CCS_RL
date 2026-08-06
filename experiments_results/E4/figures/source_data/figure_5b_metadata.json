@@ -19,6 +19,13 @@
   "baseline_definition": "Frozen Greedy deployment policy evaluated on the identical formal-test scenarios.",
   "train_validation_test_split": "Frozen training models; formal test seeds 9000031-9000060 used descriptively, with no gate or model selection.",
   "multiple_comparison_correction": "Not applied; three pre-specified descriptive stress levels.",
+  "iterative_q_state_feature_exclusions": [
+    "hour_of_week"
+  ],
+  "one_shot_state_feature_exclusions": [
+    "hour_of_week"
+  ],
+  "state_feature_count": 93,
   "formats": [
     "pdf",
     "png"

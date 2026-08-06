@@ -1,0 +1,102 @@
+{
+  "kind": "iterative_q_sampling_data_audit",
+  "formal_test_access": false,
+  "observation_input": "shared_future_summary",
+  "normalization_checkpoint": null,
+  "stages": [
+    {
+      "stage": "g0",
+      "scenario_seed_min": 1500,
+      "scenario_seed_max": 1679,
+      "scenario_seed_count": 180,
+      "roots": 2159,
+      "candidates": 13400,
+      "improving_candidate_fraction": 0.49828358208955226,
+      "tie_candidate_fraction": 0.025373134328358207,
+      "roots_with_any_improvement_fraction": 0.7864752200092635,
+      "roots_with_strong_improvement_fraction": 0.6424270495599814,
+      "best_saving_eur_median": 101683.47358703612,
+      "best_saving_eur_p90": 488312.75939941406
+    },
+    {
+      "stage": "g1",
+      "scenario_seed_min": 1500,
+      "scenario_seed_max": 1523,
+      "scenario_seed_count": 24,
+      "roots": 288,
+      "candidates": 1829,
+      "improving_candidate_fraction": 0.29414980863860035,
+      "tie_candidate_fraction": 0.19901585565882995,
+      "roots_with_any_improvement_fraction": 0.6736111111111112,
+      "roots_with_strong_improvement_fraction": 0.22916666666666666,
+      "best_saving_eur_median": 10378.499701619148,
+      "best_saving_eur_p90": 114979.67481613159
+    }
+  ],
+  "c_dedup_balanced_sampling": {
+    "stage_sampling_temperature": 0.5,
+    "near_duplicate_weighting": "inverse_cluster",
+    "near_duplicate": {
+      "roots": 2447,
+      "clusters": 2442,
+      "cross_stage_clusters": 5,
+      "roots_in_cross_stage_clusters": 10,
+      "effective_unique_fraction": 0.9979566816510013,
+      "largest_cluster": 2,
+      "mean_cluster_size": 1.0020475020475021
+    },
+    "root_advantage_weighting": "none",
+    "root_advantage_threshold_eur": 40000.0,
+    "stages": [
+      {
+        "stage_index": 0,
+        "roots": 2159,
+        "effective_roots": 2156.5,
+        "sampling_probability": 0.7332157844075051,
+        "no_improvement_roots": 433,
+        "strong_improvement_roots": 1387
+      },
+      {
+        "stage_index": 1,
+        "roots": 288,
+        "effective_roots": 285.5,
+        "sampling_probability": 0.2667842155924948,
+        "no_improvement_roots": 88,
+        "strong_improvement_roots": 66
+      }
+    ]
+  },
+  "d_dedup_advantage_sampling": {
+    "stage_sampling_temperature": 0.5,
+    "near_duplicate_weighting": "inverse_cluster",
+    "near_duplicate": {
+      "roots": 2447,
+      "clusters": 2442,
+      "cross_stage_clusters": 5,
+      "roots_in_cross_stage_clusters": 10,
+      "effective_unique_fraction": 0.9979566816510013,
+      "largest_cluster": 2,
+      "mean_cluster_size": 1.0020475020475021
+    },
+    "root_advantage_weighting": "stratified",
+    "root_advantage_threshold_eur": 40000.0,
+    "stages": [
+      {
+        "stage_index": 0,
+        "roots": 2159,
+        "effective_roots": 2156.5,
+        "sampling_probability": 0.7332157844075051,
+        "no_improvement_roots": 433,
+        "strong_improvement_roots": 1387
+      },
+      {
+        "stage_index": 1,
+        "roots": 288,
+        "effective_roots": 285.5,
+        "sampling_probability": 0.2667842155924948,
+        "no_improvement_roots": 88,
+        "strong_improvement_roots": 66
+      }
+    ]
+  }
+}

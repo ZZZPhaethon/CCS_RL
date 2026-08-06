@@ -19,6 +19,8 @@ conda activate mas-ccus
 PROJECT_DIR="${PROJECT_DIR:-/scratch_root/hx721/CCS_RLLLM_iterq_validation_search_20260728}"
 RUN_ROOT="${RUN_ROOT:-experiments_results/E2/training_one_shot_matched_run01}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-$RUN_ROOT/g0/train_merged.npz}"
+VALIDATION_DATA_PATH="${VALIDATION_DATA_PATH:-$RUN_ROOT/g0/validation_merged.npz}"
+EXCLUDE_STATE_FEATURES="${EXCLUDE_STATE_FEATURES:-}"
 MODEL_SEED="$SLURM_ARRAY_TASK_ID"
 OUT_DIR="$RUN_ROOT/model_seed_${MODEL_SEED}/p1"
 
@@ -29,10 +31,17 @@ export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
+EXCLUDE_ARGS=()
+if [[ -n "$EXCLUDE_STATE_FEATURES" ]]; then
+  IFS=':' read -r -a EXCLUDED_FEATURES <<< "$EXCLUDE_STATE_FEATURES"
+  EXCLUDE_ARGS+=(--exclude-state-features "${EXCLUDED_FEATURES[@]}")
+fi
+
 python -u scripts/train_iterative_action_q.py \
   --train-data "$TRAIN_DATA_PATH" \
-  --validation-data "$RUN_ROOT/g0/validation_merged.npz" \
+  --validation-data "$VALIDATION_DATA_PATH" \
   --out-dir "$OUT_DIR" \
+  "${EXCLUDE_ARGS[@]}" \
   --observation-input shared_future_summary \
   --epochs 40 \
   --patience 8 \

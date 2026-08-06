@@ -1,0 +1,11 @@
+{
+  "algorithm": "Event-Residual PPO",
+  "model_seeds": [0, 1, 2],
+  "test_seed_range_inclusive": [9000031, 9000060],
+  "records": 90,
+  "shared_fields_compared_per_record": 24,
+  "shared_field_mismatches": 0,
+  "detailed_episode_cost_fields_missing": 0,
+  "episode_cost_identity_failures": 0,
+  "terminal_cleanup_component_breakdown": false
+}

@@ -104,6 +104,16 @@ def parse_args(argv=None):
     parser.add_argument("--initial-checkpoint")
     parser.add_argument("--out-dir", required=True)
     parser.add_argument(
+        "--exclude-state-features",
+        nargs="*",
+        default=[],
+        metavar="FEATURE",
+        help=(
+            "Remove selected state columns from every dataset before "
+            "normalization and training."
+        ),
+    )
+    parser.add_argument(
         "--observation-input",
         choices=(
             "state_only",
@@ -344,6 +354,26 @@ def _load(path: str):
 
 def _load_collection(paths):
     return [_load(path) for path in paths]
+
+
+def exclude_state_features(rows, feature_names):
+    excluded = list(dict.fromkeys(feature_names))
+    if not excluded:
+        return
+    for data, metadata in rows:
+        names = list(metadata["state_feature_names"])
+        missing = [name for name in excluded if name not in names]
+        if missing:
+            raise ValueError(f"unknown excluded state features: {missing}")
+        if data["states"].shape[-1] != len(names):
+            raise ValueError("state array width does not match state feature names")
+        keep = [index for index, name in enumerate(names) if name not in excluded]
+        data["states"] = data["states"][..., keep]
+        metadata["source_state_feature_names"] = list(
+            metadata.get("source_state_feature_names", names)
+        )
+        metadata["state_feature_names"] = [names[index] for index in keep]
+        metadata["excluded_state_feature_names"] = excluded
 
 
 def regression_metrics(
@@ -1316,6 +1346,10 @@ def run(args):
     torch.manual_seed(args.model_seed)
     train_rows = _load_collection(args.train_data)
     validation_rows = _load_collection(args.validation_data)
+    exclude_state_features(
+        train_rows + validation_rows,
+        args.exclude_state_features,
+    )
     train_metadata = train_rows[0][1]
     all_rows = train_rows + validation_rows
     for key in ("state_feature_names", "joint_actions"):

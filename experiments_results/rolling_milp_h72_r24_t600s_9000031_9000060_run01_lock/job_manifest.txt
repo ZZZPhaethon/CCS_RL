@@ -1,0 +1,10 @@
+array_job_id=34734
+array=0-29%24
+result_root=/scratch_root/hx721/CCS_RLLLM_milp_validation_20260728/experiments_results/E1/ablation_rolling_milp_h72_r24_t600s_cplex222_seeds_9000031-9000060_run01
+recovery_job_id=35205
+recovery_array_task_id=2
+recovery_seed=9000033
+recovery_reason=job34734_timeout_at_06h30m
+recovery_slurm_time_limit=12:00:00
+recovery_scientific_configuration_unchanged=true
+recovery_partial_archive=seed_9000033_timeout_job34734

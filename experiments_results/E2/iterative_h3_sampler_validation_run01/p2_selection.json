@@ -1,0 +1,15 @@
+{
+  "selection_gate": "h4_m040_w12_c12",
+  "baseline_retained": "b_gate_only",
+  "selected_reweight_variant": "c_dedup_balanced",
+  "other_reweight_variant": "d_dedup_advantage",
+  "selected_minus_other_mean_cost_eur": -42669.38883500242,
+  "selected_minus_other_mean_cost_95pct_hierarchical_ci_eur": [
+    -114066.61476873756,
+    30693.82256958239
+  ],
+  "selected_minus_baseline_mean_cost_eur": 24491.440638174798,
+  "selected_minus_baseline_p90_cost_eur": 29282.94004005759,
+  "selected_minus_baseline_mean_vented_t": 276.50711156647435,
+  "formal_test_access": false
+}

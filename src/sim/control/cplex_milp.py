@@ -261,6 +261,9 @@ class FullScenarioCplexMilpResult:
     terminal_stock_t_by_hour: tuple[float, ...] = ()
     load_t_by_hour: dict[str, tuple[float, ...]] = field(default_factory=dict)
     unload_t_by_hour: dict[str, tuple[float, ...]] = field(default_factory=dict)
+    service_active_by_node_hour: dict[str, tuple[float, ...]] = field(
+        default_factory=dict
+    )
     diagnostic_variable_values: dict[str, object] = field(default_factory=dict)
 
 
@@ -1160,6 +1163,7 @@ def solve_full_scenario_with_cplex(
     ) = None,
     fixed_boundary_node_by_vessel: dict[str, str] | None = None,
     fix_warm_start_vessel_routes: bool = False,
+    fix_warm_start_vessel_routes_through_h: int | None = None,
     fixed_terminal_departures_by_vessel: dict[str, int] | None = None,
     fixed_terminal_departures_by_vessel_source: (
         dict[tuple[str, str], int] | None
@@ -1170,6 +1174,10 @@ def solve_full_scenario_with_cplex(
     fixed_source_reposition_departures_by_vessel: dict[str, int] | None = None,
     min_total_source_reposition_departures: int | None = None,
     integrality_relax_groups: tuple[str, ...] = (),
+    integrality_relax_after_h: int | None = None,
+    lagrangian_service_price_eur_by_node_hour: (
+        dict[tuple[str, int], float] | None
+    ) = None,
     constraint_redundancy_audit: bool = False,
     export_model_lp_path: str | Path | None = None,
 ) -> FullScenarioCplexMilpResult:
@@ -1298,11 +1306,50 @@ def solve_full_scenario_with_cplex(
             f"{sorted(unknown_integrality_groups)}"
         )
 
+    if integrality_relax_after_h is not None:
+        integrality_relax_after_h = int(integrality_relax_after_h)
+        if integrality_relax_after_h < 0:
+            raise ValueError("integrality_relax_after_h must be non-negative")
+
+    lagrangian_service_price_eur_by_node_hour = dict(
+        lagrangian_service_price_eur_by_node_hour or {}
+    )
+    known_service_nodes = set(env.emitter_ids)
+    known_service_nodes.update(
+        str(env._routes[vessel_id]["destination"])
+        for vessel_id in env.vessel_ids
+    )
+    unknown_service_nodes = {
+        node_id
+        for node_id, _hour in lagrangian_service_price_eur_by_node_hour
+        if node_id not in known_service_nodes
+    }
+    if unknown_service_nodes:
+        raise ValueError(
+            "Unknown Lagrange service-price nodes: "
+            f"{sorted(unknown_service_nodes)}"
+        )
+    if any(
+        int(hour) < 0
+        for _node_id, hour in lagrangian_service_price_eur_by_node_hour
+    ):
+        raise ValueError("Lagrange service-price hours must be non-negative")
+    if any(
+        not math.isfinite(float(price))
+        for price in lagrangian_service_price_eur_by_node_hour.values()
+    ):
+        raise ValueError("Lagrange service prices must be finite")
+
     def group_is_relaxed(group: str) -> bool:
         return "all" in integrality_relax_groups or group in integrality_relax_groups
 
-    def binary_var(name: str, group: str):
-        if group_is_relaxed(group):
+    def binary_var(name: str, group: str, time_h: int | None = None):
+        relax_for_time = (
+            integrality_relax_after_h is not None
+            and time_h is not None
+            and int(time_h) >= integrality_relax_after_h
+        )
+        if group_is_relaxed(group) or relax_for_time:
             return pulp.LpVariable(
                 name, lowBound=0.0, upBound=1.0, cat="Continuous"
             )
@@ -1468,7 +1515,9 @@ def solve_full_scenario_with_cplex(
 
     prob = pulp.LpProblem("full_scenario_native_action_cplex_milp", pulp.LpMinimize)
     arc_vars = {
-        index: binary_var(f"x_arc_{index}", "route")
+        index: binary_var(
+            f"x_arc_{index}", "route", arcs[index].start_h
+        )
         for index in range(len(arcs))
     }
     cargo = {
@@ -1482,21 +1531,21 @@ def solve_full_scenario_with_cplex(
     }
     cargo_positive = {
         (vessel_id, t): binary_var(
-            f"cargo_positive_{vessel_id}_{t}", "service"
+            f"cargo_positive_{vessel_id}_{t}", "service", t
         )
         for vessel_id in env.vessel_ids
         for t in hours
     } if environment_aligned_service else {}
     cargo_space = {
         (vessel_id, t): binary_var(
-            f"cargo_space_{vessel_id}_{t}", "service"
+            f"cargo_space_{vessel_id}_{t}", "service", t
         )
         for vessel_id in env.vessel_ids
         for t in hours
     } if environment_aligned_service else {}
     terminal_eligible = {
         (vessel_id, t): binary_var(
-            f"terminal_eligible_{vessel_id}_{t}", "fifo"
+            f"terminal_eligible_{vessel_id}_{t}", "fifo", t
         )
         for vessel_id in env.vessel_ids
         for t in hours
@@ -1518,7 +1567,7 @@ def solve_full_scenario_with_cplex(
     }
     load_active = {
         (vessel_id, emitter_id, t): binary_var(
-            f"load_active_{vessel_id}_{emitter_id}_{t}", "service"
+            f"load_active_{vessel_id}_{emitter_id}_{t}", "service", t
         )
         for vessel_id in env.vessel_ids
         for emitter_id in env.emitter_ids
@@ -1526,7 +1575,9 @@ def solve_full_scenario_with_cplex(
     }
     load_limit_choice = {
         (vessel_id, emitter_id, t, limit): binary_var(
-            f"load_limit_{vessel_id}_{emitter_id}_{t}_{limit}", "service"
+            f"load_limit_{vessel_id}_{emitter_id}_{t}_{limit}",
+            "service",
+            t,
         )
         for vessel_id in env.vessel_ids
         for emitter_id in env.emitter_ids
@@ -1540,14 +1591,14 @@ def solve_full_scenario_with_cplex(
     }
     unload_active = {
         (vessel_id, t): binary_var(
-            f"unload_active_{vessel_id}_{t}", "service"
+            f"unload_active_{vessel_id}_{t}", "service", t
         )
         for vessel_id in env.vessel_ids
         for t in hours
     }
     unload_limit_choice = {
         (vessel_id, t, limit): binary_var(
-            f"unload_limit_{vessel_id}_{t}_{limit}", "service"
+            f"unload_limit_{vessel_id}_{t}_{limit}", "service", t
         )
         for vessel_id in env.vessel_ids
         for t in hours
@@ -1581,7 +1632,9 @@ def solve_full_scenario_with_cplex(
     } if environment_aligned_service and load_min_formulation == "factored" else {}
     load_source_limit_choice = {
         (emitter_id, t, rate_index): binary_var(
-            f"load_source_limit_{emitter_id}_{t}_{rate_index}", "service"
+            f"load_source_limit_{emitter_id}_{t}_{rate_index}",
+            "service",
+            t,
         )
         for emitter_id in env.emitter_ids
         for t in hours
@@ -1589,7 +1642,9 @@ def solve_full_scenario_with_cplex(
     } if environment_aligned_service and load_min_formulation == "factored" else {}
     load_capacity_limit_choice = {
         (vessel_id, emitter_id, t): binary_var(
-            f"load_capacity_limit_{vessel_id}_{emitter_id}_{t}", "service"
+            f"load_capacity_limit_{vessel_id}_{emitter_id}_{t}",
+            "service",
+            t,
         )
         for vessel_id in env.vessel_ids
         for emitter_id in env.emitter_ids
@@ -1597,7 +1652,7 @@ def solve_full_scenario_with_cplex(
     } if environment_aligned_service and load_min_formulation == "factored" else {}
     source_overflow_active = {
         (emitter_id, t): binary_var(
-            f"source_overflow_{emitter_id}_{t}", "overflow"
+            f"source_overflow_{emitter_id}_{t}", "overflow", t
         )
         for emitter_id in env.emitter_ids
         for t in hours
@@ -1608,7 +1663,7 @@ def solve_full_scenario_with_cplex(
     }
     well_choice = {
         (well_id, t, rate_index): binary_var(
-            f"well_{well_id}_{t}_{rate_index}", "injection"
+            f"well_{well_id}_{t}_{rate_index}", "injection", t
         )
         for well_id in env.well_ids
         for t in hours
@@ -1632,6 +1687,7 @@ def solve_full_scenario_with_cplex(
         (well_id, t, regime): binary_var(
             f"well_regime_{well_id}_{t}_{regime}",
             "injection",
+            t,
         )
         for well_id in env.well_ids
         if _uses_single_well_dynamic_bhp(env, well_id)
@@ -1644,7 +1700,9 @@ def solve_full_scenario_with_cplex(
         for t in hours
     }
     injection_limit_choice = {
-        (t, limit): binary_var(f"injection_limit_{t}_{limit}", "injection")
+        (t, limit): binary_var(
+            f"injection_limit_{t}_{limit}", "injection", t
+        )
         for t in hours
         for limit in range(2)
     }
@@ -2510,7 +2568,35 @@ def solve_full_scenario_with_cplex(
     terminal_cleanup_cost_expr = (
         terminal_cleanup_model.cost_expr if terminal_cleanup_model is not None else 0.0
     )
-    augmented_operating_cost_expr = operating_cost_expr + terminal_cleanup_cost_expr
+    service_price_expr = (
+        pulp.lpSum(
+            float(
+                lagrangian_service_price_eur_by_node_hour.get(
+                    (emitter_id, t), 0.0
+                )
+            )
+            * load_active[(vessel_id, emitter_id, t)]
+            for vessel_id in env.vessel_ids
+            for emitter_id in env.emitter_ids
+            for t in hours
+        )
+        + pulp.lpSum(
+            float(
+                lagrangian_service_price_eur_by_node_hour.get(
+                    (str(env._routes[vessel_id]["destination"]), t),
+                    0.0,
+                )
+            )
+            * unload_active[(vessel_id, t)]
+            for vessel_id in env.vessel_ids
+            for t in hours
+        )
+    )
+    augmented_operating_cost_expr = (
+        operating_cost_expr
+        + terminal_cleanup_cost_expr
+        + service_price_expr
+    )
     if economic_objective:
         weighted_objective = augmented_operating_cost_expr + params.carbon_price_eur_per_t * vent_expr
     else:
@@ -2550,9 +2636,20 @@ def solve_full_scenario_with_cplex(
         else None
     )
     use_warm_start = warm_start_native_actions_by_hour is not None
-    if fix_warm_start_vessel_routes and warm_start_native_actions_by_hour is None:
+    if fix_warm_start_vessel_routes_through_h is not None:
+        fix_warm_start_vessel_routes_through_h = int(
+            fix_warm_start_vessel_routes_through_h
+        )
+        if fix_warm_start_vessel_routes_through_h < 0:
+            raise ValueError(
+                "fix_warm_start_vessel_routes_through_h must be non-negative"
+            )
+    if (
+        fix_warm_start_vessel_routes
+        or fix_warm_start_vessel_routes_through_h is not None
+    ) and warm_start_native_actions_by_hour is None:
         raise ValueError(
-            "fix_warm_start_vessel_routes requires warm-start native actions"
+            "fixing warm-start vessel routes requires warm-start native actions"
         )
     mip_start_audit = None
     mip_start_terminal_cleanup_cost = None
@@ -2623,8 +2720,18 @@ def solve_full_scenario_with_cplex(
                     source_headroom_risk=cleanup_source_headroom_risk,
                 )
             )
-        if fix_warm_start_vessel_routes:
-            for variable in arc_vars.values():
+        if (
+            fix_warm_start_vessel_routes
+            or fix_warm_start_vessel_routes_through_h is not None
+        ):
+            fixed_through_h = (
+                H
+                if fix_warm_start_vessel_routes
+                else min(H, fix_warm_start_vessel_routes_through_h or 0)
+            )
+            for index, variable in arc_vars.items():
+                if arcs[index].start_h >= fixed_through_h:
+                    continue
                 prob += variable == round(_value(variable))
         mip_start_audit = _audit_mip_start(prob)
 
@@ -2888,28 +2995,33 @@ def solve_full_scenario_with_cplex(
     net_reward = -objective_value
     augmented_objective_value = _value(weighted_objective)
     departures, arrivals = _extract_departures_and_arrivals(env, arcs, arc_vars, H)
+    binary_candidate_variables = [
+        *[arc_vars[index] for index in arc_vars],
+        *cargo_positive.values(),
+        *cargo_space.values(),
+        *terminal_eligible.values(),
+        *load_active.values(),
+        *load_limit_choice.values(),
+        *load_source_limit_choice.values(),
+        *load_capacity_limit_choice.values(),
+        *unload_active.values(),
+        *unload_limit_choice.values(),
+        *source_overflow_active.values(),
+        *injection_limit_choice.values(),
+        *well_choice.values(),
+        *automatic_well_regime.values(),
+        *(
+            list(terminal_cleanup_model.binary_variables)
+            if terminal_cleanup_model is not None
+            else []
+        ),
+    ]
     validation = _validate_solution(
         status=status,
         binary_values=[
-            *[arc_vars[index].value() for index in arc_vars],
-            *[var.value() for var in cargo_positive.values()],
-            *[var.value() for var in cargo_space.values()],
-            *[var.value() for var in terminal_eligible.values()],
-            *[var.value() for var in load_active.values()],
-            *[var.value() for var in load_limit_choice.values()],
-            *[var.value() for var in load_source_limit_choice.values()],
-            *[var.value() for var in load_capacity_limit_choice.values()],
-            *[var.value() for var in unload_active.values()],
-            *[var.value() for var in unload_limit_choice.values()],
-            *[var.value() for var in source_overflow_active.values()],
-            *[var.value() for var in injection_limit_choice.values()],
-            *[var.value() for var in well_choice.values()],
-            *[var.value() for var in automatic_well_regime.values()],
-            *(
-                [var.value() for var in terminal_cleanup_model.binary_variables]
-                if terminal_cleanup_model is not None
-                else []
-            ),
+            variable.value()
+            for variable in binary_candidate_variables
+            if variable.cat != pulp.LpContinuous
         ],
         stored_t=stored_t,
         vented_t=vented_t,
@@ -2940,6 +3052,31 @@ def solve_full_scenario_with_cplex(
         vessel_id: tuple(_value(unload[(vessel_id, t)]) for t in hours)
         for vessel_id in env.vessel_ids
     }
+    service_active_by_node_hour = {
+        emitter_id: tuple(
+            sum(
+                _value(load_active[(vessel_id, emitter_id, t)])
+                for vessel_id in env.vessel_ids
+            )
+            for t in hours
+        )
+        for emitter_id in env.emitter_ids
+    }
+    for terminal_id in sorted(
+        {
+            str(env._routes[vessel_id]["destination"])
+            for vessel_id in env.vessel_ids
+        }
+    ):
+        service_active_by_node_hour[terminal_id] = tuple(
+            sum(
+                _value(unload_active[(vessel_id, t)])
+                for vessel_id in env.vessel_ids
+                if str(env._routes[vessel_id]["destination"])
+                == terminal_id
+            )
+            for t in hours
+        )
     diagnostic_variable_values: dict[str, object] = {}
     if mip_start_terminal_cleanup_cost is not None:
         diagnostic_variable_values["mip_start_terminal_cleanup_cost"] = (
@@ -2949,7 +3086,10 @@ def solve_full_scenario_with_cplex(
         diagnostic_variable_values["constraint_redundancy"] = (
             constraint_redundancy
         )
-    if integrality_relax_groups and status in {"Optimal", "Integer Feasible"}:
+    if (
+        integrality_relax_groups
+        or integrality_relax_after_h is not None
+    ) and status in {"Optimal", "Integer Feasible"}:
         tolerance = 1e-8
 
         def positive_rows(variables):
@@ -3173,6 +3313,7 @@ def solve_full_scenario_with_cplex(
         terminal_stock_t_by_hour=terminal_stock_t_by_hour,
         load_t_by_hour=load_t_by_hour,
         unload_t_by_hour=unload_t_by_hour,
+        service_active_by_node_hour=service_active_by_node_hour,
         diagnostic_variable_values=diagnostic_variable_values,
     )
 

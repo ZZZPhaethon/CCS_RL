@@ -1,0 +1,145 @@
+{
+  "protocol_id": "iterative_h3_sampler_validation_2026-07-30",
+  "purpose": "Test whether a relaxed collection gate and data-efficiency controls make recursive iterative Q stronger than the matched one-shot reference.",
+  "formal_test_access": false,
+  "formal_test_stage_included": false,
+  "controller_validation_seeds": [
+    8100001,
+    8100002,
+    8100003,
+    8100004,
+    8100005,
+    8100006,
+    8100007,
+    8100008,
+    8100009,
+    8100010,
+    8100011,
+    8100012,
+    8100013,
+    8100014,
+    8100015,
+    8100016,
+    8100017,
+    8100018,
+    8100019,
+    8100020
+  ],
+  "model_seeds": [0, 1, 2],
+  "shared_inputs": {
+    "g0_train_seeds": [1500, 1679],
+    "g0_validation_seeds": [3200, 3239],
+    "g0_roots_per_seed": 12,
+    "p1_source": "existing G60-P4 model for each model seed",
+    "g1_collection_checkpoint": "existing G60-P4 P1 model_seed_0",
+    "g1_train_seeds": [1500, 1523],
+    "g1_validation_seeds": [3200, 3204],
+    "g1_roots_per_seed": 12,
+    "same_g0_g1_data_for_every_variant_and_model_seed": true
+  },
+  "collection_gate": {
+    "required_heads": 3,
+    "ensemble_heads": 5,
+    "residual_margin": 0.4,
+    "economic_margin_eur_metadata_only": 40000,
+    "one_override_per_window": true,
+    "max_overrides": 12,
+    "windows_h": [
+      [108, 155],
+      [156, 203],
+      [204, 251],
+      [252, 299],
+      [300, 347],
+      [348, 395],
+      [396, 443],
+      [444, 491],
+      [492, 539],
+      [540, 587],
+      [588, 635],
+      [636, 680]
+    ]
+  },
+  "p2_variants": {
+    "b_gate_only": {
+      "stage_sampling_temperature": 1.0,
+      "near_duplicate_weighting": "none",
+      "root_advantage_weighting": "none"
+    },
+    "c_dedup_balanced": {
+      "stage_sampling_temperature": 0.5,
+      "near_duplicate_weighting": "inverse_cluster",
+      "root_advantage_weighting": "none"
+    },
+    "d_dedup_advantage": {
+      "stage_sampling_temperature": 0.5,
+      "near_duplicate_weighting": "inverse_cluster",
+      "root_advantage_weighting": "stratified"
+    }
+  },
+  "near_duplicate_definition": {
+    "features": "standardized state concatenated with standardized future-summary",
+    "must_match": ["policy window", "behavior anchor action", "legal action mask"],
+    "cosine_similarity_at_least": 0.995,
+    "standardized_rms_distance_at_most": 0.1,
+    "handling": "retain raw roots and assign inverse-cluster sampling weights"
+  },
+  "advantage_strata_eur": [
+    {
+      "condition": "best saving <= 0",
+      "root_weight": 0.5
+    },
+    {
+      "condition": "0 < best saving < 40000",
+      "root_weight": 1.0
+    },
+    {
+      "condition": "best saving >= 40000",
+      "root_weight": 2.0
+    }
+  ],
+  "unchanged_training_controls": {
+    "previous_policy_anchor_coefficient": 0.0,
+    "candidate_improving_sample_weight": 2.5,
+    "pairwise_min_cost_eur": 10000,
+    "follow_anchor_coefficient": 0.0,
+    "p2_encoder_learning_rate": 0.00005,
+    "p2_head_learning_rate": 0.00015
+  },
+  "validation_gates": {
+    "primary": {
+      "name": "h4_m040_w12_c12",
+      "required_heads": 4,
+      "margin": 0.4
+    },
+    "secondary": {
+      "name": "h3_m040_w12_c12",
+      "required_heads": 3,
+      "margin": 0.4
+    }
+  },
+  "p2_selection": {
+    "baseline_retained": "b_gate_only",
+    "reweight_candidate_pool": [
+      "c_dedup_balanced",
+      "d_dedup_advantage"
+    ],
+    "selection_gate": "h4_m040_w12_c12",
+    "primary_metric": "mean paired delta total cost versus Greedy across all model seeds and validation seeds",
+    "secondary_metrics": [
+      "p90 paired delta total cost",
+      "mean vented tonnes",
+      "mean override events"
+    ]
+  },
+  "recursive_continuation": {
+    "retain": [
+      "b_gate_only",
+      "better of c_dedup_balanced and d_dedup_advantage"
+    ],
+    "p3_g2_train_seeds": [1800, 1835],
+    "p3_g2_validation_seeds": [3230, 3236],
+    "p4_g3_train_seeds": [2100, 2159],
+    "p4_g3_validation_seeds": [3300, 3311],
+    "selection_remains_validation_only": true
+  }
+}

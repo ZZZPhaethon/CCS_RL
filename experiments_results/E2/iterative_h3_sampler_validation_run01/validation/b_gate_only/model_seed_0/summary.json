@@ -1,0 +1,195 @@
+{
+  "kind": "iterative_action_q_policy_evaluation",
+  "checkpoint": "experiments_results/E2/iterative_h3_sampler_validation_run01/branches/b_gate_only/model_seed_0/p2/iterative_action_q.pt",
+  "eval_seeds": [
+    8100001,
+    8100002,
+    8100003,
+    8100004,
+    8100005,
+    8100006,
+    8100007,
+    8100008,
+    8100009,
+    8100010,
+    8100011,
+    8100012,
+    8100013,
+    8100014,
+    8100015,
+    8100016,
+    8100017,
+    8100018,
+    8100019,
+    8100020
+  ],
+  "scenario_protocol": "unified_window_v1",
+  "stress_level": "medium",
+  "forecast_context_hours": 168,
+  "validation_only": true,
+  "seed_manifest": "experiments/protocols/unified_window_v1_seed_manifest.json",
+  "gates": [
+    {
+      "name": "h4_m040_w12_c12",
+      "required_heads": 4,
+      "margin": 0.4,
+      "max_overrides": 12,
+      "min_hour": null,
+      "max_hour": null,
+      "windows": [
+        [
+          108.0,
+          155.0
+        ],
+        [
+          156.0,
+          203.0
+        ],
+        [
+          204.0,
+          251.0
+        ],
+        [
+          252.0,
+          299.0
+        ],
+        [
+          300.0,
+          347.0
+        ],
+        [
+          348.0,
+          395.0
+        ],
+        [
+          396.0,
+          443.0
+        ],
+        [
+          444.0,
+          491.0
+        ],
+        [
+          492.0,
+          539.0
+        ],
+        [
+          540.0,
+          587.0
+        ],
+        [
+          588.0,
+          635.0
+        ],
+        [
+          636.0,
+          680.0
+        ]
+      ],
+      "uncertainty_beta": 0.0
+    },
+    {
+      "name": "h3_m040_w12_c12",
+      "required_heads": 3,
+      "margin": 0.4,
+      "max_overrides": 12,
+      "min_hour": null,
+      "max_hour": null,
+      "windows": [
+        [
+          108.0,
+          155.0
+        ],
+        [
+          156.0,
+          203.0
+        ],
+        [
+          204.0,
+          251.0
+        ],
+        [
+          252.0,
+          299.0
+        ],
+        [
+          300.0,
+          347.0
+        ],
+        [
+          348.0,
+          395.0
+        ],
+        [
+          396.0,
+          443.0
+        ],
+        [
+          444.0,
+          491.0
+        ],
+        [
+          492.0,
+          539.0
+        ],
+        [
+          540.0,
+          587.0
+        ],
+        [
+          588.0,
+          635.0
+        ],
+        [
+          636.0,
+          680.0
+        ]
+      ],
+      "uncertainty_beta": 0.0
+    }
+  ],
+  "summary": {
+    "h3_m040_w12_c12": {
+      "episodes": 20,
+      "mean_total_cost_eur": 1898681.860313112,
+      "mean_greedy_total_cost_eur": 2074008.3646553264,
+      "mean_delta_total_cost_eur": -175326.50434221412,
+      "median_delta_total_cost_eur": -166247.32413881447,
+      "mean_delta_95pct_ci_eur": [
+        -280747.40442439937,
+        -80204.14233877845
+      ],
+      "wins": 15,
+      "ties": 0,
+      "losses": 5,
+      "mean_vented_t": 1315.0142109300116,
+      "mean_stored_t": 108662.66843101164,
+      "mean_unit_cost_eur_per_t": 17.526151626718967,
+      "mean_override_events": 11.7,
+      "mean_proposed_override_events": 354.25,
+      "early_departures": 11,
+      "emitter_to_emitter_legs": 39
+    },
+    "h4_m040_w12_c12": {
+      "episodes": 20,
+      "mean_total_cost_eur": 1872237.4733472392,
+      "mean_greedy_total_cost_eur": 2074008.3646553264,
+      "mean_delta_total_cost_eur": -201770.89130808692,
+      "median_delta_total_cost_eur": -199119.00362668838,
+      "mean_delta_95pct_ci_eur": [
+        -308674.9298820226,
+        -102851.93683987366
+      ],
+      "wins": 15,
+      "ties": 0,
+      "losses": 5,
+      "mean_vented_t": 956.6609654023708,
+      "mean_stored_t": 109100.02550680723,
+      "mean_unit_cost_eur_per_t": 17.19062769457273,
+      "mean_override_events": 11.6,
+      "mean_proposed_override_events": 351.25,
+      "early_departures": 10,
+      "emitter_to_emitter_legs": 36
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "comparison": "same exogenous scenario; Greedy versus Iterative-Q",
+  "cost_reduction_vs_greedy_percent": 15.801257067025324,
+  "cost_saving_eur": 358906.76560585015,
+  "experiment": "E6 mechanism case study",
+  "figures": [
+    "figures\\e6_system_states.svg",
+    "figures\\e6_system_states.pdf",
+    "figures\\e6_system_states.tiff",
+    "figures\\e6_system_states.png",
+    "figures\\e6_vessel_actions.svg",
+    "figures\\e6_vessel_actions.pdf",
+    "figures\\e6_vessel_actions.tiff",
+    "figures\\e6_vessel_actions.png"
+  ],
+  "greedy": {
+    "episode_conditioning_eur": 905083.4829726038,
+    "episode_loading_eur": 3532.950552140504,
+    "episode_operating_cost_eur": 1545106.2080145902,
+    "episode_reconditioning_eur": 41108.806989840996,
+    "episode_storage_shortfall_penalty_eur": 0.0,
+    "episode_total_cost_eur": 2038461.402699088,
+    "episode_unloading_eur": 2976.187500000004,
+    "episode_vent_penalty_eur": 493355.19468449784,
+    "episode_vessel_fuel_eur": 592404.780000005,
+    "event_count": 373,
+    "operating_cost_eur": 1778025.899132593,
+    "stored_t": 100265.38290205119,
+    "terminal_cleanup_operating_cost_eur": 232919.69111800278,
+    "total_cost_eur": 2271381.0938170906,
+    "unit_cost_eur_per_t": 22.653691913150052,
+    "vent_penalty_eur": 493355.19468449784,
+    "vented_t": 6166.939933556223
+  },
+  "iterative_q": {
+    "episode_conditioning_eur": 938673.9420046079,
+    "episode_loading_eur": 3664.069319653541,
+    "episode_operating_cost_eur": 1577868.3451232417,
+    "episode_reconditioning_eur": 44465.962013382275,
+    "episode_storage_shortfall_penalty_eur": 0.0,
+    "episode_total_cost_eur": 1646736.4479130376,
+    "episode_unloading_eur": 3226.1317855941456,
+    "episode_vent_penalty_eur": 68868.102789796,
+    "episode_vessel_fuel_eur": 587838.2400000038,
+    "event_count": 403,
+    "operating_cost_eur": 1843606.2254214445,
+    "override_events": 11,
+    "stored_t": 108453.56588629827,
+    "terminal_cleanup_operating_cost_eur": 265737.88029820274,
+    "total_cost_eur": 1912474.3282112405,
+    "unit_cost_eur_per_t": 17.634038240994872,
+    "vent_penalty_eur": 68868.102789796,
+    "vented_t": 860.8512848724498
+  },
+  "iterative_q_checkpoint": "experiments_results\\E1\\models\\iterative_q\\g60_p4_model_seed_0\\iterative_action_q.pt",
+  "iterative_q_model_seed": 0,
+  "iterative_q_observation_schema": {
+    "excluded_state_features": [
+      "hour_of_week"
+    ],
+    "source_state_features": 94,
+    "state_features": 93
+  },
+  "source_files": [
+    "source_data/e6_greedy_hourly_trace.csv",
+    "source_data/e6_iterative_q_hourly_trace.csv",
+    "source_data/e6_event_decisions.csv",
+    "source_data/e6_interventions.csv",
+    "source_data/e6_outcome_comparison.csv"
+  ],
+  "test_seed": 9000056,
+  "trace_role": "mechanistic case study; excluded from E1 statistics"
+}

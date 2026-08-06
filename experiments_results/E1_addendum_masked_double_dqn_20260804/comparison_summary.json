@@ -1,0 +1,78 @@
+{
+  "experiment": "E1 post-hoc Masked Double DQN addendum",
+  "training_job_id": 36815,
+  "formal_evaluation_job_id": 36823,
+  "training_budget_per_model_seed": {
+    "simulator_step_calls": 9505312,
+    "gradient_updates": 2351330
+  },
+  "formal_test": {
+    "model_seeds": [0, 1, 2],
+    "test_seed_min": 9000031,
+    "test_seed_max": 9000060,
+    "test_seeds_per_model": 30,
+    "complete": true
+  },
+  "algorithm_aggregates": [
+    {
+      "algorithm": "masked_double_dqn",
+      "n": 90,
+      "mean_total_cost_eur": 2164035.4905260047,
+      "mean_vented_t": 3836.311614040687,
+      "mean_stored_t": 104464.71230134607
+    },
+    {
+      "algorithm": "greedy",
+      "n": 30,
+      "mean_total_cost_eur": 2254211.563636566,
+      "mean_vented_t": 7296.773222316017,
+      "mean_stored_t": 102984.17556541669
+    },
+    {
+      "algorithm": "ppo_hourly",
+      "n": 90,
+      "mean_total_cost_eur": 5659632.195624892,
+      "mean_vented_t": 49756.756780677155,
+      "mean_stored_t": 44082.936721063335
+    },
+    {
+      "algorithm": "iterative_action_q_g60_p4",
+      "n": 90,
+      "mean_total_cost_eur": 1864718.4746599605,
+      "mean_vented_t": 949.4621594196798,
+      "mean_stored_t": 111120.75828653098
+    }
+  ],
+  "paired_dqn_comparisons": [
+    {
+      "reference": "greedy",
+      "n": 90,
+      "mean_delta_dqn_minus_reference_eur": -90176.07311056218,
+      "relative_mean_cost_change_pct": -4.000337615387193,
+      "dqn_wins": 52,
+      "dqn_win_rate": 0.5777777777777777
+    },
+    {
+      "reference": "ppo_hourly",
+      "n": 90,
+      "mean_delta_dqn_minus_reference_eur": -3495596.705098888,
+      "relative_mean_cost_change_pct": -61.76367269592386,
+      "dqn_wins": 90,
+      "dqn_win_rate": 1.0
+    },
+    {
+      "reference": "iterative_action_q_g60_p4",
+      "n": 90,
+      "mean_delta_dqn_minus_reference_eur": 299317.01586604345,
+      "relative_mean_cost_change_pct": 16.051592770357786,
+      "dqn_wins": 9,
+      "dqn_win_rate": 0.1
+    }
+  ],
+  "dqn_vs_greedy_physical_changes_pct": {
+    "mean_vented_t": -47.42454647887453,
+    "mean_stored_t": 1.4376351782210663
+  },
+  "interpretation": "At the matched physical-simulator budget, Masked Double DQN is substantially better than Hourly PPO and modestly better than Greedy on average, but it is worse and less stable than iterative Q.",
+  "disclosure": "This DQN baseline was added post hoc after the original E1 formal test set had been accessed for other controllers; its implementation and configuration were locked before the DQN formal evaluation."
+}

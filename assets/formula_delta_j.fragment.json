@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "type": "latex-formula-image-fragment",
+  "images": [
+    {
+      "id": "formula_delta_j",
+      "path": "assets/formula_delta_j.pdf",
+      "box_px": [
+        1370.0,
+        329.0,
+        225.0,
+        62.0
+      ],
+      "alt": "LaTeX rendered formula formula_delta_j",
+      "z_index": 220
+    }
+  ],
+  "asset_provenance": [
+    {
+      "path": "assets/formula_delta_j.pdf",
+      "source": "assets/formula_delta_j.tex",
+      "source_type": "latex-rendered-formula",
+      "provenance_note": "Rendered from LaTeX by editppt formula render-latex; visual fidelity is prioritized over formula editability."
+    }
+  ],
+  "formula_inventory": [
+    {
+      "id": "formula_delta_j",
+      "decision": "latex-rendered-image",
+      "editable": false,
+      "image": "assets/formula_delta_j.pdf",
+      "tex_source": "assets/formula_delta_j.tex"
+    }
+  ]
+}

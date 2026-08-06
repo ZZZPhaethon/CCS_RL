@@ -5,29 +5,43 @@
 本文档用于规划三船 CCS 船运调度案例在 `unified_window_v1` 扰动协议下的正式论文实验。实验围绕以下三个问题组织：
 
 1. **有效性**：Iterative Action-Q 是否能在相同物理环境和测试场景下优于启发式、PPO 类方法和 Rolling MILP？
-2. **因果性**：性能提升究竟来自 Q 学习本身、迭代状态分布扩展，还是未来信息？
-3. **适用边界**：训练好的控制器在天气、上游产量和下游注入能力发生分布变化时是否仍能稳定工作？
+2. **可解释性与信息作用**：Q 的稀疏干预如何改变运行轨迹，未来信息及其表示方式如何影响性能？
+3. **适用边界**：训练好的控制器在扰动分布变化和部署时域显著延长时是否仍能稳定工作？
 
 本文档默认：
 
 - 论文主方法是 **Iterative Action-Q**；
 - 固定船服务固定 emitter 的规则策略称为 **Fixed-Assignment Heuristic**；
 - Full-horizon MILP 保留为正式实验，但只作为限时、完美信息的离线参考；最终根据可行解、best bound 和 MIP gap 决定放在正文还是 Supplementary；
-- E1 比较六种在线控制器，其中三种学习控制器为 Hourly Centralized Maskable PPO、High-level Centralized Maskable PPO 和 Iterative Action-Q G60-P4；
-- 三种学习控制器采用约 \(9.5\times10^6\) 次底层 1 h simulator step calls 的近似匹配环境交互预算；Iterative Action-Q G60-P4 实际使用 9,526,297 次，两个 PPO 的训练 hard cap 为 9,505,319 次；
+- E1 比较七种在线控制器，其中四种学习控制器为 Hourly Centralized Maskable PPO、High-level Centralized Maskable PPO、Masked Double DQN 和 Iterative Action-Q G60-P4；
+- 四种学习控制器采用约 \(9.5\times10^6\) 次底层 1 h simulator step calls 的近似匹配环境交互预算；Iterative Action-Q G60-P4 实际使用 9,526,297 次，两个 PPO 的训练 hard cap 为 9,505,319 次，Masked Double DQN 实际使用 9,505,312 次；
 - Hourly Centralized Maskable PPO 和 High-level Centralized Maskable PPO 均使用与总成本一致的 objective-aligned reward，不使用额外的 stored-CO₂ credit；
 - 每个 seed 生成 888 h 外生场景，其中前 720 h 是唯一执行与计分区间，后 168 h 只允许作为只读预测/规划上下文；
 - 所有方法只控制船舶调度；井由共享的最大可行注入底层控制器操作，任何方法均不能直接选择注入率；
 - Rolling MILP 使用经过 simulator replay 验证的 Greedy trajectory 作为唯一 warm start，不使用额外候选 warm start、shifted previous-plan warm start 或执行 fallback；
-- E1 的六种控制器统一使用固定测试 seeds `9000031–9000060`。
+- E1 的七种控制器统一使用固定测试 seeds `9000031–9000060`。
 
 机器可读的设计锁与 seed manifest 分别保存在：
 
 - `experiments/protocols/unified_window_v1_paper_protocol.json`；
 - `experiments/protocols/unified_window_v1_seed_manifest.json`。
 
-E1 正式测试集固定为 `9,000,031–9,000,060`，六种方法均使用这 30 个 seeds
+E1 正式测试集固定为 `9,000,031–9,000,060`，七种方法均使用这 30 个 seeds
 的现有结果。
+
+本次重编号只改变论文中的正式实验编号，不移动既有结果目录。正式编号与历史产物目录的对应关系为：
+
+| 正式编号 | 实验 | 既有结果目录 |
+|---|---|---|
+| E0 | 物理仿真层验证 | `experiments_results/E0/` |
+| E1 | 在线控制器主比较 | `experiments_results/E1/`、`experiments_results/E1_addendum_masked_double_dqn_20260804/` |
+| E6 | Greedy–Iterative Q 运行机制案例 | `experiments_results/E6/`、`experiments_results/E6_zero_vent_seed_9000031/` |
+| E4 | Low/Medium/High 扰动鲁棒性 | `experiments_results/E4/` |
+| E7 | 冻结策略的时间跨度泛化 | `experiments_results/E7/` |
+| E3 | Future-information 消融 | `experiments_results/E3/` |
+| E5 | Full-horizon MILP 离线参考 | `experiments_results/E5/` |
+
+原 `experiments_results/E2/` 是已从正式论文计划移除的 iteration-ablation 历史产物，只作归档，不再对应任何正式实验编号。
 
 ---
 
@@ -36,10 +50,10 @@ E1 正式测试集固定为 `9,000,031–9,000,060`，六种方法均使用这 3
 | 拟支持的主张 | 必要证据 | 对应实验 |
 |---|---|---|
 | Iterative Action-Q 在三船动态扰动场景中具有更低的总成本和 vent | 与强在线控制器的配对比较 | E1 |
-| Iterative state aggregation 对性能有独立贡献 | One-shot Q 与 Iterative Q 的预算控制消融 | E2 |
-| 未来信息的作用取决于表示方式，结构化摘要不一定等同于完整序列 | State-only、摘要和完整序列比较 | E3 |
+| Q 的收益能够从运行轨迹上解释 | Greedy 与 Iterative Q 的机制案例和稀疏干预轨迹 | E6 |
 | 方法并非只适用于训练扰动分布 | 冻结模型后的 Low/Medium/High 综合 stress tests | E4 |
-| Q 的收益能够从运行轨迹上解释 | 主比较后的代表性轨迹 | E1 |
+| 方法能够扩展到比训练 episode 更长的部署时域 | 30/90/180/365 天冻结策略评估 | E7 |
+| 未来信息的作用取决于表示方式，结构化摘要不一定等同于完整序列 | State-only、摘要和完整序列比较 | E3 |
 | Full-horizon MILP 能否提供有意义的离线参考 | 限时求解、可行性验证和 MIP gap | E5 |
 | 不同方法的训练与在线计算代价透明 | 统一计算资源核算 | 支持性分析 A1 |
 
@@ -55,16 +69,15 @@ E1 正式测试集固定为 `9,000,031–9,000,060`，六种方法均使用这 3
 | 动态贪心调度 | Greedy | 强实时启发式基线 | 否 | 不使用 |
 | 每小时直接决策 PPO | Hourly Centralized Maskable PPO | 目标对齐的最基础 model-free RL 基线 | 是 | 同源 168 h summary |
 | 24 h 高层决策 PPO | High-level Centralized Maskable PPO | 目标对齐的高层 model-free RL 基线 | 是 | 同源 168 h summary |
+| 每小时 masked value-based RL | Masked Double DQN | 原生联合船舶动作的 value-based RL 基线 | 是 | 同源 168 h summary |
 | 当前主方法 | Iterative Action-Q G60-P4 | 论文主方法 | 是 | 同源 168 h summary |
 | 滚动优化 | Rolling MILP | 在线优化基线 | 否 | 使用统一 forecast |
 
-### 3.2 消融方法
+### 3.2 信息与训练策略消融
 
 | 方法 | 目的 |
 |---|---|
-| One-shot Action-Q，原始预算 | 测试不进行 policy roll-in 时的直接效果 |
-| One-shot Action-Q，匹配仿真预算 | 排除 Iterative Q 仅仅使用了更多模拟数据的解释 |
-| Iterative Action-Q，State-only | 测试迭代训练在无未来输入时是否仍有效 |
+| Iterative Action-Q，State-only | 测试无未来输入时的控制效果 |
 | Iterative Action-Q，168 h summary | 测试低维未来摘要的增益 |
 | Iterative Action-Q，full 168 h sequence | 利用已有结果说明完整未来序列不一定更优；可放附录 |
 | BC–PPO | 可选历史/训练策略消融，不作为主表基线 |
@@ -101,11 +114,25 @@ Full-horizon MILP 作为 **time-limited perfect-foresight MILP reference** 运�
 - 使用 legal-action masks；
 - 使用非折扣总成本目标，正式候选设置为 `gamma = 1`；
 - 720 h 最后一个 transition 加入共同 compact trip cleanup cost，并标记为真正的 MDP terminal，禁止在 cleanup value 之后继续 bootstrap；因训练预算耗尽而提前结束时只标记 truncation，不加入 cleanup；
-- E1 固定使用与另外两种学习方法相同的 168 h structured future summary；State-only 仅作为 E3 消融。
+- E1 固定使用与另外三种学习方法相同的 168 h structured future summary；State-only 仅作为 E3 消融。
 
 因此，除正的 reward scale 外，完整 episode 的 PPO 累计训练回报严格等于
 `−(720 h realised economic cost + common compact trip cleanup cost)`。该定义中的
 “每小时给动作”指 PPO 直接给原生船舶调度动作，而不是给一个由底层规则执行多小时的高层目标。
+
+#### Masked Double DQN
+
+该方法作为 E1 的第七个在线控制器，使用逐小时原生联合船舶调度动作，并锁定：
+
+- `episode_hours = 720`，每个决策推进 1 h；
+- 将三船 `[5, 5, 5]` `MultiDiscrete` 动作枚举为 125 个联合动作，并使用 legal-action masks；
+- 观测使用当前物理状态和与其他学习方法同源的 168 h structured summary，不包含 `valid_fraction`；
+- 从零训练，不使用 Greedy default、BC warm start、event trigger、goal executor 或 residual action；
+- 使用 Double DQN、`gamma = 1` 和与 realised total cost 加共同 terminal cleanup 一致的训练目标；
+- model seeds 为 0/1/2，每个 seed 实际使用 9,505,312 次 simulator calls，并按 validation mean total cost 选择 checkpoint；
+- 正式测试使用 seeds `9000031–9000060`，共 90 条 model-seed/test-seed 记录。
+
+Masked Double DQN 是在原 E1 测试结果已被访问后追加的 post-hoc baseline。其实现和配置在 DQN 正式测试前锁定，但论文必须明确披露其 post-hoc 属性，不能将其描述为原始预注册比较的一部分。
 
 #### High-level Centralized Maskable PPO
 
@@ -225,9 +252,9 @@ E0 必须验证：
 
 1. 所有方法都观察相同当前物理状态。
 2. 所有 forecast-capable 方法访问同一份 168 h forecast 对象，其来源、准确度、更新时间和扰动 realization 一致。
-3. Hourly Centralized PPO、High-level Centralized PPO 和 Iterative Q 在 E1 中统一使用由该对象计算的同一个 168 h structured summary；不加入 `valid_fraction`，也不在 720 h 处截断摘要。
+3. Hourly Centralized PPO、High-level Centralized PPO、Masked Double DQN 和 Iterative Q 在 E1 中统一使用由该对象计算的同源 168 h structured summary；不加入 `valid_fraction`，也不在 720 h 处截断摘要。
 4. Rolling MILP 使用同一 forecast 对象的逐小时完整序列；这是表示粒度差异，不是 forecast 来源差异。
-5. Summary 字段、horizon 和归一化方式只能在 validation 阶段统一锁定，不能针对三种学习算法分别选择，也不能按测试 seed 动态改变。
+5. Summary 字段、horizon 和归一化方式只能在 validation 阶段锁定，不能针对四种学习算法分别查看正式测试结果后调整，也不能按测试 seed 动态改变。
 6. Fixed-Assignment 和 Greedy 按定义不使用 forecast。
 7. 主结果表必须列出每种方法的“forecast available”和“forecast used”。
 8. 任何时刻的最大预测终点均不得超过同一样本的 888 h 边界；720 h 后的计划动作不得执行或计分。
@@ -312,26 +339,28 @@ B_{\mathrm{Q}}=
 - 不推进 simulator 的纯 forecast-feature 计算；
 - 正式配置锁定前的超参数搜索。超参数搜索成本单独报告。
 
-E1 的三种学习方法使用近似匹配的最大训练环境交互预算：
+E1 的四种学习方法使用近似匹配的最大训练环境交互预算：
 
 | 方法 | 最大训练环境交互预算 |
 |---|---:|
 | Iterative Action-Q G60-P4 | 实际 9,526,297 |
 | Hourly Centralized Maskable PPO | hard cap 9,505,319 |
 | High-level Centralized Maskable PPO | hard cap 9,505,319 |
+| Masked Double DQN | 实际 9,505,312 |
 
-Iterative Q 与两个 PPO 的最大预算差为 20,978 simulator calls，即 0.22%；
+四种学习方法的最大预算差为 20,985 simulator calls，即约 0.22%；
 论文统一表述为 approximately matched environment-interaction budget，并逐方法
 报告实际 simulator calls。
 
 具体计数规则：
 
 - Hourly Centralized PPO 的每个环境 step 必须恰好推进 1 h，并且直接使用该 step 的 PPO 动作；vectorized training 时所有 workers 的 steps 求和；
+- Masked Double DQN 的每个环境 step 必须恰好推进 1 h；vectorized training 时所有 workers 的 steps 求和；
 - High-level Centralized PPO 的一个高层 transition 可能跨越多个小时；训练预算累计 transition 内实际推进的全部 physical hours，不能直接使用 SB3 high-level timesteps；
 - Iterative Q 按所有真实执行的 roll-in 和 counterfactual rollout 小时求和；
 - 每个独立训练 run 均遵守上表对应的预算。
 
-三种方法均可使用相同验证规则在预算上限内选择最佳 checkpoint；不强迫性能已收敛的方法耗尽预算。E1 只比较最终选定模型，不要求为两个 PPO 和 Iterative Q 建立统一的 25%/50%/75% 中间 checkpoint。
+四种方法均可使用相同验证规则在预算上限内选择最佳 checkpoint；不强迫性能已收敛的方法耗尽预算。E1 只比较最终选定模型，不要求为四种学习方法建立统一的 25%/50%/75% 中间 checkpoint。
 
 统一报告：
 
@@ -431,6 +460,7 @@ Iterative Q 与两个 PPO 的最大预算差为 20,978 simulator calls，即 0.2
 - 720 h Medium 场景的最大全系统质量守恒残差为 \(6.16\times10^{-8}\) t，低于 \(10^{-6}\) t 容限；
 - 未发现库存/压力/注入率/船舶状态机硬约束违反，末端 compact cleanup 重复核算误差为 0 EUR；
 - E0 不用于选择 Iterative Q 超参数或未来信息形式，相关配置保持未锁定状态。
+- E0 结果保留在论文及 Supplementary 的可信性证据中，但当前 PPT 不设置独立 E0 结果页。
 
 ### 注意事项
 
@@ -441,7 +471,7 @@ Iterative Q 与两个 PPO 的最大预算差为 20,978 simulator calls，即 0.2
 
 ---
 
-## E1. 六个在线控制器主比较
+## E1. 七个在线控制器主比较
 
 ### 目的
 
@@ -453,14 +483,15 @@ Iterative Q 与两个 PPO 的最大预算差为 20,978 simulator calls，即 0.2
 2. Greedy；
 3. Hourly Centralized Maskable PPO；
 4. High-level Centralized Maskable PPO；
-5. Iterative Action-Q G60-P4；
-6. Rolling MILP。
+5. Masked Double DQN；
+6. Iterative Action-Q G60-P4；
+7. Rolling MILP。
 
 ### 实验步骤
 
 1. 使用不含 `valid_fraction` 的单一 168 h summary，并锁定 Iterative Q G60-P4 配置和门控；
 2. 使用第 4.7 节记录的约 \(9.5\times10^6\) simulator-call 近似匹配预算；
-3. 两种 PPO 均使用 validation-best checkpoint，Iterative Q 使用冻结的 G60-P4 model seeds 0/1/2；
+3. 两种 PPO、Masked Double DQN 和 Iterative Q 均使用 validation-best checkpoint；四种学习方法均使用 model seeds 0/1/2；
 4. 锁定 Rolling MILP：
    - replan interval；
    - planning horizon；
@@ -505,166 +536,74 @@ Rolling MILP 不是本文主方法，因此不做完整时间预算扫描。只�
   - Operating cost；
   - Win/loss vs Greedy。
 - **Figure 3a：Paired total-cost differences**
-  - 以现实中最容易实施的 Fixed-Assignment 为业务基线，展示 Greedy、两种 PPO、Iterative Q 和 Rolling MILP 的配对总成本差和 95% CI；
+  - 以现实中最容易实施的 Fixed-Assignment 为业务基线，展示 Greedy、两种 PPO、Masked Double DQN、Iterative Q 和 Rolling MILP 的配对总成本差和 95% CI；
   - 横向点区间图；每种方法展示 30 个测试场景的配对差值，学习型方法先在同一测试 seed 内对 3 个 model seeds 取均值；
   - 0 EUR 竖线表示与 Fixed-Assignment 持平，负值表示成本更低；95% CI 对测试场景和学习型方法的 model instances 分层重采样。
 - **Figure 3b：Cost decomposition**
   - 以 vessel fuel、conditioning、reconditioning、loading、unloading、vent penalty 和 common terminal-cleanup operating cost 七类成本分项进行堆叠展示；
-  - 六种方法按平均 total cost 排序；七类分项之和必须与 total cost 一致。
+  - 七种方法按平均 total cost 排序；七类分项之和必须与 total cost 一致。
 - **Figure 3c：Unit-cost decomposition**
   - 使用与 Figure 3b 相同的七类成本分项和颜色，但将每个 episode 的各项成本先除以该 episode 全部进入系统的 `captured_t`，再跨测试记录取均值；
   - 该分母包括最终 stored、vented 和期末仍在系统内的 CO₂，避免 vent 已计入成本分子后又因缩小 `stored_t` 分母而被重复放大；
-  - 六种方法按平均 unit total cost 排序；堆叠分项之和必须与平均 `total_cost_eur / captured_t` 一致，不使用“平均成本除以平均 captured CO₂”的近似值。
+  - 七种方法按平均 unit total cost 排序；堆叠分项之和必须与平均 `total_cost_eur / captured_t` 一致，不使用“平均成本除以平均 captured CO₂”的近似值。
   - Iterative Q 的旧归档未直接导出 `captured_t`，因此按相同 test seed 使用配对外生场景的 `captured_t`；脚本必须验证其他控制器已导出的同 seed 数值完全一致。
-- **Figure 4：Representative operational trajectory**
-  - 直接作为 E1 主比较的解释性结果，紧跟主结果表和 Figure 3；
-  - 使用 model seed 0，在 30 个测试 seeds 中自动选择 Iterative Q 相对 Greedy 成本差最接近中位数的 seed；
-  - 当前选择结果为 seed `9000056`；
-  - 图中只展示 Iterative Q 轨迹，不叠加 Greedy；
-  - 面板 a 以分行色带展示 weather slowdown、真实 capture outage（仅 `capture_availability == 0`）、capture high-output 和 well maintenance；每个 emitter 的 outage 与 high-output 共用一行但采用不同颜色，capture 的逐小时随机波动不作为事件展示；
-  - 面板 b–e 分别展示各 emitter buffer inventory、terminal inventory、三条船的 cargo inventory，以及 cumulative vent；inventory 面板同时标出实际量与最大容量；
-  - 面板 f 区分三条船的运行状态；船名统一写作 Vessel 1、Vessel 2 和 Vessel 3，不使用仿真内部名称；
-  - 不在图中标注 accepted intervention 时刻；
-  - 若现有汇总文件没有逐小时轨迹，只对 seed `9000056` 使用冻结 checkpoint 做一次 trace-only 重放，不改变 E1 统计结果。
-- Figure 3a、Figure 3b、Figure 3c 和 Figure 4 只导出 PDF 与 300 dpi PNG。
+- Figure 3a、Figure 3b 和 Figure 3c 只导出 PDF 与 300 dpi PNG。
 - 逐 seed CSV、统计 JSON 和完整配置快照。
-
-### 代表性轨迹选择规则
-
-Figure 4 使用 Iterative Q model seed 0 相对 Greedy 的总成本改善最接近中位数的测试 seed；按现有 E1 结果该 seed 为 `9000056`。选择规则必须由脚本自动执行，不能人工选择提升最大或“最好看”的 seed。
-
-失败轨迹不占用独立实验编号。可将 Iterative Q 相对 Greedy 表现最差的测试 seed 放在：
-
-- E4 High-stress 结果之后；或
-- Supplementary Figure S4。
 
 ### 注意事项
 
 - Fixed-Assignment 必须是真正的固定服务映射，不能与动态 Greedy 重复；
-- 六个在线控制器的上层动作均只包含船舶调度；任何方法都不得直接控制井注入率；
+- 七个在线控制器的上层动作均只包含船舶调度；任何方法都不得直接控制井注入率；
 - Hourly Centralized PPO 必须逐小时直接输出原生船舶动作、使用 legal-action masks，并采用第 3.4 节锁定的目标对齐 reward；不得通过高层 goal 或规则执行器代替逐小时 PPO 决策；
 - High-level Centralized PPO 使用 24 h 最大重规划间隔、事件触发更新和 dynamic action masks；
-- E1 的 Iterative Q 只使用最终 G60-P4 模型；P1–P4 的阶段比较属于 E2；
+- Masked Double DQN 逐小时输出经过 legal-action mask 的原生联合船舶动作，并按 post-hoc baseline 披露；
+- E1 的 Iterative Q 只使用最终 G60-P4 模型；P1–P4 仅描述训练数据聚合过程，不再作为独立正式实验比较；
 - 所有结果使用 simulator 实际执行后的成本，不能直接使用 MILP 内部预测 objective；
 - 若某方法未完成完整 episode，必须单独报告失败率和已完成比例，不能只对完成 episodes 求均值后与其他方法直接排名，也不能用未声明的 fallback 补齐结果；
-- 轨迹图只用于解释 E1 的统计结果，不能替代多 seed 比较。
+- E6 机制案例只用于解释 E1 的统计结果，不能替代多 seed 比较。
 
 ---
 
-## E2. Iterative state aggregation 消融
+## E6. Greedy–Iterative Q 运行机制案例
 
 ### 目的
 
-回答 Iterative Action-Q 的收益是否来自策略访问状态的逐轮扩展，而不是简单地来自更多训练数据或同一个 Q 网络。
+解释 E1 中 Iterative Action-Q 相对 Greedy 的成本和 vent 改善如何由少量、可定位的调度干预产生。E6 是单案例机制分析，不是新的多 seed 性能比较。
 
-### 比较组
+### 案例选择与设置
 
-1. One-shot Q，G0 原始 roots；
-2. One-shot Q，使用与 G60-P4 相同的 \(B_{\mathrm{Q}}\) 仿真预算，但所有 roots 仍来自 Greedy roll-in；
-3. Iterative Q P1；
-4. Iterative Q P2；
-5. Iterative Q P3；
-6. Iterative Q P4。
+- 固定使用 E1 的 Iterative Action-Q G60-P4 model seed 0；
+- Greedy 与 Iterative Q 使用完全相同的外生场景和底层物理环境；
+- 在 model seed 0 的 E1 正式测试记录中，先筛选 `Iterative Q vented_t == 0` 且 `Greedy vented_t >= 5000` 的案例；
+- 在满足条件的案例中，选择成本改善百分比最接近 model-seed-0 中位数的 seed；
+- 当前规则选择 seed `9000031`；不得人工挑选成本改善最大或轨迹最好看的场景；
+- 只允许使用冻结 checkpoint 做 trace-only replay，不改变 E1 的统计结果。
 
-P1–P4 是迭代数据聚合阶段，不是人为等分的训练 checkpoint。锁定的新增与累计 roots 为：
+### 实验内容
 
-| 阶段 | 新增数据 | 新增 roots | 累计 roots | 累计 simulator calls |
-|---|---|---:|---:|---:|
-| P1 | G0 | 2,160 | 2,160 | 5,639,992 |
-| P2 | G1 | 288 | 2,448 | 6,400,212 |
-| P3 | G2 | 432 | 2,880 | 7,607,197 |
-| P4 | G3 | 720 | 3,600 | 9,526,297 |
-
-各阶段新增 roots 和单个 root 的候选 rollout 长度均可能不同，因此实际累计 simulator step calls 也不会按 25% 等距增长。
-
-若完整 P1–P4 阶段消融成本过高，正文至少保留：
-
-- One-shot Q，预算匹配；
-- Iterative Q P4。
-
-### 公平性控制
-
-- 相同 state/action representation；
-- 相同 candidate-action generator；
-- 相同 Q-target；
-- 相同网络结构、优化器和 early stopping；
-- 相同 future variant；
-- 相同门控和 intervention budget；
-- One-shot matched 使用与 G60-P4 完全相同的 \(B_{\mathrm{Q}}\) 上限和计数口径；
-- P1–P4 保持各自真实的数据聚合过程，不为了形成等距 checkpoint 而改变 root 分配。
+1. 逐小时重放 Greedy 与 Iterative Q；
+2. 记录两种方法的 emitter buffer、terminal inventory、vessel cargo、累计 vent、累计 storage 和成本；
+3. 记录每个事件决策、Greedy 建议、Q 选择、head agreement、Q margin 和是否形成实际动作改变；
+4. 汇总所有 accepted Q interventions，解释其发生时刻、被改变的船舶动作和干预前系统状态；
+5. 对比相同 captured CO₂ 下的总成本、单位成本、vent 和 stored CO₂。
 
 ### 产出
 
-- **Table 4：Iteration ablation**
-  - 数据来源；
-  - 阶段和累计 roots；
-  - candidate rollouts；
-  - 实际累计 simulator calls；
-  - Total cost；
-  - Vent；
-  - Stored；
-  - Win/loss vs Greedy。
-- **Supplementary Figure S2**
-  - 横轴优先使用实际累计 simulator calls，并按真实数值进行非等距放置；
-  - 纵轴为 total cost，横轴使用上表的实际累计 simulator calls；
-  - 该图用于说明 Iterative Q 内部的数据聚合过程，不要求两个 PPO 提供对应的 P1–P4 checkpoint。
+- **Figure 4a：System-state mechanism trace**
+  - 同图对照 Greedy 与 Iterative Q 的库存、累计 vent 和关键扰动；
+  - 标记 accepted Q interventions，展示干预如何改变后续系统状态。
+- **Figure 4b：Vessel-action mechanism trace**
+  - 分船展示 Greedy 与 Iterative Q 的离散动作序列；
+  - 标出实际发生动作改变的 Q 干预。
+- `e6_greedy_hourly_trace.csv`、`e6_iterative_q_hourly_trace.csv`、`e6_event_decisions.csv`、`e6_interventions.csv` 和 `e6_outcome_comparison.csv`；
+- Figure 4a/4b 导出 SVG、PDF、TIFF 和 PNG。
 
 ### 注意事项
 
-- 不能只比较 G0-small 与 P4 后断言“iteration有效”，因为两者数据量不同；
-- P1–P4 的根数不是等份，不应称为等距训练进度；
-- 如果 matched-budget One-shot 仍明显较差，才能较强地支持“状态分布扩展”解释；
-- 若差异不明显，应将 iteration 描述为训练稳定性或覆盖机制，而不是必然的性能增益。
-
----
-
-## E3. Future information 消融
-
-### 目的
-
-回答未来信息是否有用，以及低维物理摘要是否比直接输入完整未来序列更适合当前数据规模。
-
-### 最小正式比较
-
-1. Iterative Q，State-only；
-2. Iterative Q，168 h summary。
-
-### 辅助比较
-
-3. Iterative Q，full 168 h sequence；
-4. 若论文声称现实部署能力，再加入 noisy/predicted 168 h summary。
-
-完整序列的 MLP、TCN 和 GRU 不需要全部作为正式多 seed 实验。可使用已有筛选结果，在附录中说明为何选择或放弃完整序列。
-
-### 公平性控制
-
-- 使用相同 roots 和 candidate labels；
-- 相同训练/验证划分；
-- 相同 Q 网络主体和门控；
-- summary 必须由同一份 forecast 对象计算；
-- 输入维度变化应披露参数量；
-- 不能在 test set 上选择 forecast variant；
-- perfect forecast 与 predicted/noisy forecast 不能混为同一个设定。
-
-### 产出
-
-- **Table 5：Future-information ablation**
-  - information used；
-  - representation dimension；
-  - parameter count；
-  - Total cost；
-  - Vent；
-  - Stored；
-  - Δ cost vs State-only。
-- 可选 **Supplementary Figure S3**
-  - 不同表示相对 State-only 的配对成本差及 95% CI。
-
-### 注意事项
-
-- “完整未来反而更差”不等于未来没有信息价值；
-- 合理解释包括有限 roots、高维冗余、样本效率和 Q-gate 校准，但除非有直接证据，不应将其中任何一个写成已证明机制；
-- 如果 168 h summary 使用真实未来，应称为 idealized/perfect-forecast ablation；
-- 主结论可以是“结构化摘要在当前数据规模下更有效”，不能泛化成“摘要永远优于序列模型”。
+- E6 只支持对所选案例中可直接观察到的运行机制进行解释，不能从一个 seed 推广普遍因果机制；
+- E6 不进入 E1 的 bootstrap、均值、胜负率或其他正式统计；
+- 正文中的总体性能结论仍必须来自 E1 的多 seed 配对比较；
+- 历史目录 `experiments_results/E6/` 中的 seed `9000056` 版本仅保留为 provenance；正式 E6 版本以当前选择规则对应的 seed `9000031` 为准。
 
 ---
 
@@ -727,7 +666,144 @@ P1–P4 是迭代数据聚合阶段，不是人为等分的训练 checkpoint。�
 - stress test 的目标是测边界，不要求方法在所有场景都优于 Greedy；
 - 失败结果应保留并在 Discussion 中解释；
 - Medium 的结果可直接复用 E1；只需新增 Low 和 High 评估；
-- Failure trajectory 可从 High stress 中选择预先定义的最差配对 seed，放 Supplementary Figure S4。
+- Failure trajectory 可从 High stress 中选择预先定义的最差配对 seed，放 Supplementary Figure S3。
+
+---
+
+## E7. 冻结策略的时间跨度泛化
+
+### 目的
+
+测试仅在 720 h episode 设置下训练和选择的 Iterative Action-Q，能否在不重新训练的情况下，以 direct-global episode progress 稳定部署到 90、180 和 365 天。
+
+### 比较方法
+
+1. Fixed-Assignment；
+2. Greedy；
+3. Iterative-Q direct-global。
+
+Rolling MILP 不进入首轮 E7，因为其逐次优化成本会随部署时域显著增长，且 E7 的核心问题是冻结学习策略的时间泛化。
+
+### 实验设置
+
+- 评估 horizon 固定为 720、2,160、4,320 和 8,760 h，即 30、90、180 和 365 天；
+- 使用正式测试 seeds `9000031–9000060`；Iterative Q 使用冻结的 model seeds 0/1/2；
+- 每个 test seed 先生成同一条 8,928 h 场景，再截取嵌套前缀，保证不同 horizon 共享相同随机过程前缀；
+- 所有 Iterative Q 权重、门控、future summary 和 720 h 基础 intervention windows 完全冻结；基础 windows 每 720 h 重复；
+- Iterative-Q direct-global 使用 `t / H` 作为 episode progress；
+- 720 h 下的 total cost、vent 和 stored 必须与 E1 中相同 checkpoint 和场景的基准结果一致，作为长时域 adapter 未改变基准策略的校验。
+
+### 统计与指标
+
+- Total cost、vent 和其他累计量统一换算为每 720 h 数值；
+- 报告相对 Fixed-Assignment 的配对成本降低及 95% CI；
+- 报告 storage rate；
+- 对 Iterative-Q direct-global 相对 Fixed-Assignment 和 Greedy 的差异做 model-seed/test-seed 分层 bootstrap。
+
+### 产出
+
+- **Figure 6：Temporal-horizon generalization**
+  - 面板 a 展示 30/90/180/365 天相对 Fixed-Assignment 的配对成本降低；
+  - 面板 b 展示各 horizon 每 720 h 的 vent。
+- E7 完整汇总表、逐 episode CSV、配对统计表和 audit JSON；
+- Figure 6 导出 SVG、PDF、TIFF 和 PNG。
+
+### 注意事项
+
+- E7 只检验时间跨度变化，不等同于新的物理网络、船数或 emitter 数量泛化；
+- 年度场景仍使用与 E1 相同的 Medium stress 生成机制；不能把 E7 解释为分布外扰动鲁棒性，后者由 E4 检验；
+- E7 不比较不同 episode-progress 编码，结论仅适用于 direct-global（`t / H`）部署协议；
+- 历史目录中已标记为 invalid protocol 的 E7 runs 不得进入正式 E7 汇总。
+
+---
+
+## E3. Future information 消融
+
+### 目的
+
+回答未来信息是否有用，以及低维物理摘要是否比直接输入完整未来序列更适合当前数据规模。
+
+### 最小正式比较
+
+1. Iterative Q，State-only；
+2. Iterative Q，168 h summary。
+
+### 辅助比较
+
+3. Iterative Q，full 168 h sequence；
+4. 若论文声称现实部署能力，再加入 noisy/predicted 168 h summary。
+
+完整序列的 MLP、TCN 和 GRU 不需要全部作为正式多 seed 实验。可使用已有筛选结果，在附录中说明为何选择或放弃完整序列。
+
+### 公平性控制
+
+- 使用相同 roots 和 candidate labels；
+- 相同训练/验证划分；
+- 相同 Q 网络主体和门控；
+- summary 必须由同一份 forecast 对象计算；
+- 输入维度变化应披露参数量；
+- 不能在 test set 上选择 forecast variant；
+- perfect forecast 与 predicted/noisy forecast 不能混为同一个设定。
+
+### 产出
+
+- **Table 4：Future-information ablation**
+  - information used；
+  - representation dimension；
+  - parameter count；
+  - Total cost；
+  - Vent；
+  - Stored；
+  - Δ cost vs State-only。
+- 可选 **Supplementary Figure S2**
+  - 不同表示相对 State-only 的配对成本差及 95% CI。
+
+### 注意事项
+
+- “完整未来反而更差”不等于未来没有信息价值；
+- 合理解释包括有限 roots、高维冗余、样本效率和 Q-gate 校准，但除非有直接证据，不应将其中任何一个写成已证明机制；
+- 如果 168 h summary 使用真实未来，应称为 idealized/perfect-forecast ablation；
+- 主结论可以是“结构化摘要在当前数据规模下更有效”，不能泛化成“摘要永远优于序列模型”。
+
+---
+
+## E5. Full-horizon MILP 离线参考
+
+### 目的
+
+在相同三船场景上运行一个使用完整未来信息的 Full-horizon MILP，记录有限计算预算内能够达到的可行解质量和最优性界限。该实验保留，但不预设能够求到 optimal，也不作为在线控制器与 E1 七种方法直接排名。
+
+### 设置
+
+- 使用 perfect foresight；
+- 只优化前 720 h，并在 720 h 状态上计算共同 cleanup value；不读取 720–888 h 外生信息；
+- 使用与 simulator 一致的经济参数；
+- 只优化船舶调度，并在模型中执行与 simulator 相同的最大可行井注入规则；
+- 使用与其他方法相同的 compact trip cleanup terminal value；
+- Greedy warm start 覆盖全部 720 h 船舶动作，并从其 720 h 末状态完整补齐 cleanup 辅助变量；
+- 使用与正式测试集相同的场景 seeds；若全部 seeds 的计算成本不可接受，必须在求解前锁定一个代表性 seed 子集；
+- 主结果 time limit 固定为每个 seed 5 h；原 2 h 结果保留为 superseded provenance；
+- 每个 CPLEX 进程固定 4 threads，并使用 deterministic parallel mode；
+- 不持续求解到 optimal；
+- 对每个 seed 报告 incumbent、best bound、MIP gap、termination status 和 solve time；
+- 所有 incumbent 必须经过 simulator replay，记录 replay total cost、vent、stored 和 mismatch；
+- 没有经过验证的整数可行解时，不报告控制性能，只报告求解状态和 bound。
+
+### 产出
+
+- **Table 5 或 Supplementary Table S3：Time-limited full-horizon MILP reference**
+- 是否放正文由结果决定：
+  - 若多数 seeds 有有效可行解，且 bound/gap 能提供有意义参照，则在正文 Section 6.7 展示；
+  - 若可行率低或 gap 很大，完整结果放 Supplementary，正文用一段话报告计算局限；
+  - 即使没有有效可行解，也保留实验记录，不从实验计划中删除。
+
+### 解释规则
+
+- feasible incumbent 是成本最小化问题中当前已找到的可行上界，不等于最优解；
+- solver best bound 是下界，只有 gap 足够小时才接近最优；
+- Iterative Q 或 Rolling MILP 优于一个超时 incumbent，不代表优于理论最优；
+- 若 simulator replay 与 MILP 内部 objective 不一致，以 simulator replay 结果作为执行性能；
+- **禁止称为 oracle**，除非相关 seed 全部获得最优性证明。
 
 ---
 
@@ -735,7 +811,7 @@ P1–P4 是迭代数据聚合阶段，不是人为等分的训练 checkpoint。�
 
 ### 目的
 
-从 E1–E3 的日志中汇总不同方法在训练阶段和部署阶段的计算差异，不将 Iterative Q 的大量 counterfactual rollouts 隐藏在“roots数量”之后。本项不需要额外训练模型，也不作为独立性能实验。
+从 E1、E7 和 E3 的训练与评估日志中汇总不同方法在训练阶段和部署阶段的计算差异，不将 Iterative Q 的大量 counterfactual rollouts 隐藏在“roots 数量”之后。本项不需要额外训练模型，也不作为独立性能实验。
 
 ### 实验内容
 
@@ -771,50 +847,10 @@ P1–P4 是迭代数据聚合阶段，不是人为等分的训练 checkpoint。�
 - Vectorized PPO 的所有 worker steps 都要计入；
 - High-level PPO 按每个高层 transition 内实际推进的 physical hours 计入，不能直接用 high-level timesteps；
 - Q 的每个候选动作后续 rollout 都要计入；
-- 三种学习方法均需报告实际 simulator calls 和对应预算使用比例；
-- CPU-hours、GPU-hours和wall time应分开；
-- 不同硬件上的 wall time不可直接比较，必须同时报告硬件；
-- 即使环境交互预算匹配，也只有在展示性能随累计 simulator calls 的曲线时才能使用“sample-efficient”表述。
-
----
-
-## E5. Full-horizon MILP 离线参考
-
-### 目的
-
-在相同三船场景上运行一个使用完整未来信息的 Full-horizon MILP，记录有限计算预算内能够达到的可行解质量和最优性界限。该实验保留，但不预设能够求到 optimal，也不作为在线控制器与 E1 六种方法直接排名。
-
-### 设置
-
-- 使用 perfect foresight；
-- 只优化前 720 h，并在 720 h 状态上计算共同 cleanup value；不读取 720–888 h 外生信息；
-- 使用与 simulator 一致的经济参数；
-- 只优化船舶调度，并在模型中执行与 simulator 相同的最大可行井注入规则；
-- 使用与其他方法相同的 compact trip cleanup terminal value；
-- Greedy warm start 覆盖全部 720 h 船舶动作，并从其 720 h 末状态完整补齐 cleanup 辅助变量；
-- 使用与正式测试集相同的场景 seeds；若全部 seeds 的计算成本不可接受，必须在求解前锁定一个代表性 seed 子集；
-- 主结果 time limit 固定为每个 seed 5 h；原 2 h 结果保留为 superseded provenance；
-- 每个 CPLEX 进程固定 4 threads，并使用 deterministic parallel mode；
-- 不持续求解到 optimal；
-- 对每个 seed 报告 incumbent、best bound、MIP gap、termination status 和 solve time；
-- 所有 incumbent 必须经过 simulator replay，记录 replay total cost、vent、stored 和 mismatch；
-- 没有经过验证的整数可行解时，不报告控制性能，只报告求解状态和 bound。
-
-### 产出
-
-- **Table 7 或 Supplementary Table S3：Time-limited full-horizon MILP reference**
-- 是否放正文由结果决定：
-  - 若多数 seeds 有有效可行解，且 bound/gap 能提供有意义参照，则在正文 Section 6.8 展示；
-  - 若可行率低或 gap 很大，完整结果放 Supplementary，正文用一段话报告计算局限；
-  - 即使没有有效可行解，也保留实验记录，不从实验计划中删除。
-
-### 解释规则
-
-- feasible incumbent 是成本最小化问题中当前已找到的可行上界，不等于最优解；
-- solver best bound 是下界，只有 gap 足够小时才接近最优；
-- Iterative Q 或 Rolling MILP 优于一个超时 incumbent，不代表优于理论最优；
-- 若 simulator replay 与 MILP 内部 objective 不一致，以 simulator replay 结果作为执行性能；
-- **禁止称为 oracle**，除非相关 seed 全部获得最优性证明。
+- 四种学习方法均需报告实际 simulator calls 和对应预算使用比例；
+- CPU-hours、GPU-hours 和 wall time 应分开；
+- 不同硬件上的 wall time 不可直接比较，必须同时报告硬件；
+- 即使环境交互预算匹配，也只有在展示性能随累计 simulator calls 的变化时才能使用“sample-efficient”表述。
 
 ---
 
@@ -828,25 +864,24 @@ P1–P4 是迭代数据聚合阶段，不是人为等分的训练 checkpoint。�
 | Figure 2 | Iterative Action-Q 训练与在线执行流程 | 方法 |
 | Table 1 | 物理、经济和 disturbance 参数 | Experimental setup |
 | Table 2 | 控制器信息权限、决策频率、训练/求解设置 | Fairness protocol |
-| Table 3 | 六个在线控制器主结果 | E1 |
+| Table 3 | 七个在线控制器主结果 | E1 |
 | Figure 3 | 配对成本差和成本分解 | E1 |
-| Figure 4 | Representative trajectory | E1 解释性分析 |
-| Table 4 | Iteration ablation | E2 |
-| Table 5 | Future-information ablation | E3 |
+| Figure 4 | Greedy–Iterative Q 运行机制与船舶动作 | E6 |
 | Figure 5 | Low/Medium/High 综合 stress test | E4 |
+| Figure 6 | 30/90/180/365 天时间跨度泛化 | E7 |
+| Table 4 | Future-information ablation | E3 |
+| Table 5 | Full-horizon MILP 结果（若结果足以进入正文） | E5 |
 | Table 6 | 训练和部署计算成本 | 支持性分析 A1 |
-| Table 7 | Full-horizon MILP 结果（若结果足以进入正文） | E5 |
 
 ### Supplementary
 
 | 编号 | 内容 |
 |---|---|
 | Table S1 / Figure S1 | Simulator verification |
-| Figure S2 | P1–P4 的实际累计 simulator-call 曲线 |
-| Figure S3 | Future representation 配对差 |
+| Figure S2 | Future representation 配对差 |
 | Table S2 | Low/Medium/High 完整 robustness 数值 |
-| Figure S4 | Failure trajectory |
-| Table S3 | Full MILP 完整结果；Table 7 不进入正文时使用 |
+| Figure S3 | Failure trajectory |
+| Table S3 | Full MILP 完整结果；Table 5 不进入正文时使用 |
 | Tables S4–Sx | 所有训练超参数、网络结构、逐 seed 结果 |
 
 ### 每次正式运行必须保存
@@ -866,31 +901,32 @@ P1–P4 是迭代数据聚合阶段，不是人为等分的训练 checkpoint。�
 
 ## 8. 推荐执行顺序
 
-1. **同步 E1 协议**：六种方法、G60-P4 和现有正式测试集 `9000031–9000060`；
-2. **完成 E1 统计表**：生成六方法 Table 3 和配对 bootstrap/hierarchical bootstrap 结果；
-3. **生成 Figure 3**：配对成本差点区间图和成本分解堆叠图；
-4. **生成 Figure 4**：自动选定 seed `9000056`，必要时做一次 trace-only 重放；
-5. **完成 E2**：按 G60-P1–P4 和 matched-budget One-shot Q 进行迭代聚合消融；
-6. **完成 E3**：汇总 State-only、168 h summary 和 full-sequence 结果；
-7. **运行 E4 Low/High**：Medium 直接复用 E1；
-8. **运行 E5**：使用锁定时限完成 Full-horizon MILP 离线参考；
-9. **完成 A1**：汇总训练与部署计算成本；
-10. 一次性生成正文和 Supplementary 图表。
+正式实验已按叙事顺序连续编号：
+
+1. **E0 — 物理仿真层验证**：确认守恒、约束、状态机和末端核算；
+2. **E1 — 在线控制器主比较**：锁定七种方法、G60-P4 和正式测试集 `9000031–9000060`，生成 Table 3 与 Figure 3；
+3. **E6 — 运行机制案例**：按预定义规则使用 seed `9000031`，生成 Greedy–Iterative Q 的 Figure 4a/4b 和干预明细；
+4. **E4 — 扰动鲁棒性**：Medium 复用 E1，新增并汇总 Low/High，生成 Figure 5；
+5. **E7 — 时间跨度泛化**：使用冻结 E1 策略完成 30/90/180/365 天评估，生成 Figure 6；
+6. **E3 — Future-information 消融**：汇总 State-only、168 h summary 和 full-sequence，生成 Table 4 和可选 Figure S2；
+7. **E5 — Full-horizon MILP**：使用锁定时限完成离线参考，生成 Table 5 或 Table S3；
+8. **A1 — 计算成本汇总**：汇总训练与部署成本，生成 Table 6；
+9. 一次性生成正文和 Supplementary 的最终图表与 source data。
 
 ---
 
 ## 9. 正式实验开始前的锁定清单
 
 - [x] E0 物理仿真层验证已完成，20/20 项检查通过；完整结果位于 `experiments_results/E0/`；
-- [x] E1 六种主方法和 baseline 名称已固定；
+- [x] E1 七种主方法和 baseline 名称已固定；
 - [x] Fixed-Assignment 与 Greedy 的行为不重复：三船正式场景的 5 个 validation seeds 中，两者在可行动状态的决策分歧率为 42.76%，Fixed-Assignment 始终保持一船一 emitter，而 Greedy 会跨 emitter 调度；
 - [x] 总成本公式、经济参数和 penalty 已在机器可读协议中固定；
 - [x] 共同 compact trip cleanup terminal value 已固定；
 - [x] 共享的最大可行井注入函数已实现，正式协议下所有控制器的上层动作空间均已移除井注入率；
 - [x] Rolling MILP 和 Full-horizon MILP 已使用相同自动注入规则，不包含额外井控制自由度；
 - [x] Forecast 来源、误差和可见范围已固定为 perfect-forecast protocol；
-- [x] Hourly Centralized PPO、High-level Centralized PPO 与 Iterative Q 已接入同一个 future-summary encoder；窗口可由统一参数切换，算法各自的动作和控制结构不变；
-- [x] 三种学习方法已统一为不含 `valid_fraction` 的 168 h summary；每个样本生成 888 h 场景，720 h 后仅作只读预测/规划上下文；
+- [x] Hourly Centralized PPO、High-level Centralized PPO、Masked Double DQN 与 Iterative Q 已接入同源的 future-summary encoder；算法各自的动作和控制结构不变；
+- [x] 四种学习方法已统一为不含 `valid_fraction` 的 168 h summary；每个样本生成 888 h 场景，720 h 后仅作只读预测/规划上下文；
 - [x] Rolling MILP 的经济目标、168 h horizon、24 h replan interval、600 s time limit、Greedy-only warm start 和无 fallback 失败规则已固定；原 300 s 结果仅作 provenance；
 - [x] Full-horizon MILP 的 5 h time limit、测试 seed 集和 replay 验证规则已固定；原 2 h 结果仅作 provenance；
 - [ ] Low/Medium/High stress 参数已在验证集检查并锁定；
@@ -898,12 +934,16 @@ P1–P4 是迭代数据聚合阶段，不是人为等分的训练 checkpoint。�
 - [x] Hourly Centralized PPO 已实现为直接逐小时接口：当前状态 + 168 h summary、三船原生 `[5,5,5]` `MultiDiscrete` 动作、legal-action mask、自动最大井注入，无 event/goal/executor/Greedy/residual/BC；完整 episode 末端 reward 含共同 cleanup value 且不继续 bootstrap；
 - [x] Hourly Centralized PPO 已接入底层 simulator-hour hard cap：每次 1 h 推进前检查预算，训练产物记录实际 calls、simulated hours、预算使用率及耗尽状态；
 - [x] High-level Centralized PPO 已按 24 h 最大重规划间隔、事件触发更新、统一 168 h summary、目标对齐 reward 和 9,505,319 hard cap 完成三个 model seeds；
+- [x] Masked Double DQN 已按逐小时 125 联合动作、legal-action masks、统一 168 h summary、目标对齐 reward 和每 seed 9,505,312 simulator calls 完成三个 model seeds；
 - [x] 3,600-root Iterative Q G60-P4 的 G0/G1/G2/G3=2,160/288/432/720 已锁定，实际训练预算为 9,526,297 simulator calls；
 - [x] 训练、验证、legacy-development 和 E1 正式测试集均已写入 manifest v5；
 - [ ] 训练模型不能读取测试 seeds；
-- [x] E1 正式测试集固定为 `9000031–9000060`，六种方法结果均已完成；
+- [x] E1 正式测试集固定为 `9000031–9000060`，七种方法结果均已完成；
 - [x] Simulator step accounting 已实现：在 `PhysicalSimulator.step()` 成功推进后统一累计 calls 与 simulated hours；深拷贝的 Q root/candidate 共享同一计数器，数据集 metadata 和 summary 均记录实际用量；
-- [x] E1 六种方法均能输出统一的 per-seed 核心指标；
+- [x] E1 七种方法均能输出统一的 per-seed 核心指标；
+- [x] E6 案例选择规则已实现，当前规则锁定 seed `9000031`；
+- [ ] E6 正式产物已统一归档；历史目录 `experiments_results/E6/` 中的 seed `9000056` 版本仅保留为 provenance；
+- [x] E7 已锁定 720/2,160/4,320/8,760 h、相同嵌套场景前缀及 Iterative-Q direct-global 部署协议；
+- [x] E7 四个 horizon 的正式结果和汇总已完成；
 - [ ] 统计脚本已在 toy data 上验证；
-- [ ] 轨迹案例的自动选择规则已实现；
 - [ ] 所有输出目录禁止静默覆盖。

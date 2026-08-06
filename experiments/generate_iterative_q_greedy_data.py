@@ -33,8 +33,8 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("scenario seeds must be unique")
-    if not args.root_fractions or any(not 0.0 < value < 1.0 for value in args.root_fractions):
-        parser.error("root fractions must lie in (0, 1)")
+    if not args.root_fractions or any(not 0.0 <= value < 1.0 for value in args.root_fractions):
+        parser.error("root fractions must lie in [0, 1)")
     if len(set(args.root_fractions)) != len(args.root_fractions):
         parser.error("root fractions must be unique")
     if args.roots_per_seed is not None and not (

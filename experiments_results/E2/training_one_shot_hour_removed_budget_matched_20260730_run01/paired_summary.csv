@@ -1,0 +1,9 @@
+comparison,model_seed,n_scenarios,baseline_mean_total_cost_eur,one_shot_nohour_mean_total_cost_eur,mean_delta_total_cost_eur,mean_delta_percent,mean_delta_vented_t,mean_delta_override_events,episodes_one_shot_better,episodes_one_shot_worse,episodes_tied,scenario_bootstrap_ci_low_eur,scenario_bootstrap_ci_high_eur,crossed_seed_scenario_bootstrap_ci_low_eur,crossed_seed_scenario_bootstrap_ci_high_eur
+formal_iterative_q,0,30,1870036.718819,1960015.463311,89978.744492,4.811603,1073.381000,0.166667,7,23,0,,,,
+formal_iterative_q,1,30,1868639.413397,1894341.740649,25702.327252,1.375457,278.534203,0.533333,12,18,0,,,,
+formal_iterative_q,2,30,1906400.126062,1940545.748829,34145.622766,1.791105,209.285853,0.133333,10,20,0,,,,
+formal_iterative_q,pooled,90,1881692.086093,1931634.317596,49942.231504,2.654113,520.400352,0.277778,29,61,0,-3774.237654,104417.988291,-23819.374721,115548.792951
+full_feature_one_shot,0,30,1865030.196200,1960015.463311,94985.267112,5.092961,1154.969709,-0.066667,5,25,0,,,,
+full_feature_one_shot,1,30,1914704.230871,1894341.740649,-20362.490223,-1.063480,-249.031846,0.133333,13,17,0,,,,
+full_feature_one_shot,2,30,1875927.407547,1940545.748829,64618.341281,3.444608,787.457623,0.000000,9,20,1,,,,
+full_feature_one_shot,pooled,90,1885220.611540,1931634.317596,46413.706057,2.461977,564.465162,0.022222,27,62,1,13014.839951,84411.392512,-28863.021017,120988.378047

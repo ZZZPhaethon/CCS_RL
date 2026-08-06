@@ -1,0 +1,437 @@
+{
+  "protocol_id": "paper_unified_window_v1_3vessel_2026-07-27",
+  "protocol_version": 6,
+  "locked_on": "2026-07-28",
+  "amended_on": "2026-07-29",
+  "status": "design_locked_implementation_pending",
+  "test_set_revision": {
+    "active_range_inclusive": [
+      9000031,
+      9000060
+    ],
+    "active_use": "primary paired comparison set for future frozen controllers",
+    "active_access_status": "unvisited holdout test set for future frozen controllers",
+    "deprecated_range_inclusive": [
+      9000001,
+      9000030
+    ],
+    "deprecated_result_status": "retained for provenance and excluded from future primary comparison claims",
+    "selection_prohibition": "neither active nor deprecated test results may be used for further model, checkpoint, gate, budget or reporting selection"
+  },
+  "scope": {
+    "system": "three-vessel Northern Lights phase-1 CCS network",
+    "scenario": "northern_lights_phase1_3vessels",
+    "scenario_file": "scenarios/northern_lights_phase1_3vessels.json",
+    "scenario_file_sha256": "d2624cc1c619575d99deb49c517ebdb3702f88d8ac918de277170a062dd63c5b",
+    "scenario_protocol": "unified_window_v1",
+    "episode_hours": 720,
+    "scenario_hours": 888,
+    "time_step_hours": 1.0,
+    "forecast_context_hours": 168
+  },
+  "environment": {
+    "enforce_full_load_dispatch": false,
+    "require_empty_terminal_departure": true,
+    "include_goal_observation": false,
+    "weather_mode": "window",
+    "terminal_boundary": {
+      "mode": "common_compact_trip_cleanup_value",
+      "capture_after_720h": 0.0,
+      "cleanup_disturbances": "disabled",
+      "cleanup_goal": "store all remaining captured CO2 and return participating empty vessels to a ready emitter state",
+      "applies_to_training_terminal_return": true,
+      "applies_to_validation_and_test_total_cost": true,
+      "applies_to_rolling_and_full_horizon_milp_terminal_objective": true
+    }
+  },
+  "medium_stress_disturbance": {
+    "capture_noise_std": 0.3,
+    "capture_outage_rate_per_week": 0.5,
+    "capture_outage_mean_hours": 12.0,
+    "capture_high_output_rate_per_week": 0.5,
+    "capture_high_output_mean_hours": 48.0,
+    "capture_high_output_multiplier_range": [
+      1.25,
+      1.75
+    ],
+    "weather_window_rate_per_week": 0.5,
+    "weather_window_mean_hours": 48.0,
+    "weather_window_speed_factor_range": [
+      0.5,
+      0.8
+    ],
+    "well_maintenance_rate_per_week": 0.3,
+    "well_maintenance_mean_hours": 12.0,
+    "emitter_initial_fill_range": [
+      0.0,
+      0.5
+    ],
+    "terminal_initial_fill_range": [
+      0.0,
+      0.5
+    ],
+    "reservoir_initial_pressure_fill_range": [
+      0.0,
+      0.5
+    ]
+  },
+  "control_scope": {
+    "upper_level_actions": [
+      "vessel_dispatch"
+    ],
+    "excluded_upper_level_actions": [
+      "well_injection_rate",
+      "capture_utilization",
+      "loading_rate",
+      "unloading_rate"
+    ],
+    "well_control": {
+      "mode": "automatic_continuous_maximum_feasible_rate",
+      "rate_unit": "tonnes_per_hour",
+      "selection_rule": "request the continuous maximum rate allowed by availability, equipment capacity, injectivity and pressure constraints; request zero when unavailable or below the minimum stable rate",
+      "actual_flow_limits": [
+        "terminal inventory",
+        "pipeline/manifold capacity",
+        "well availability",
+        "well injectivity",
+        "reservoir remaining capacity",
+        "bottom-hole pressure limit"
+      ],
+      "applies_to": [
+        "Fixed-Assignment Heuristic",
+        "Greedy",
+        "Hourly Centralized Maskable PPO",
+        "Event-Residual PPO",
+        "Iterative Action-Q",
+        "Rolling MILP",
+        "Full-horizon MILP"
+      ],
+      "model_boundary": [
+        "no time-varying injection electricity price",
+        "no controllable well start-stop or ramping schedule",
+        "no reward for deliberate pressure-recovery shutdown",
+        "no nonlinear marginal injection cost controlled by rate"
+      ]
+    }
+  },
+  "forecast_protocol": {
+    "source": "the same sampled Scenario object for every forecast-capable method",
+    "accuracy": "perfect_forecast",
+    "execution_and_scoring_boundary_hours": 720,
+    "maximum_forecast_index_hours": 888,
+    "post_boundary_rule": "hours 720 through 888 are read-only forecast/planning context; no controller action is executed or scored after hour 720",
+    "learning_methods": {
+      "methods": [
+        "Hourly Centralized Maskable PPO",
+        "Event-Residual PPO",
+        "Iterative Action-Q"
+      ],
+      "representation": "shared_structured_summary",
+      "windows_hours": [
+        168
+      ],
+      "features_per_window": [
+        "emitter_availability_mean for each emitter",
+        "well_available_mean for each well",
+        "well_injectivity_min for each well",
+        "fleet_speed_factor_mean",
+        "fleet_speed_factor_min"
+      ],
+      "valid_fraction_feature": false,
+      "normalization": "existing scenario-native dimensionless values",
+      "state_only_use": "E3 ablation only"
+    },
+    "rolling_milp": {
+      "representation": "full_hourly_168h_sequence",
+      "source_must_match_learning_methods": true,
+      "planning_horizon_is_clipped_by": "sampled 888 h scenario boundary, not the 720 h execution boundary"
+    },
+    "full_horizon_milp": {
+      "planning_horizon_hours": 720,
+      "terminal_cleanup_boundary_hours": 720,
+      "post_720h_forecast_used": false,
+      "source_must_match_learning_methods": true
+    },
+    "fixed_assignment_and_greedy_use_forecast": false
+  },
+  "learning_controller_interfaces": {
+    "Hourly Centralized Maskable PPO": {
+      "implementation_entrypoint": "python -m sim.control.hourly_ppo.train_hourly_ppo",
+      "evaluation_entrypoint": "python -m sim.control.hourly_ppo.evaluate_hourly_ppo",
+      "policy_transition_hours": 1,
+      "physical_steps_per_policy_transition": 1,
+      "observation": "current physical state plus shared 168 h structured summary",
+      "action_space": {
+        "type": "MultiDiscrete",
+        "per_vessel_choices": [
+          "WAIT",
+          "Terminal",
+          "Emitter 1",
+          "Emitter 2",
+          "Emitter 3"
+        ],
+        "three_vessel_dimensions": [
+          5,
+          5,
+          5
+        ],
+        "directly_applied_to_native_environment": true,
+        "legal_action_masks": true
+      },
+      "excluded_structure": [
+        "event trigger",
+        "multi-hour dispatch goal",
+        "rule or MPC executor",
+        "Greedy default",
+        "residual action",
+        "behaviour-cloning warm start",
+        "agent-selected well rate"
+      ],
+      "gamma": 1.0,
+      "terminal_rule": "add common compact trip cleanup cost to the final reward and terminate without value bootstrapping"
+    },
+    "Event-Residual PPO": {
+      "policy_transition_hours": "event-dependent",
+      "action_structure": "residual intervention over Greedy default"
+    },
+    "Iterative Action-Q": {
+      "policy_transition_hours": "intervention-window-dependent",
+      "action_structure": "gated joint vessel action"
+    }
+  },
+  "economic_objective": {
+    "currency": "EUR",
+    "parameters": {
+      "carbon_price_eur_per_t": 80.0,
+      "ship_fuel_cost_eur_per_t": 600.0,
+      "main_engine_fuel_use_kg_per_kwh": 0.148,
+      "main_engine_power_kw": 5500.0,
+      "cruise_power_fraction": 0.85,
+      "hoteling_power_fraction": 0.05,
+      "conditioning_eur_per_t": 7.82,
+      "reconditioning_eur_per_t": 0.41,
+      "storage_shortfall_eur_per_t": 0.0
+    },
+    "derived_rates": {
+      "vessel_fuel_eur_per_h_sailing": 415.14,
+      "hoteling_fuel_eur_per_h": 24.42
+    },
+    "reward_alignment": {
+      "reward_mode": "economic",
+      "injection_reward_eur_per_t": 0.0,
+      "store_reward_eur_per_t": 0.0,
+      "vent_penalty_weight": 1.0,
+      "operating_cost_weight": 1.0,
+      "gamma": 1.0
+    },
+    "episode_cost_formula": "vessel_fuel + conditioning + reconditioning + loading + unloading + vent_penalty + storage_shortfall_penalty",
+    "reported_total_cost_formula": "episode_cost + common_compact_trip_cleanup_operating_cost",
+    "required_episode_cost_fields": [
+      "vessel_fuel",
+      "conditioning",
+      "reconditioning",
+      "loading",
+      "unloading",
+      "vent_penalty",
+      "storage_shortfall_penalty",
+      "terminal_cleanup_operating_cost",
+      "operating_cost",
+      "total_cost"
+    ],
+    "required_activity_diagnostics": [
+      "vessel_sailing_hours",
+      "vessel_waiting_hours",
+      "vessel_loading_hours",
+      "vessel_unloading_hours",
+      "stored_t",
+      "vented_t",
+      "loaded_t",
+      "unloaded_t"
+    ],
+    "current_model_boundary": [
+      "no fixed port-call or berth fee",
+      "no separate waiting-cost tariff",
+      "no separate injection-electricity cost",
+      "activity diagnostics must not be added to total cost unless the protocol is versioned"
+    ],
+    "source_of_truth": "simulator EconomicLedger after action replay plus the common compact trip cleanup value evaluated from the replayed 720 h terminal state"
+  },
+  "milp_compute_protocol": {
+    "cplex_parallel_mode": "deterministic",
+    "solver_threads_per_process": 4,
+    "rolling_milp": {
+      "replan_interval_hours": 24,
+      "planning_horizon_hours": 168,
+      "validation_time_limits_seconds_per_replan": [
+        30,
+        300
+      ],
+      "formal_time_limit_seconds_per_replan": 300,
+      "formal_time_limit_status": "locked_without_additional_calibration_on_2026-07-29",
+      "warm_start": "greedy vessel actions with complete cleanup auxiliary-variable values",
+      "fallback": "none"
+    },
+    "full_horizon_milp": {
+      "time_limit_seconds_per_seed": 7200,
+      "warm_start": "greedy vessel actions with complete cleanup auxiliary-variable values",
+      "fallback": "none"
+    }
+  },
+  "training_budget": {
+    "reference": "B_selected",
+    "definition": "actual calls that advance the bottom-level simulator by one physical hour in the raw G0-G2 training shards used by the selected 3,600-root Iterative Action-Q P3 checkpoint",
+    "iterative_q_policy_aggregation_rounds": 2,
+    "iterative_q_root_allocation_nominal": {
+      "G0": 2400,
+      "G1": 480,
+      "G2": 720
+    },
+    "iterative_q_training_seed_counts": {
+      "G0": 200,
+      "G1": 40,
+      "G2": 60
+    },
+    "iterative_q_roots_per_seed": 12,
+    "iterative_q_cumulative_roots": {
+      "P1": 2400,
+      "P2": 2880,
+      "P3": 3600
+    },
+    "iterative_q_realized_usable_roots": {
+      "G0": 2399,
+      "G1": 480,
+      "G2": 720,
+      "total": 3599
+    },
+    "stage_simulator_step_calls": {
+      "G0": 6328003,
+      "G1": 1270670,
+      "G2": 1906646
+    },
+    "matched_methods": [
+      "Hourly Centralized Maskable PPO",
+      "Event-Residual PPO",
+      "Iterative Action-Q P3"
+    ],
+    "measured_value": 9505319,
+    "measurement_status": "measured_and_locked_on_controller_validation_only",
+    "per_independent_training_run_hard_cap": 9505319,
+    "excluded_from_budget": [
+      "controller-validation rollouts",
+      "formal-test rollouts",
+      "network forward/backward and repeated SGD epochs",
+      "feature-only computation that does not advance the simulator",
+      "discarded development-search branches"
+    ]
+  },
+  "iterative_q_validation_selection_audit": {
+    "scope": "controller_validation_only",
+    "formal_test_accessed": false,
+    "result_directory": "experiments_results/iterative_q_validation_search/summary_comparison_3600",
+    "exact_p4_extension": {
+      "root_allocation_nominal": {
+        "G0": 2400,
+        "G1": 480,
+        "G2": 720,
+        "G3": 1200
+      },
+      "P3_mean_total_cost_eur": 1859495.6861979142,
+      "P4_mean_total_cost_eur": 1861068.8815317468,
+      "P4_minus_P3_mean_cost_eur": 1573.1953338326186,
+      "hierarchical_95pct_ci_eur": [
+        -62870.428591633776,
+        67325.26781549737
+      ],
+      "P3_between_model_seed_sd_eur": 19500.974436397188,
+      "P4_between_model_seed_sd_eur": 18159.772686160748,
+      "mean_additional_simulator_calls": 3240970.333333332,
+      "relative_additional_simulator_calls_pct": 34.08269561921704,
+      "decision": "retain P3 because P4 has no validated mean-cost advantage and materially higher compute"
+    }
+  },
+  "iterative_q_selected_configuration": {
+    "final_stage": "P3",
+    "model_seed": 0,
+    "observation_input": "shared_future_summary",
+    "future_summary_windows_h": [
+      168
+    ],
+    "valid_fraction_feature": false,
+    "ensemble_heads": 5,
+    "required_heads": 4,
+    "q_margin_reward_units": 0.4,
+    "q_margin_eur": 40000,
+    "maximum_interventions": 12,
+    "policy_windows_h": [
+      [
+        108,
+        155
+      ],
+      [
+        156,
+        203
+      ],
+      [
+        204,
+        251
+      ],
+      [
+        252,
+        299
+      ],
+      [
+        300,
+        347
+      ],
+      [
+        348,
+        395
+      ],
+      [
+        396,
+        443
+      ],
+      [
+        444,
+        491
+      ],
+      [
+        492,
+        539
+      ],
+      [
+        540,
+        587
+      ],
+      [
+        588,
+        635
+      ],
+      [
+        636,
+        680
+      ]
+    ],
+    "selection_source": "controller-validation seeds 8100001-8100020 only",
+    "formal_test_accessed": false
+  },
+  "formal_online_controllers": [
+    "Fixed-Assignment Heuristic",
+    "Greedy",
+    "Hourly Centralized Maskable PPO",
+    "Event-Residual PPO",
+    "Iterative Action-Q",
+    "Rolling MILP"
+  ],
+  "offline_reference": "Full-horizon MILP",
+  "implementation_requirements_before_training": [
+    "remove well-rate choices from every upper-level controller interface",
+    "apply the shared automatic well rule inside the environment",
+    "make Rolling MILP and Full-horizon MILP reproduce the same automatic well rule",
+    "make all three learning methods consume the same 168 h summary implementation without a valid-fraction feature",
+    "generate 888 h sampled scenarios while enforcing a read-only forecast boundary after the 720 h execution and scoring horizon",
+    "add complete episode cost-component and activity diagnostics",
+    "add the bottom-level one-hour simulator-step counter",
+    "apply the common compact trip cleanup value to every learning terminal return, evaluation record and MILP terminal objective"
+  ]
+}

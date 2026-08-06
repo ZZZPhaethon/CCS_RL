@@ -1,0 +1,5 @@
+env_check=35419
+train_array=35420
+seed_0_eval=35421
+seed_1_eval=35422
+seed_2_eval=35423
