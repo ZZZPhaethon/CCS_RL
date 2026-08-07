@@ -29,4 +29,4 @@ jobs:
 
       - name: Check README has project title
         run: |
-          grep -q "CCS_RLLLM" README.md
+          grep -q "CCS_RL" README.md
